@@ -22,3 +22,6 @@ Thumbs.db
 
 # Secrets
 .env
+
+# App cache
+.cache/

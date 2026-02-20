@@ -106,6 +106,10 @@ def main() -> int:
             dr = last_days(max(1, args.days))
             date_from, date_to = dr.to_unix()
 
+            # Normalize range to 60-second buckets to make cache stable between runs
+            date_to = date_to - (date_to % 60)
+            date_from = date_to - (max(1, args.days) * 86400)
+
             items = mb.statement(account=account_id, date_from=date_from, date_to=date_to)
         finally:
             mb.close()
