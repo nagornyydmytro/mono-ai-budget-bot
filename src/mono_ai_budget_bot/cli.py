@@ -21,7 +21,7 @@ def main() -> int:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "mono-client-info", "mono-statement", "range", "analytics"],
+        choices=["health", "status-env", "mono-client-info", "mono-statement", "range", "analytics", "refresh-facts", "show-facts"],
         help="Command to run",
     )
 
@@ -220,6 +220,98 @@ def main() -> int:
         print(f"period = {args.period}")
         print(f"accounts = {len(account_ids)}")
         print(current_facts)
+        return 0
+
+    if args.command == "refresh-facts":
+        from .core.time_ranges import range_month, range_today, range_week, previous_period
+        from .monobank import MonobankClient
+        from .analytics.from_monobank import rows_from_statement
+        from .analytics.compute import compute_facts
+        from .analytics.compare import compare_totals, compare_categories
+        from .storage.report_store import ReportStore
+
+        # pick current period range
+        if args.period == "today":
+            current_dr = range_today()
+            duration_days = 1
+        elif args.period == "week":
+            current_dr = range_week()
+            duration_days = 7
+        else:
+            current_dr = range_month()
+            duration_days = 30
+
+        current_from, current_to = current_dr.to_unix()
+
+        mb = MonobankClient(token=settings.mono_token)
+        try:
+            info = mb.client_info()
+
+            # accounts to process (default: all)
+            if args.account:
+                account_ids = [args.account]
+            else:
+                account_ids = [a.id for a in info.accounts]
+
+            if not account_ids:
+                raise RuntimeError("No accounts returned by Monobank client-info.")
+
+            # current rows merged across accounts
+            rows = []
+            for aid in account_ids:
+                items = mb.statement(account=aid, date_from=current_from, date_to=current_to)
+                rows.extend(rows_from_statement(aid, items))
+            current_facts = compute_facts(rows)
+
+            # comparison for week/month
+            if args.period in ("week", "month"):
+                prev_dr = previous_period(current_dr, days=duration_days)
+                prev_from, prev_to = prev_dr.to_unix()
+
+                prev_rows = []
+                for aid in account_ids:
+                    prev_items = mb.statement(account=aid, date_from=prev_from, date_to=prev_to)
+                    prev_rows.extend(rows_from_statement(aid, prev_items))
+                prev_facts = compute_facts(prev_rows)
+
+                current_facts["comparison"] = {
+                    "prev_period": {
+                        "dt_from": prev_dr.dt_from.isoformat(),
+                        "dt_to": prev_dr.dt_to.isoformat(),
+                        "totals": prev_facts["totals"],
+                        "categories_real_spend": prev_facts.get("categories_real_spend", {}),
+                    },
+                    "totals": compare_totals(current_facts, prev_facts),
+                    "categories": compare_categories(
+                        current_facts.get("categories_real_spend", {}),
+                        prev_facts.get("categories_real_spend", {}),
+                    ),
+                }
+
+        finally:
+            mb.close()
+
+        store = ReportStore()
+        saved_path = store.save(args.period, current_facts)
+        print(f"saved = {saved_path.as_posix()}")
+        print(f"period = {args.period}")
+        print(f"accounts = {len(account_ids)}")
+        return 0
+
+    if args.command == "show-facts":
+        from datetime import datetime
+        from .storage.report_store import ReportStore
+
+        store = ReportStore()
+        stored = store.load(args.period)
+        if stored is None:
+            print(f"no cached facts for period '{args.period}'. Run: refresh-facts --period {args.period}")
+            return 1
+
+        ts = datetime.fromtimestamp(stored.generated_at).isoformat(timespec="seconds")
+        print(f"period = {stored.period}")
+        print(f"generated_at = {ts}")
+        print(stored.facts)
         return 0
 
     return 1
