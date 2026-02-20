@@ -12,11 +12,18 @@ from aiogram.utils.markdown import hcode
 from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..storage.report_store import ReportStore
+from ..storage.user_store import UserStore
 
 
 def _fmt_money(v: float) -> str:
     return f"{v:,.2f} ₴".replace(",", " ")
 
+def _mask_secret(s: str, show: int = 4) -> str:
+    if not s:
+        return "None"
+    if len(s) <= show:
+        return "*" * len(s)
+    return s[:show] + "*" * (len(s) - show)
 
 def _safe_get(d: dict, path: list[str], default=None):
     cur = d
@@ -117,6 +124,7 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
     store = ReportStore()
+    users = UserStore()
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
 
@@ -146,9 +154,52 @@ async def main() -> None:
             "• /status — покаже, коли востаннє оновлювались facts.\n"
         )
 
+    @dp.message(Command("connect"))
+    async def cmd_connect(message: Message) -> None:
+        """
+        Usage:
+          /connect <mono_token>
+        """
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            await message.answer(
+                "🔐 Підключення Monobank\n\n"
+                "Надішли команду так:\n"
+                f"{hcode('/connect <mono_token>')}\n\n"
+                "Токен зберігається локально на твоєму комп'ютері (не комітиться в репозиторій)."
+            )
+            return
+
+        mono_token = parts[1].strip()
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            await message.answer("Не зміг визначити твій Telegram user id.")
+            return
+
+        users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
+        await message.answer(
+            "✅ Monobank токен збережено.\n\n"
+            "Далі:\n"
+            "• /status — перевірити статус\n"
+            "• (далі додамо) /accounts — вибір карток для аналізу"
+        )
+
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
-        parts = ["*Статус кешу:*"]
+        parts = ["*Статус:*"]
+
+        tg_id = message.from_user.id if message.from_user else None
+        cfg = users.load(tg_id) if tg_id is not None else None
+
+        if cfg is None:
+            parts.append("🔐 Monobank: не підключено")
+            parts.append(f"Підключи: {hcode('/connect <mono_token>')}")
+        else:
+            parts.append(f"🔐 Monobank: підключено ({hcode(_mask_secret(cfg.mono_token))})")
+            parts.append(f"📌 Вибрані картки: {len(cfg.selected_account_ids)} (налаштуємо в /accounts)")
+
+        parts.append("")
+        parts.append("*Статус кешу:*")
         for p in ("today", "week", "month"):
             stored = store.load(p)
             if stored is None:
@@ -156,6 +207,7 @@ async def main() -> None:
             else:
                 ts = datetime.fromtimestamp(stored.generated_at).isoformat(timespec="seconds")
                 parts.append(f"• {p}: {hcode(ts)}")
+
         await message.answer("\n".join(parts))
 
     async def _send_period_report(message: Message, period: str) -> None:
