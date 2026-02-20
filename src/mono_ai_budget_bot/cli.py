@@ -172,22 +172,32 @@ def main() -> int:
         mb = MonobankClient(token=settings.mono_token)
         try:
             info = mb.client_info()
-            account_id = args.account or (info.accounts[0].id if info.accounts else None)
-            if not account_id:
+
+            # accounts to process
+            if args.account:
+                account_ids = [args.account]
+            else:
+                account_ids = [a.id for a in info.accounts]
+
+            if not account_ids:
                 raise RuntimeError("No accounts returned by Monobank client-info.")
 
-            # current rows
-            current_items = mb.statement(account=account_id, date_from=current_from, date_to=current_to)
-            current_rows = rows_from_statement(account_id, current_items)
-            current_facts = compute_facts(current_rows)
+            # current rows (merged across accounts)
+            rows = []
+            for aid in account_ids:
+                items = mb.statement(account=aid, date_from=current_from, date_to=current_to)
+                rows.extend(rows_from_statement(aid, items))
+            current_facts = compute_facts(rows)
 
-            # add comparison for week/month (today comparison is optional, we skip for now)
+            # add comparison for week/month
             if args.period in ("week", "month"):
                 prev_dr = previous_period(current_dr, days=duration_days)
                 prev_from, prev_to = prev_dr.to_unix()
 
-                prev_items = mb.statement(account=account_id, date_from=prev_from, date_to=prev_to)
-                prev_rows = rows_from_statement(account_id, prev_items)
+                prev_rows = []
+                for aid in account_ids:
+                    prev_items = mb.statement(account=aid, date_from=prev_from, date_to=prev_to)
+                    prev_rows.extend(rows_from_statement(aid, prev_items))
                 prev_facts = compute_facts(prev_rows)
 
                 current_facts["comparison"] = {
@@ -208,7 +218,7 @@ def main() -> int:
             mb.close()
 
         print(f"period = {args.period}")
-        print(f"account_id = {account_id}")
+        print(f"accounts = {len(account_ids)}")
         print(current_facts)
         return 0
 
