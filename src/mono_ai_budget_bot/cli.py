@@ -21,7 +21,7 @@ def main() -> int:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env"],
+        choices=["health", "status-env", "mono-client-info"],
         help="Command to run",
     )
     args = parser.parse_args()
@@ -46,6 +46,36 @@ def main() -> int:
         print("OPENAI_API_KEY =", mask(settings.openai_api_key))
         print("OPENAI_MODEL =", settings.openai_model)
         print("LOG_LEVEL =", settings.log_level)
+        return 0
+
+    if args.command == "mono-client-info":
+        from .monobank import MonobankClient
+
+        mb = MonobankClient(token=settings.mono_token)
+        try:
+            info = mb.client_info()
+        finally:
+            mb.close()
+
+        accounts_count = len(info.accounts)
+        print("client_name =", info.name)
+        print("accounts_count =", accounts_count)
+
+        for acc in info.accounts[:5]:
+            masked = acc.maskedPan[:1] if acc.maskedPan else []
+            print(
+                "account:",
+                acc.id,
+                "currencyCode=",
+                acc.currencyCode,
+                "balance=",
+                acc.balance,
+                "maskedPan=",
+                masked,
+            )
+
+        if accounts_count > 5:
+            print(f"... and {accounts_count - 5} more accounts")
         return 0
 
     return 1
