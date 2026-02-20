@@ -7,7 +7,7 @@ from typing import Optional
 # Later we can refine using LLM for ambiguous merchants/MCC.
 MCC_CATEGORY_RANGES: list[tuple[range, str]] = [
     (range(4000, 4800), "Транспорт"),            # incl. gas, parking, transit, taxi in many cases
-    (range(4800, 4900), "Перекази/Фінансові"),   # we still exclude transfers explicitly elsewhere
+    (range(4800, 4900), "Фінансові послуги"),   # we still exclude transfers explicitly elsewhere
     (range(5000, 5599), "Подорожі"),             # airlines, hotels, car rentals
     (range(5600, 5699), "Одяг/Взуття"),
     (range(5700, 5736), "Техніка/Електроніка"),

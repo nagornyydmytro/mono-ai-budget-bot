@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from .models import TxKind
 
-# Monobank P2P / card-to-card transfers часто мають MCC 4829
-TRANSFER_MCC = {4829}
-
+# Monobank P2P / card-to-card transfers часто мають MCC 4829 або 6536
+TRANSFER_MCC = {4829, 6536}
 
 def is_transfer(mcc: int | None, description: str) -> bool:
     if mcc in TRANSFER_MCC:
