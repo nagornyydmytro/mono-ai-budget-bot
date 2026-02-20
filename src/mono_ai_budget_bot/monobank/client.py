@@ -1,6 +1,5 @@
 import httpx
-from .models import MonoClientInfo
-
+from .models import MonoClientInfo, MonoStatementItem
 
 class MonobankClient:
     def __init__(self, token: str, base_url: str = "https://api.monobank.ua"):
@@ -26,3 +25,9 @@ class MonobankClient:
                 f"Response: {resp.text}"
             ) from e
         return MonoClientInfo.model_validate(resp.json())
+
+    def statement(self, account: str, date_from: int, date_to: int) -> list[MonoStatementItem]:
+        resp = self._client.get(f"/personal/statement/{account}/{date_from}/{date_to}")
+        resp.raise_for_status()
+        data = resp.json()
+        return [MonoStatementItem.model_validate(x) for x in data]

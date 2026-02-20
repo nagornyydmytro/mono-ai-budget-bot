@@ -15,3 +15,19 @@ class MonoAccount(BaseModel):
 class MonoClientInfo(BaseModel):
     name: str | None = None
     accounts: list[MonoAccount] = Field(default_factory=list)
+
+class MonoStatementItem(BaseModel):
+    id: str
+    time: int
+    description: str | None = None
+    mcc: int | None = None
+    originalMcc: int | None = None
+    amount: int
+    operationAmount: int | None = None
+    currencyCode: int | None = None
+    commissionRate: int | None = None
+    cashbackAmount: int | None = None
+    balance: int | None = None
+    hold: bool | None = None
+    counterEdrpou: str | None = None
+    counterIban: str | None = None

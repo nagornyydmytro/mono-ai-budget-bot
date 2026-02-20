@@ -21,9 +21,23 @@ def main() -> int:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "mono-client-info"],
+        choices=["health", "status-env", "mono-client-info", "mono-statement"],
         help="Command to run",
     )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=1,
+        help="Number of last days for statement range (used with mono-statement). Default: 1",
+    )
+    parser.add_argument(
+        "--account",
+        type=str,
+        default=None,
+        help="Monobank account id to fetch statement for (used with mono-statement). "
+        "If omitted, the first account from client-info will be used.",
+    )
+
     args = parser.parse_args()
 
     if args.version:
@@ -76,6 +90,39 @@ def main() -> int:
 
         if accounts_count > 5:
             print(f"... and {accounts_count - 5} more accounts")
+        return 0
+
+    if args.command == "mono-statement":
+        from .core.time_ranges import last_days
+        from .monobank import MonobankClient
+
+        mb = MonobankClient(token=settings.mono_token)
+        try:
+            info = mb.client_info()
+            account_id = args.account or (info.accounts[0].id if info.accounts else None)
+            if not account_id:
+                raise RuntimeError("No accounts returned by Monobank client-info.")
+
+            dr = last_days(max(1, args.days))
+            date_from, date_to = dr.to_unix()
+
+            items = mb.statement(account=account_id, date_from=date_from, date_to=date_to)
+        finally:
+            mb.close()
+
+        print("account_id =", account_id)
+        print("range_days =", max(1, args.days))
+        print("transactions_count =", len(items))
+
+        # Show a few sample rows (no sensitive details beyond description & amounts)
+        for it in items[:10]:
+            desc = (it.description or "").replace("\n", " ").strip()
+            if len(desc) > 80:
+                desc = desc[:77] + "..."
+            print("tx:", it.time, "amount=", it.amount, "mcc=", it.mcc, "desc=", desc)
+
+        if len(items) > 10:
+            print(f"... and {len(items) - 10} more transactions")
         return 0
 
     return 1
