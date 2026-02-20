@@ -6,6 +6,13 @@ authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 packages = [{ include = "mono_ai_budget_bot", from = "src" }]
 
+[tool.poetry.scripts]
+monobot = "mono_ai_budget_bot.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [tool.poetry.dependencies]
 python = "^3.11"
 aiogram = "^3.4.1"
