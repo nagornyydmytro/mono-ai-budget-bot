@@ -21,14 +21,15 @@ def main() -> int:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "mono-client-info", "mono-statement"],
+        choices=["health", "status-env", "mono-client-info", "mono-statement", "range"],
         help="Command to run",
     )
+
     parser.add_argument(
-        "--days",
-        type=int,
-        default=1,
-        help="Number of last days for statement range (used with mono-statement). Default: 1",
+        "--period",
+        choices=["today", "week", "month"],
+        default="today",
+        help="Calendar period in Kyiv timezone (used with range / mono-statement). Default: today",
     )
     parser.add_argument(
         "--account",
@@ -62,6 +63,24 @@ def main() -> int:
         print("LOG_LEVEL =", settings.log_level)
         return 0
 
+    if args.command == "range":
+        from .core.time_ranges import range_month, range_today, range_week
+
+        if args.period == "today":
+            dr = range_today()
+        elif args.period == "week":
+            dr = range_week()
+        else:
+            dr = range_month()
+
+        date_from, date_to = dr.to_unix()
+        print("period =", args.period)
+        print("dt_from =", dr.dt_from.isoformat())
+        print("dt_to   =", dr.dt_to.isoformat())
+        print("unix_from =", date_from)
+        print("unix_to   =", date_to)
+        return 0
+
     if args.command == "mono-client-info":
         from .monobank import MonobankClient
 
@@ -93,8 +112,17 @@ def main() -> int:
         return 0
 
     if args.command == "mono-statement":
-        from .core.time_ranges import last_days
+        from .core.time_ranges import range_month, range_today, range_week
         from .monobank import MonobankClient
+
+        if args.period == "today":
+            dr = range_today()
+        elif args.period == "week":
+            dr = range_week()
+        else:
+            dr = range_month()
+
+        date_from, date_to = dr.to_unix()
 
         mb = MonobankClient(token=settings.mono_token)
         try:
@@ -103,22 +131,14 @@ def main() -> int:
             if not account_id:
                 raise RuntimeError("No accounts returned by Monobank client-info.")
 
-            dr = last_days(max(1, args.days))
-            date_from, date_to = dr.to_unix()
-
-            # Normalize range to 60-second buckets to make cache stable between runs
-            date_to = date_to - (date_to % 60)
-            date_from = date_to - (max(1, args.days) * 86400)
-
             items = mb.statement(account=account_id, date_from=date_from, date_to=date_to)
         finally:
             mb.close()
 
+        print("period =", args.period)
         print("account_id =", account_id)
-        print("range_days =", max(1, args.days))
         print("transactions_count =", len(items))
 
-        # Show a few sample rows (no sensitive details beyond description & amounts)
         for it in items[:10]:
             desc = (it.description or "").replace("\n", " ").strip()
             if len(desc) > 80:

@@ -16,8 +16,29 @@ class DateRange:
         return int(self.dt_from.timestamp()), int(self.dt_to.timestamp())
 
 
-def last_days(days: int) -> DateRange:
+def _floor_to_minute(dt: datetime) -> datetime:
+    return dt.replace(second=0, microsecond=0)
+
+
+def range_today() -> DateRange:
     now = datetime.now(tz=KYIV_TZ)
-    dt_to = now
-    dt_from = now - timedelta(days=days)
-    return DateRange(dt_from=dt_from, dt_to=dt_to)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return DateRange(dt_from=start, dt_to=_floor_to_minute(now))
+
+
+def range_last_days(days: int) -> DateRange:
+    if days < 1:
+        raise ValueError("days must be >= 1")
+    now = datetime.now(tz=KYIV_TZ)
+    end = _floor_to_minute(now)
+    start_day = (now - timedelta(days=days)).date()
+    start = datetime.combine(start_day, datetime.min.time(), tzinfo=KYIV_TZ)
+    return DateRange(dt_from=start, dt_to=end)
+
+
+def range_week() -> DateRange:
+    return range_last_days(7)
+
+
+def range_month() -> DateRange:
+    return range_last_days(30)
