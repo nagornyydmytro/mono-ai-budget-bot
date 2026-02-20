@@ -121,6 +121,68 @@ def render_report(period: str, stored: dict) -> str:
 
     return "\n".join(lines).strip()
 
+async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
+    from ..core.time_ranges import range_month, range_today, range_week, previous_period
+    from ..monobank import MonobankClient
+    from ..analytics.from_monobank import rows_from_statement
+    from ..analytics.compute import compute_facts
+    from ..analytics.compare import compare_totals, compare_categories
+
+    # choose range
+    if period == "today":
+        current_dr = range_today()
+        duration_days = 1
+    elif period == "week":
+        current_dr = range_week()
+        duration_days = 7
+    else:
+        current_dr = range_month()
+        duration_days = 30
+
+    current_from, current_to = current_dr.to_unix()
+
+    mb = MonobankClient(token=cfg.mono_token)
+    try:
+        info = mb.client_info()
+        if cfg.selected_account_ids:
+            account_ids = cfg.selected_account_ids
+        else:
+            account_ids = [a.id for a in info.accounts]
+
+        rows = []
+        for aid in account_ids:
+            items = mb.statement(account=aid, date_from=current_from, date_to=current_to)
+            rows.extend(rows_from_statement(aid, items))
+        current_facts = compute_facts(rows)
+
+        if period in ("week", "month"):
+            prev_dr = previous_period(current_dr, days=duration_days)
+            prev_from, prev_to = prev_dr.to_unix()
+
+            prev_rows = []
+            for aid in account_ids:
+                prev_items = mb.statement(account=aid, date_from=prev_from, date_to=prev_to)
+                prev_rows.extend(rows_from_statement(aid, prev_items))
+            prev_facts = compute_facts(prev_rows)
+
+            current_facts["comparison"] = {
+                "prev_period": {
+                    "dt_from": prev_dr.dt_from.isoformat(),
+                    "dt_to": prev_dr.dt_to.isoformat(),
+                    "totals": prev_facts["totals"],
+                    "categories_real_spend": prev_facts.get("categories_real_spend", {}),
+                },
+                "totals": compare_totals(current_facts, prev_facts),
+                "categories": compare_categories(
+                    current_facts.get("categories_real_spend", {}),
+                    prev_facts.get("categories_real_spend", {}),
+                ),
+            }
+    finally:
+        mb.close()
+
+    store.save(period, current_facts)
+
 def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, InlineKeyboardBuilder]:
     """
     accounts: list of dicts with keys: id, currencyCode, maskedPan
@@ -392,9 +454,41 @@ async def main() -> None:
             )
         await query.answer("Готово")
 
+    @dp.message(Command("refresh"))
+    async def cmd_refresh(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            await message.answer("Не зміг визначити твій Telegram user id.")
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None:
+            await message.answer(f"Спочатку підключи: {hcode('/connect <mono_token>')}")
+            return
+
+        parts = (message.text or "").split()
+        period = parts[1].strip().lower() if len(parts) > 1 else "week"
+
+        if period not in ("today", "week", "month", "all"):
+            await message.answer("Використання: /refresh today|week|month|all")
+            return
+
+        await message.answer("⏳ Оновлюю дані… (може зайняти час через ліміти Mono API)")
+
+        try:
+            if period == "all":
+                for p in ("today", "week", "month"):
+                    await refresh_period_for_user(p, cfg, store)
+            else:
+                await refresh_period_for_user(period, cfg, store)
+        except Exception as e:
+            await message.answer(f"❌ Помилка оновлення: {hcode(str(e))}")
+            return
+
+        await message.answer("✅ Готово! Дані оновлено.\n\nМожеш дивитись: /today /week /month")
+
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
