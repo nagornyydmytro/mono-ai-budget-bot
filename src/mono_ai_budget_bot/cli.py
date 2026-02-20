@@ -21,7 +21,7 @@ def main() -> int:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "mono-client-info", "mono-statement", "range", "analytics", "refresh-facts", "show-facts"],
+        choices=["health", "status-env", "mono-client-info", "mono-statement", "range", "analytics", "refresh-facts", "show-facts","bot"],
         help="Command to run",
     )
 
@@ -312,6 +312,13 @@ def main() -> int:
         print(f"period = {stored.period}")
         print(f"generated_at = {ts}")
         print(stored.facts)
+        return 0
+
+    if args.command == "bot":
+        from .bot.app import main as bot_main
+        import asyncio
+
+        asyncio.run(bot_main())
         return 0
 
     return 1
