@@ -8,6 +8,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.utils.markdown import hcode
+from aiogram.types import CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import load_settings
 from ..logging_setup import setup_logging
@@ -24,6 +26,12 @@ def _mask_secret(s: str, show: int = 4) -> str:
     if len(s) <= show:
         return "*" * len(s)
     return s[:show] + "*" * (len(s) - show)
+
+def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: list[str]) -> None:
+    cfg = users.load(telegram_user_id)
+    if cfg is None:
+        return
+    users.save(telegram_user_id, mono_token=cfg.mono_token, selected_account_ids=selected)
 
 def _safe_get(d: dict, path: list[str], default=None):
     cur = d
@@ -113,6 +121,34 @@ def render_report(period: str, stored: dict) -> str:
 
     return "\n".join(lines).strip()
 
+def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, InlineKeyboardBuilder]:
+    """
+    accounts: list of dicts with keys: id, currencyCode, maskedPan
+    """
+    lines: list[str] = []
+    lines.append("🧾 <b>Вибір карток для аналізу</b>")
+    lines.append("")
+    lines.append("Обери картки, які враховувати у звітах (інші ігноруються).")
+    lines.append("")
+
+    kb = InlineKeyboardBuilder()
+
+    for acc in accounts:
+        acc_id = acc["id"]
+        masked = " / ".join(acc.get("maskedPan") or []) or "без картки"
+        cur = str(acc.get("currencyCode", ""))
+        mark = "✅" if acc_id in selected_ids else "⬜️"
+        text = f"{mark} {masked} ({cur})"
+        kb.button(text=text, callback_data=f"acc_toggle:{acc_id}")
+
+    kb.adjust(1)
+
+    # action row
+    kb.button(text="🧹 Очистити вибір", callback_data="acc_clear")
+    kb.button(text="✅ Готово", callback_data="acc_done")
+    kb.adjust(1, 2)
+
+    return "\n".join(lines), kb
 
 async def main() -> None:
     settings = load_settings()
@@ -233,6 +269,128 @@ async def main() -> None:
     @dp.message(Command("month"))
     async def cmd_month(message: Message) -> None:
         await _send_period_report(message, "month")
+
+    @dp.message(Command("accounts"))
+    async def cmd_accounts(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            await message.answer("Не зміг визначити твій Telegram user id.")
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None:
+            await message.answer(
+                "🔐 Спочатку підключи Monobank токен:\n"
+                f"{hcode('/connect <mono_token>')}"
+            )
+            return
+
+        # Fetch accounts from Monobank (client-info)
+        from ..monobank import MonobankClient
+
+        mb = MonobankClient(token=cfg.mono_token)
+        try:
+            info = mb.client_info()
+        finally:
+            mb.close()
+
+        accounts = []
+        for a in info.accounts:
+            accounts.append(
+                {
+                    "id": a.id,
+                    "currencyCode": a.currencyCode,
+                    "maskedPan": a.maskedPan,
+                }
+            )
+
+        selected_ids = set(cfg.selected_account_ids or [])
+        text, kb = render_accounts_screen(accounts, selected_ids)
+
+        await message.answer(text, reply_markup=kb.as_markup())
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("acc_toggle:"))
+    async def cb_toggle_account(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Помилка: нема user id", show_alert=True)
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None:
+            await query.answer("Спочатку підключи /connect", show_alert=True)
+            return
+
+        acc_id = (query.data or "").split("acc_toggle:", 1)[1].strip()
+        selected = set(cfg.selected_account_ids or [])
+
+        if acc_id in selected:
+            selected.remove(acc_id)
+        else:
+            selected.add(acc_id)
+
+        _save_selected_accounts(users, tg_id, sorted(selected))
+
+        # Re-render screen (re-fetch accounts to keep UI consistent)
+        from ..monobank import MonobankClient
+
+        mb = MonobankClient(token=cfg.mono_token)
+        try:
+            info = mb.client_info()
+        finally:
+            mb.close()
+
+        accounts = [{"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan} for a in info.accounts]
+        text, kb = render_accounts_screen(accounts, set(selected))
+
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb.as_markup())
+        await query.answer("Ок")
+
+    @dp.callback_query(lambda c: c.data == "acc_clear")
+    async def cb_clear_accounts(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Помилка: нема user id", show_alert=True)
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None:
+            await query.answer("Спочатку підключи /connect", show_alert=True)
+            return
+
+        _save_selected_accounts(users, tg_id, [])
+
+        from ..monobank import MonobankClient
+
+        mb = MonobankClient(token=cfg.mono_token)
+        try:
+            info = mb.client_info()
+        finally:
+            mb.close()
+
+        accounts = [{"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan} for a in info.accounts]
+        text, kb = render_accounts_screen(accounts, set())
+
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb.as_markup())
+        await query.answer("Очищено")
+
+    @dp.callback_query(lambda c: c.data == "acc_done")
+    async def cb_done_accounts(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        cfg = users.load(tg_id) if tg_id is not None else None
+
+        count = len(cfg.selected_account_ids) if cfg else 0
+        if query.message:
+            await query.message.edit_text(
+                "✅ Збережено!\n\n"
+                f"Вибрано карток: <b>{count}</b>\n"
+                "Далі:\n"
+                "• /status — перевірити\n"
+                "• /week — звіт\n"
+            )
+        await query.answer("Готово")
 
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
