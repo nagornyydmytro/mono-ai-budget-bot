@@ -21,7 +21,7 @@ def main() -> int:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "mono-client-info", "mono-statement", "range"],
+        choices=["health", "status-env", "mono-client-info", "mono-statement", "range", "analytics"],
         help="Command to run",
     )
 
@@ -147,6 +147,42 @@ def main() -> int:
 
         if len(items) > 10:
             print(f"... and {len(items) - 10} more transactions")
+        return 0
+
+    if args.command == "analytics":
+        from .core.time_ranges import range_month, range_today, range_week
+        from .monobank import MonobankClient
+        from .analytics.from_monobank import rows_from_statement
+        from .analytics.compute import compute_facts
+
+        if args.period == "today":
+            dr = range_today()
+        elif args.period == "week":
+            dr = range_week()
+        else:
+            dr = range_month()
+
+        date_from, date_to = dr.to_unix()
+
+        mb = MonobankClient(token=settings.mono_token)
+        try:
+            info = mb.client_info()
+            rows = []
+            # IMPORTANT: in this commit we fetch ONE account by default to avoid 60s limit per account.
+            # Full merge across all accounts will come right after (with smarter batching or via cached runs).
+            account_id = args.account or (info.accounts[0].id if info.accounts else None)
+            if not account_id:
+                raise RuntimeError("No accounts returned by Monobank client-info.")
+
+            items = mb.statement(account=account_id, date_from=date_from, date_to=date_to)
+            rows.extend(rows_from_statement(account_id, items))
+        finally:
+            mb.close()
+
+        facts = compute_facts(rows)
+        print(f"period = {args.period}")
+        print(f"account_id = {account_id}")
+        print(facts)
         return 0
 
     return 1
