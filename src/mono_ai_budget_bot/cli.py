@@ -150,39 +150,66 @@ def main() -> int:
         return 0
 
     if args.command == "analytics":
-        from .core.time_ranges import range_month, range_today, range_week
+        from .core.time_ranges import range_month, range_today, range_week, previous_period
         from .monobank import MonobankClient
         from .analytics.from_monobank import rows_from_statement
         from .analytics.compute import compute_facts
+        from .analytics.compare import compare_totals, compare_categories
 
+        # pick current period range
         if args.period == "today":
-            dr = range_today()
+            current_dr = range_today()
+            duration_days = 1
         elif args.period == "week":
-            dr = range_week()
+            current_dr = range_week()
+            duration_days = 7
         else:
-            dr = range_month()
+            current_dr = range_month()
+            duration_days = 30
 
-        date_from, date_to = dr.to_unix()
+        current_from, current_to = current_dr.to_unix()
 
         mb = MonobankClient(token=settings.mono_token)
         try:
             info = mb.client_info()
-            rows = []
-            # IMPORTANT: in this commit we fetch ONE account by default to avoid 60s limit per account.
-            # Full merge across all accounts will come right after (with smarter batching or via cached runs).
             account_id = args.account or (info.accounts[0].id if info.accounts else None)
             if not account_id:
                 raise RuntimeError("No accounts returned by Monobank client-info.")
 
-            items = mb.statement(account=account_id, date_from=date_from, date_to=date_to)
-            rows.extend(rows_from_statement(account_id, items))
+            # current rows
+            current_items = mb.statement(account=account_id, date_from=current_from, date_to=current_to)
+            current_rows = rows_from_statement(account_id, current_items)
+            current_facts = compute_facts(current_rows)
+
+            # add comparison for week/month (today comparison is optional, we skip for now)
+            if args.period in ("week", "month"):
+                prev_dr = previous_period(current_dr, days=duration_days)
+                prev_from, prev_to = prev_dr.to_unix()
+
+                prev_items = mb.statement(account=account_id, date_from=prev_from, date_to=prev_to)
+                prev_rows = rows_from_statement(account_id, prev_items)
+                prev_facts = compute_facts(prev_rows)
+
+                current_facts["comparison"] = {
+                    "prev_period": {
+                        "dt_from": prev_dr.dt_from.isoformat(),
+                        "dt_to": prev_dr.dt_to.isoformat(),
+                        "totals": prev_facts["totals"],
+                        "categories_real_spend": prev_facts.get("categories_real_spend", {}),
+                    },
+                    "totals": compare_totals(current_facts, prev_facts),
+                    "categories": compare_categories(
+                        current_facts.get("categories_real_spend", {}),
+                        prev_facts.get("categories_real_spend", {}),
+                    ),
+                }
+
         finally:
             mb.close()
 
-        facts = compute_facts(rows)
         print(f"period = {args.period}")
         print(f"account_id = {account_id}")
-        print(facts)
+        print(current_facts)
         return 0
 
     return 1
