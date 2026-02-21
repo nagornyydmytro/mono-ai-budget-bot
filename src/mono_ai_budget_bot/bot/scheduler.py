@@ -117,7 +117,7 @@ def start_jobs(
 
             try:
                 await refresh_period_for_user("week", u, report_store)
-                stored = report_store.load("week")
+                stored = report_store.load(u.telegram_user_id,"week")
                 if stored is None:
                     continue
                 text = render_report_text("week", stored.facts)
@@ -137,7 +137,7 @@ def start_jobs(
 
             try:
                 await refresh_period_for_user("month", u, report_store)
-                stored = report_store.load("month")
+                stored = report_store.load(u.telegram_user_id,"month")
                 if stored is None:
                     continue
                 text = render_report_text("month", stored.facts)

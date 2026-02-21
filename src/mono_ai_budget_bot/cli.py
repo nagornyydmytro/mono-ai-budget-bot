@@ -13,7 +13,6 @@ def mask(value: str | None, show: int = 4) -> str:
         return "*" * len(value)
     return value[:show] + "*" * (len(value) - show)
 
-
 def main() -> int:
     parser = argparse.ArgumentParser(prog="mono-ai-budget-bot")
     parser.add_argument("--version", action="store_true", help="Print version and exit")
@@ -303,7 +302,7 @@ def main() -> int:
         from .storage.report_store import ReportStore
 
         store = ReportStore()
-        stored = store.load(args.period)
+        stored = store.load(cfg.telegram_user_id, args.period)
         if stored is None:
             print(f"no cached facts for period '{args.period}'. Run: refresh-facts --period {args.period}")
             return 1

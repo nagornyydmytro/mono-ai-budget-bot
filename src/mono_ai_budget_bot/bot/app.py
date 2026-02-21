@@ -231,7 +231,7 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     finally:
         mb.close()
 
-    store.save(period, current_facts)
+    store.save(cfg.telegram_user_id, period, current_facts)
 
 
 def build_ai_block(summary: str, insights: list[str], next_step: str) -> str:
@@ -265,7 +265,7 @@ async def main() -> None:
     users = UserStore()
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
-
+    
     from .scheduler import create_scheduler, start_jobs
     scheduler = create_scheduler(logger)
     loop=asyncio.get_running_loop()
@@ -363,7 +363,7 @@ async def main() -> None:
         lines.append("")
         lines.append("*Статус кешу:*")
         for p in ("today", "week", "month"):
-            stored = store.load(p)
+            stored = store.load(cfg.telegram_user_id,p)
             if stored is None:
                 lines.append(f"• {p}: немає (зроби /refresh {p})")
             else:
@@ -516,9 +516,19 @@ async def main() -> None:
     async def _send_period_report(message: Message, period: str) -> None:
         want_ai = " ai" in (" " + (message.text or "").lower() + " ")
 
-        stored = store.load(period)
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            await message.answer("Не зміг визначити твій Telegram user id.")
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token:
+            await message.answer("Спочатку підключи Monobank: /connect <monobank token>")
+            return
+
+        stored = store.load(tg_id, period)
         if stored is None:
-            await message.answer(f"Немає кешованого звіту для *{md_escape(period)}*. Зроби: /refresh {period}")
+            await message.answer(f"Немає кешу для {period}. Зроби: /refresh {period}")
             return
 
         ai_block = None
