@@ -5,10 +5,9 @@ import logging
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
-from aiogram.types import Message
-from aiogram.utils.markdown import hcode
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import load_settings
@@ -17,21 +16,27 @@ from ..storage.report_store import ReportStore
 from ..storage.user_store import UserStore
 
 
+# --- Markdown (NOT MarkdownV2) escaping for dynamic text ---
+# In Telegram Markdown, these chars can break formatting if they appear in user/merchant/category strings.
+_MD_SPECIAL = "\\`*_[]()"
+
+
+def md_escape(text: str) -> str:
+    if text is None:
+        return ""
+    s = str(text)
+    out = []
+    for ch in s:
+        if ch in _MD_SPECIAL:
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _fmt_money(v: float) -> str:
     return f"{v:,.2f} ₴".replace(",", " ")
 
-def _mask_secret(s: str, show: int = 4) -> str:
-    if not s:
-        return "None"
-    if len(s) <= show:
-        return "*" * len(s)
-    return s[:show] + "*" * (len(s) - show)
-
-def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: list[str]) -> None:
-    cfg = users.load(telegram_user_id)
-    if cfg is None:
-        return
-    users.save(telegram_user_id, mono_token=cfg.mono_token, selected_account_ids=selected)
 
 def _safe_get(d: dict, path: list[str], default=None):
     cur = d
@@ -42,9 +47,50 @@ def _safe_get(d: dict, path: list[str], default=None):
     return cur
 
 
-def render_report(period: str, stored: dict) -> str:
-    totals = _safe_get(stored, ["totals"], {}) or {}
-    comparison = stored.get("comparison")
+def _mask_secret(s: str, show: int = 4) -> str:
+    if not s:
+        return "None"
+    if len(s) <= show:
+        return "*" * len(s)
+    return s[:show] + "*" * (len(s) - show)
+
+
+def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: list[str]) -> None:
+    cfg = users.load(telegram_user_id)
+    if cfg is None:
+        return
+    users.save(telegram_user_id, mono_token=cfg.mono_token, selected_account_ids=selected)
+
+
+def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, InlineKeyboardBuilder]:
+    lines: list[str] = []
+    lines.append("🧾 *Вибір карток для аналізу*")
+    lines.append("")
+    lines.append("Обери картки, які враховувати у звітах (інші ігноруються).")
+    lines.append("")
+
+    kb = InlineKeyboardBuilder()
+
+    # кнопки не парсяться як Markdown, але текст кнопок ми все одно робимо простим і без форматування
+    for acc in accounts:
+        acc_id = acc["id"]
+        masked = " / ".join(acc.get("maskedPan") or []) or "без картки"
+        cur = str(acc.get("currencyCode", ""))
+        mark = "✅" if acc_id in selected_ids else "⬜️"
+        text = f"{mark} {masked} ({cur})"
+        kb.button(text=text, callback_data=f"acc_toggle:{acc_id}")
+
+    kb.adjust(1)
+    kb.button(text="🧹 Очистити вибір", callback_data="acc_clear")
+    kb.button(text="✅ Готово", callback_data="acc_done")
+    kb.adjust(1, 2)
+
+    return "\n".join(lines), kb
+
+
+def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
+    totals = _safe_get(facts, ["totals"], {}) or {}
+    comparison = facts.get("comparison")
 
     real_spend = float(totals.get("real_spend_total_uah", 0.0))
     spend = float(totals.get("spend_total_uah", 0.0))
@@ -56,35 +102,32 @@ def render_report(period: str, stored: dict) -> str:
     title = title_map.get(period, period)
 
     lines: list[str] = []
-    lines.append(f"*📊 {title}*")
+    lines.append(f"📊 *{md_escape(title)}*")
     lines.append("")
-    lines.append(f"💸 Реальні витрати (без переказів):* {_fmt_money(real_spend)}*")
-    lines.append(f"🧾 Всі списання (cash out): {_fmt_money(spend)}")
-    lines.append(f"💰 Надходження (cash in): {_fmt_money(income)}")
-    lines.append(f"🔁 Перекази: +{_fmt_money(tr_in)} / -{_fmt_money(tr_out)}")
+    lines.append(f"💸 Реальні витрати (без переказів): *{md_escape(_fmt_money(real_spend))}*")
+    lines.append(f"🧾 Всі списання (cash out): {md_escape(_fmt_money(spend))}")
+    lines.append(f"💰 Надходження (cash in): {md_escape(_fmt_money(income))}")
+    lines.append(f"🔁 Перекази: +{md_escape(_fmt_money(tr_in))} / -{md_escape(_fmt_money(tr_out))}")
     lines.append("")
 
-    # Top categories (named)
-    top_named = stored.get("top_categories_named_real_spend", []) or []
+    top_named = facts.get("top_categories_named_real_spend", []) or []
     if top_named:
         lines.append("*Топ категорій (реальні витрати):*")
         for i, row in enumerate(top_named[:5], start=1):
-            cat = row.get("category", "—")
+            cat = md_escape(str(row.get("category", "—")))
             amt = float(row.get("amount_uah", 0.0))
-            lines.append(f"{i}. {cat}: {_fmt_money(amt)}")
+            lines.append(f"{i}. {cat}: {md_escape(_fmt_money(amt))}")
         lines.append("")
 
-    # Top merchants
-    top_merchants = stored.get("top_merchants_real_spend", []) or []
+    top_merchants = facts.get("top_merchants_real_spend", []) or []
     if top_merchants:
         lines.append("*Топ мерчантів (реальні витрати):*")
         for i, row in enumerate(top_merchants[:5], start=1):
-            m = row.get("merchant", "—")
+            m = md_escape(str(row.get("merchant", "—")))
             amt = float(row.get("amount_uah", 0.0))
-            lines.append(f"{i}. {m}: {_fmt_money(amt)}")
+            lines.append(f"{i}. {m}: {md_escape(_fmt_money(amt))}")
         lines.append("")
 
-    # Comparison (week/month)
     if isinstance(comparison, dict):
         totals_cmp = comparison.get("totals", {})
         delta = totals_cmp.get("delta", {}) if isinstance(totals_cmp, dict) else {}
@@ -97,13 +140,13 @@ def render_report(period: str, stored: dict) -> str:
             sign = "+" if float(d_real) >= 0 else ""
             pct_txt = "—" if p_real is None else f"{p_real:+.2f}%"
             lines.append("*Порівняння з попереднім періодом:*")
-            lines.append(f"• Реальні витрати: {sign}{_fmt_money(float(d_real))} ({pct_txt})")
+            lines.append(
+                f"• Реальні витрати: {md_escape(sign + _fmt_money(float(d_real)))} ({md_escape(pct_txt)})"
+            )
             lines.append("")
 
-            # Category deltas (top changes)
             cat_cmp = comparison.get("categories", {})
             if isinstance(cat_cmp, dict) and cat_cmp:
-                # sort by abs delta
                 items = []
                 for k, v in cat_cmp.items():
                     if not isinstance(v, dict):
@@ -116,19 +159,26 @@ def render_report(period: str, stored: dict) -> str:
                 for k, dlt, pctv in items[:5]:
                     sign2 = "+" if dlt >= 0 else ""
                     pct_txt2 = "—" if pctv is None else f"{pctv:+.2f}%"
-                    lines.append(f"• {k}: {sign2}{_fmt_money(dlt)} ({pct_txt2})")
+                    lines.append(
+                        f"• {md_escape(str(k))}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
+                    )
                 lines.append("")
+
+    if ai_block:
+        lines.append("🤖 *AI інсайти:*")
+        lines.append(ai_block.strip())
+        lines.append("")
 
     return "\n".join(lines).strip()
 
-async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
-    from ..core.time_ranges import range_month, range_today, range_week, previous_period
-    from ..monobank import MonobankClient
-    from ..analytics.from_monobank import rows_from_statement
-    from ..analytics.compute import compute_facts
-    from ..analytics.compare import compare_totals, compare_categories
 
-    # choose range
+async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
+    from ..analytics.compare import compare_categories, compare_totals
+    from ..analytics.compute import compute_facts
+    from ..analytics.from_monobank import rows_from_statement
+    from ..core.time_ranges import previous_period, range_month, range_today, range_week
+    from ..monobank import MonobankClient
+
     if period == "today":
         current_dr = range_today()
         duration_days = 1
@@ -183,34 +233,19 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
 
     store.save(period, current_facts)
 
-def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, InlineKeyboardBuilder]:
-    """
-    accounts: list of dicts with keys: id, currencyCode, maskedPan
-    """
+
+def build_ai_block(summary: str, insights: list[str], next_step: str) -> str:
     lines: list[str] = []
-    lines.append("🧾 <b>Вибір карток для аналізу</b>")
+    lines.append(f"• {md_escape(summary)}")
     lines.append("")
-    lines.append("Обери картки, які враховувати у звітах (інші ігноруються).")
+    lines.append("*Рекомендації:*")
+    for s in insights[:7]:
+        lines.append(f"• {md_escape(s)}")
     lines.append("")
+    lines.append("*Наступний крок (7 днів):*")
+    lines.append(f"• {md_escape(next_step)}")
+    return "\n".join(lines)
 
-    kb = InlineKeyboardBuilder()
-
-    for acc in accounts:
-        acc_id = acc["id"]
-        masked = " / ".join(acc.get("maskedPan") or []) or "без картки"
-        cur = str(acc.get("currencyCode", ""))
-        mark = "✅" if acc_id in selected_ids else "⬜️"
-        text = f"{mark} {masked} ({cur})"
-        kb.button(text=text, callback_data=f"acc_toggle:{acc_id}")
-
-    kb.adjust(1)
-
-    # action row
-    kb.button(text="🧹 Очистити вибір", callback_data="acc_clear")
-    kb.button(text="✅ Готово", callback_data="acc_done")
-    kb.adjust(1, 2)
-
-    return "\n".join(lines), kb
 
 async def main() -> None:
     settings = load_settings()
@@ -219,7 +254,12 @@ async def main() -> None:
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    bot = Bot(token=settings.telegram_bot_token)
+    # Telegram "Markdown" (not V2) so *bold* works and parentheses/arrows won't explode parsing.
+    bot = Bot(
+        token=settings.telegram_bot_token,
+        default=DefaultBotProperties(parse_mode="Markdown"),
+    )
+
     dp = Dispatcher()
     store = ReportStore()
     users = UserStore()
@@ -230,41 +270,44 @@ async def main() -> None:
     async def cmd_start(message: Message) -> None:
         text = (
             "Привіт! Я mono-ai-budget-bot 🤖\n\n"
-            "Команди:\n"
-            "• /today — звіт за сьогодні\n"
-            "• /week — звіт за останні 7 днів\n"
-            "• /month — звіт за останні 30 днів\n"
-            "• /status — статус кешу\n"
-            "• /help — допомога\n\n"
-            "Поки що звіти беруться з локального кешу. Оновлення даних зробимо наступним кроком."
+            "*Команди:*\n"
+            "• /connect <mono_token> — підключити Monobank\n"
+            "• /accounts — вибір карток для аналізу\n"
+            "• /refresh today|week|month|all — оновити дані\n\n"
+            "*Звіти:*\n"
+            "• /today\n"
+            "• /week\n"
+            "• /month\n\n"
+            "*AI (on-demand):*\n"
+            "• /week ai — звіт + AI інсайти\n"
+            "• /today ai\n"
+            "• /month ai\n\n"
+            "*Статус:*\n"
+            "• /status\n"
+            "• /help\n"
         )
-        await message.answer(text)
+        await message.answer(text, parse_mode=None)
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
         await message.answer(
-            "ℹ️ Допомога\n\n"
-            "Звіти:\n"
-            "• /today\n"
-            "• /week\n"
-            "• /month\n\n"
-            "Статус:\n"
-            "• /status — покаже, коли востаннє оновлювались facts.\n"
+            "*Як користуватись:*\n"
+            "1) /connect <mono_token>\n"
+            "2) /accounts (вибери картки)\n"
+            "3) /refresh week (онови дані)\n"
+            "4) /week (звіт)\n"
+            "5) /week ai (звіт + AI)\n", parse_mode=None
         )
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
-        """
-        Usage:
-          /connect <mono_token>
-        """
         parts = (message.text or "").split(maxsplit=1)
         if len(parts) < 2 or not parts[1].strip():
             await message.answer(
-                "🔐 Підключення Monobank\n\n"
+                "🔐 *Підключення Monobank*\n\n"
                 "Надішли команду так:\n"
-                f"{hcode('/connect <mono_token>')}\n\n"
-                "Токен зберігається локально на твоєму комп'ютері (не комітиться в репозиторій)."
+                "/connect <mono_token>\n\n"
+                "Токен зберігається локально на твоєму комп'ютері (не комітиться в репозиторій).", parse_mode=None
             )
             return
 
@@ -278,59 +321,38 @@ async def main() -> None:
         await message.answer(
             "✅ Monobank токен збережено.\n\n"
             "Далі:\n"
-            "• /status — перевірити статус\n"
-            "• (далі додамо) /accounts — вибір карток для аналізу"
+            "• /accounts — вибір карток\n"
+            "• /refresh week — оновити дані\n"
+            "• /status — перевірити статус"
         )
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
-        parts = ["*Статус:*"]
+        lines = ["*Статус:*"]
 
         tg_id = message.from_user.id if message.from_user else None
         cfg = users.load(tg_id) if tg_id is not None else None
 
         if cfg is None:
-            parts.append("🔐 Monobank: не підключено")
-            parts.append(f"Підключи: {hcode('/connect <mono_token>')}")
+            lines.append("🔐 Monobank: не підключено")
+            lines.append("Підключи: /connect <mono_token>")
         else:
-            parts.append(f"🔐 Monobank: підключено ({hcode(_mask_secret(cfg.mono_token))})")
-            parts.append(f"📌 Вибрані картки: {len(cfg.selected_account_ids)} (налаштуємо в /accounts)")
+            # token mask may contain '*' which is markdown special, escape it
+            masked = md_escape(_mask_secret(cfg.mono_token))
+            lines.append(f"🔐 Monobank: підключено ({masked})")
+            lines.append(f"📌 Вибрані картки: {len(cfg.selected_account_ids)}")
 
-        parts.append("")
-        parts.append("*Статус кешу:*")
+        lines.append("")
+        lines.append("*Статус кешу:*")
         for p in ("today", "week", "month"):
             stored = store.load(p)
             if stored is None:
-                parts.append(f"• {p}: немає (зроби refresh-facts)")
+                lines.append(f"• {p}: немає (зроби /refresh {p})")
             else:
                 ts = datetime.fromtimestamp(stored.generated_at).isoformat(timespec="seconds")
-                parts.append(f"• {p}: {hcode(ts)}")
+                lines.append(f"• {p}: {md_escape(ts)}")
 
-        await message.answer("\n".join(parts))
-
-    async def _send_period_report(message: Message, period: str) -> None:
-        stored = store.load(period)
-        if stored is None:
-            await message.answer(
-                f"Немає кешованого звіту для {period}.\n"
-                f"Запусти локально: {hcode(f'monobot refresh-facts --period {period}')}"
-            )
-            return
-
-        text = render_report(period, stored.facts)
-        await message.answer(text)
-
-    @dp.message(Command("today"))
-    async def cmd_today(message: Message) -> None:
-        await _send_period_report(message, "today")
-
-    @dp.message(Command("week"))
-    async def cmd_week(message: Message) -> None:
-        await _send_period_report(message, "week")
-
-    @dp.message(Command("month"))
-    async def cmd_month(message: Message) -> None:
-        await _send_period_report(message, "month")
+        await message.answer("\n".join(lines))
 
     @dp.message(Command("accounts"))
     async def cmd_accounts(message: Message) -> None:
@@ -341,13 +363,9 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer(
-                "🔐 Спочатку підключи Monobank токен:\n"
-                f"{hcode('/connect <mono_token>')}"
-            )
+            await message.answer("🔐 Спочатку підключи Monobank: /connect <mono_token>")
             return
 
-        # Fetch accounts from Monobank (client-info)
         from ..monobank import MonobankClient
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -356,19 +374,9 @@ async def main() -> None:
         finally:
             mb.close()
 
-        accounts = []
-        for a in info.accounts:
-            accounts.append(
-                {
-                    "id": a.id,
-                    "currencyCode": a.currencyCode,
-                    "maskedPan": a.maskedPan,
-                }
-            )
-
+        accounts = [{"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan} for a in info.accounts]
         selected_ids = set(cfg.selected_account_ids or [])
         text, kb = render_accounts_screen(accounts, selected_ids)
-
         await message.answer(text, reply_markup=kb.as_markup())
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("acc_toggle:"))
@@ -393,7 +401,6 @@ async def main() -> None:
 
         _save_selected_accounts(users, tg_id, sorted(selected))
 
-        # Re-render screen (re-fetch accounts to keep UI consistent)
         from ..monobank import MonobankClient
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -447,10 +454,11 @@ async def main() -> None:
         if query.message:
             await query.message.edit_text(
                 "✅ Збережено!\n\n"
-                f"Вибрано карток: <b>{count}</b>\n"
+                f"Вибрано карток: *{count}*\n"
                 "Далі:\n"
-                "• /status — перевірити\n"
+                "• /refresh week — оновити дані\n"
                 "• /week — звіт\n"
+                "• /week ai — звіт + AI\n"
             )
         await query.answer("Готово")
 
@@ -463,7 +471,7 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer(f"Спочатку підключи: {hcode('/connect <mono_token>')}")
+            await message.answer("Спочатку підключи: /connect <mono_token>")
             return
 
         parts = (message.text or "").split()
@@ -482,13 +490,59 @@ async def main() -> None:
             else:
                 await refresh_period_for_user(period, cfg, store)
         except Exception as e:
-            await message.answer(f"❌ Помилка оновлення: {hcode(str(e))}")
+            await message.answer(f"❌ Помилка оновлення: {md_escape(str(e))}")
             return
 
         await message.answer("✅ Готово! Дані оновлено.\n\nМожеш дивитись: /today /week /month")
 
+    async def _send_period_report(message: Message, period: str) -> None:
+        want_ai = " ai" in (" " + (message.text or "").lower() + " ")
+
+        stored = store.load(period)
+        if stored is None:
+            await message.answer(f"Немає кешованого звіту для *{md_escape(period)}*. Зроби: /refresh {period}")
+            return
+
+        ai_block = None
+        if want_ai:
+            if not settings.openai_api_key:
+                await message.answer("OPENAI_API_KEY не задано в .env — AI недоступний.")
+            else:
+                period_label = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}.get(
+                    period, period
+                )
+                await message.answer("🤖 Генерую AI інсайти…")
+                try:
+                    from ..llm.openai_client import OpenAIClient
+
+                    client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+                    try:
+                        res = client.generate_report(stored.facts, period_label=period_label)
+                    finally:
+                        client.close()
+
+                    ai_block = build_ai_block(res.summary, res.insights, res.next_step)
+                except Exception as e:
+                    await message.answer(f"❌ AI помилка: {md_escape(str(e))}")
+
+        text = render_report(period, stored.facts, ai_block=ai_block)
+        await message.answer(text)
+
+    @dp.message(Command("today"))
+    async def cmd_today(message: Message) -> None:
+        await _send_period_report(message, "today")
+
+    @dp.message(Command("week"))
+    async def cmd_week(message: Message) -> None:
+        await _send_period_report(message, "week")
+
+    @dp.message(Command("month"))
+    async def cmd_month(message: Message) -> None:
+        await _send_period_report(message, "month")
+
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
