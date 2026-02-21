@@ -285,63 +285,84 @@ async def main() -> None:
         tg_id = message.from_user.id if message.from_user else None
         if tg_id is None:
             return
+
         users.save(tg_id, chat_id=message.chat.id)
+
         text = (
             "Привіт! Я mono-ai-budget-bot 🤖\n\n"
-            "*Команди:*\n"
-            "• /connect <mono_token> — підключити Monobank\n"
+            "Я допомагаю аналізувати витрати з Monobank, порівнювати періоди "
+            "та отримувати AI інсайти.\n\n"
+            "Щоб почати:\n"
+            "1) Отримай monobank token тут:\n"
+            "https://api.monobank.ua/index.html\n"
+            "2) Авторизуйся через Monobank\n"
+            "3) Створи Personal API token\n"
+            "4) Надішли його командою:\n"
+            "/connect YOUR_TOKEN\n\n"
+            "Команди:\n"
+            "• /connect YOUR_TOKEN — підключити Monobank\n"
             "• /accounts — вибір карток для аналізу\n"
             "• /refresh today|week|month|all — оновити дані\n\n"
-            "*Звіти:*\n"
+            "Звіти:\n"
             "• /today\n"
             "• /week\n"
-            "• /month\n\n"
-            "*AI (on-demand):*\n"
-            "• /week ai — звіт + AI інсайти\n"
-            "• /today ai\n"
-            "• /month ai\n\n"
-            "*Статус:*\n"
+            "• /month\n"
+            "• /week ai — звіт + AI інсайти\n\n"
+            "Статус:\n"
             "• /status\n"
             "• /help\n"
         )
+
         await message.answer(text, parse_mode=None)
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
         await message.answer(
-            "*Як користуватись:*\n"
-            "1) /connect <mono_token>\n"
-            "2) /accounts (вибери картки)\n"
-            "3) /refresh week (онови дані)\n"
-            "4) /week (звіт)\n"
-            "5) /week ai (звіт + AI)\n", parse_mode=None
+            "Як користуватись:\n\n"
+            "1) Отримай monobank token:\n"
+            "https://api.monobank.ua/index.html\n"
+            "2) /connect <monobank token>\n"
+            "3) /accounts — вибери картки\n"
+            "4) /refresh week — онови дані\n"
+            "5) /week — переглянь звіт\n"
+            "6) /week ai — звіт з AI інсайтами\n\n"
+            "Дані зберігаються локально.\n"
+            "Monobank API має обмеження: 1 запит / 60 сек.",
+            parse_mode=None,
         )
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
         parts = (message.text or "").split(maxsplit=1)
+
         if len(parts) < 2 or not parts[1].strip():
             await message.answer(
-                "🔐 *Підключення Monobank*\n\n"
-                "Надішли команду так:\n"
-                "/connect <mono_token>\n\n"
-                "Токен зберігається локально на твоєму комп'ютері (не комітиться в репозиторій).", parse_mode=None
+                "🔐 Підключення Monobank\n\n"
+                "1) Перейди на сторінку:\n"
+                "https://api.monobank.ua/index.html\n"
+                "2) Авторизуйся через Monobank\n"
+                "3) Створи Personal API token\n"
+                "4) Надішли його так:\n"
+                "/connect YOUR_TOKEN\n\n"
+                "Токен зберігається локально і не публікується.",
+                parse_mode=None,
             )
             return
 
         mono_token = parts[1].strip()
         tg_id = message.from_user.id if message.from_user else None
+
         if tg_id is None:
             await message.answer("Не зміг визначити твій Telegram user id.")
             return
 
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
+
         await message.answer(
-            "✅ Monobank токен збережено.\n\n"
+            "✅ Monobank token збережено.\n\n"
             "Далі:\n"
             "• /accounts — вибір карток\n"
-            "• /refresh week — оновити дані\n"
-            "• /status — перевірити статус"
+            "Після вибору карток бот запропонує завантажити історію за 1 або 3 місяці."
         )
 
     @dp.message(Command("status"))
@@ -353,7 +374,7 @@ async def main() -> None:
 
         if cfg is None:
             lines.append("🔐 Monobank: не підключено")
-            lines.append("Підключи: /connect <mono_token>")
+            lines.append("Підключи: /connect <monobank token>")
         else:
             # token mask may contain '*' which is markdown special, escape it
             masked = md_escape(_mask_secret(cfg.mono_token))
@@ -381,7 +402,7 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer("🔐 Спочатку підключи Monobank: /connect <mono_token>")
+            await message.answer("🔐 Спочатку підключи Monobank: /connect <monobank token>")
             return
 
         from ..monobank import MonobankClient
@@ -489,7 +510,7 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer("Спочатку підключи: /connect <mono_token>")
+            await message.answer("Спочатку підключи: /connect <monobank token>")
             return
 
         parts = (message.text or "").split()
