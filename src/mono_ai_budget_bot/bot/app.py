@@ -7,7 +7,7 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import load_settings
@@ -15,6 +15,18 @@ from ..logging_setup import setup_logging
 from ..storage.report_store import ReportStore
 from ..storage.user_store import UserStore
 
+import time
+from mono_ai_budget_bot.monobank import MonobankClient
+from mono_ai_budget_bot.monobank.sync import sync_accounts_ledger
+from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
+from mono_ai_budget_bot.analytics.compute import compute_facts
+from mono_ai_budget_bot.core.time_ranges import range_today, range_week, range_month
+
+from mono_ai_budget_bot.storage.report_store import ReportStore
+from mono_ai_budget_bot.storage.tx_store import TxStore
+
+store = ReportStore()
+tx_store = TxStore()
 
 # --- Markdown (NOT MarkdownV2) escaping for dynamic text ---
 # In Telegram Markdown, these chars can break formatting if they appear in user/merchant/category strings.
@@ -246,7 +258,6 @@ def build_ai_block(summary: str, insights: list[str], next_step: str) -> str:
     lines.append(f"• {md_escape(next_step)}")
     return "\n".join(lines)
 
-
 async def main() -> None:
     settings = load_settings()
     setup_logging(settings.log_level)
@@ -261,7 +272,6 @@ async def main() -> None:
     )
 
     dp = Dispatcher()
-    store = ReportStore()
     users = UserStore()
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
@@ -321,7 +331,7 @@ async def main() -> None:
             "Як користуватись:\n\n"
             "1) Отримай monobank token:\n"
             "https://api.monobank.ua/index.html\n"
-            "2) /connect <monobank token>\n"
+            "2) /connect YOUR_TOKEN\n"
             "3) /accounts — вибери картки\n"
             "4) /refresh week — онови дані\n"
             "5) /week — переглянь звіт\n"
@@ -490,16 +500,86 @@ async def main() -> None:
         cfg = users.load(tg_id) if tg_id is not None else None
 
         count = len(cfg.selected_account_ids) if cfg else 0
+
+        kb = InlineKeyboardBuilder()
+        kb.row(
+            InlineKeyboardButton(text="📥 Завантажити 1 місяць", callback_data="boot_30"),
+            InlineKeyboardButton(text="📥 Завантажити 3 місяці", callback_data="boot_90"),
+        )
+        kb.row(InlineKeyboardButton(text="Пропустити", callback_data="boot_skip"))
+
         if query.message:
             await query.message.edit_text(
                 "✅ Збережено!\n\n"
-                f"Вибрано карток: *{count}*\n"
-                "Далі:\n"
-                "• /refresh week — оновити дані\n"
-                "• /week — звіт\n"
-                "• /week ai — звіт + AI\n"
+                f"Вибрано карток: {count}\n\n"
+                "Хочеш завантажити історію транзакцій?\n"
+                "Після завантаження звіти /today /week /month працюватимуть одразу.\n",
+                reply_markup=kb.as_markup(),
+                parse_mode=None,
             )
         await query.answer("Готово")
+
+    @dp.callback_query(lambda c: c.data in ("boot_30", "boot_90", "boot_skip"))
+    async def cb_bootstrap(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token:
+            await query.answer("Спочатку /connect", show_alert=True)
+            return
+
+        account_ids = list(cfg.selected_account_ids or [])
+        if not account_ids:
+            await query.answer("Спочатку вибери картки: /accounts", show_alert=True)
+            return
+
+        if query.data == "boot_skip":
+            if query.message:
+                await query.message.edit_text(
+                    "Ок! Можеш зробити /refresh week або одразу /week (якщо кеш уже є).",
+                    parse_mode=None,
+                )
+            await query.answer("Пропущено")
+            return
+
+        days = 30 if query.data == "boot_30" else 90
+        if query.message:
+            await query.message.edit_text(
+                f"📥 Завантажую історію за {days} днів… Це може зайняти час через ліміти Monobank API.",
+                parse_mode=None,
+            )
+
+        mb = MonobankClient(token=cfg.mono_token)
+        try:
+            res = sync_accounts_ledger(
+                mb=mb,
+                tx_store=tx_store,
+                telegram_user_id=tg_id,
+                account_ids=account_ids,
+                days_back=days,
+            )
+        finally:
+            mb.close()
+
+        await _compute_and_cache_reports_for_user(tg_id, account_ids)
+
+        if query.message:
+            await query.message.edit_text(
+                "✅ Готово!\n\n"
+                f"Карток: {res.accounts}\n"
+                f"Запитів до API: {res.fetched_requests}\n"
+                f"Додано транзакцій: {res.appended}\n\n"
+                "Тепер можеш:\n"
+                "• /today\n"
+                "• /week\n"
+                "• /month\n"
+                "• /week ai\n",
+                parse_mode=None,
+            )
+        await query.answer("Завантажено")
 
     @dp.message(Command("refresh"))
     async def cmd_refresh(message: Message) -> None:
@@ -615,6 +695,22 @@ async def main() -> None:
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
 
+async def _compute_and_cache_reports_for_user(tg_id: int, account_ids: list[str]) -> None:
+    for period in ["today", "week", "month"]:
+
+        if period == "today":
+            dr = range_today()
+        elif period == "week":
+            dr = range_week()
+        else:  # month
+            dr = range_month()
+
+        ts_from, ts_to = dr.to_unix()
+
+        records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
+        rows = rows_from_ledger(records)
+        facts = compute_facts(rows)
+        store.save(tg_id, period, facts)
 
 if __name__ == "__main__":
     asyncio.run(main())
