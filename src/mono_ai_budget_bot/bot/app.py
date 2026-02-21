@@ -266,8 +266,26 @@ async def main() -> None:
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
 
+    from .scheduler import create_scheduler, start_jobs
+    scheduler = create_scheduler(logger)
+    loop=asyncio.get_running_loop()
+    start_jobs(
+        scheduler,
+        loop=loop,
+        bot=bot,
+        users=users,
+        report_store=store,
+        refresh_period_for_user=refresh_period_for_user,
+        render_report_text=render_report,
+        logger=logger,
+    )
+
     @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            return
+        users.save(tg_id, chat_id=message.chat.id)
         text = (
             "Привіт! Я mono-ai-budget-bot 🤖\n\n"
             "*Команди:*\n"
@@ -539,6 +557,29 @@ async def main() -> None:
     @dp.message(Command("month"))
     async def cmd_month(message: Message) -> None:
         await _send_period_report(message, "month")
+
+    @dp.message(Command("autojobs"))
+    async def cmd_autojobs(message: Message) -> None:
+        tg_id = message.from_user.id
+        cfg = users.load(tg_id)
+        if cfg is None:
+            await message.answer("Спочатку підключи Monobank: /connect <mono_token>")
+            return
+
+        parts = (message.text or "").split()
+        action = parts[1].lower() if len(parts) > 1 else "status"
+
+        if action == "on":
+            users.save(tg_id, autojobs_enabled=True)
+            await message.answer("✅ Автозвіти увімкнено")
+            return
+        if action == "off":
+            users.save(tg_id, autojobs_enabled=False)
+            await message.answer("✅ Автозвіти вимкнено")
+            return
+
+        cfg2 = users.load(tg_id)
+        await message.answer(f"Автозвіти: {'ON' if cfg2 and cfg2.autojobs_enabled else 'OFF'}")
 
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)

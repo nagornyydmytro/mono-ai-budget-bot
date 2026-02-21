@@ -21,6 +21,7 @@ python-dotenv = "^1.0.1"
 pydantic = "^2.6.0"
 pydantic-settings = "^2.13.1"
 tzdata = "^2025.3"
+apscheduler = "^3.10.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
