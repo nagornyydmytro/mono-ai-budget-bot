@@ -589,30 +589,66 @@ async def main() -> None:
             return
 
         cfg = users.load(tg_id)
-        if cfg is None:
-            await message.answer("Спочатку підключи: /connect <monobank token>")
+        if cfg is None or not cfg.mono_token:
+            await message.answer("Спочатку підключи Monobank: /connect YOUR_TOKEN")
+            return
+
+        account_ids = list(cfg.selected_account_ids or [])
+        if not account_ids:
+            await message.answer("Спочатку вибери картки для аналізу: /accounts")
             return
 
         parts = (message.text or "").split()
-        period = parts[1].strip().lower() if len(parts) > 1 else "week"
+        arg = parts[1].strip().lower() if len(parts) > 1 else "week"
 
-        if period not in ("today", "week", "month", "all"):
+        if arg not in ("today", "week", "month", "all"):
             await message.answer("Використання: /refresh today|week|month|all")
             return
 
-        await message.answer("⏳ Оновлюю дані… (може зайняти час через ліміти Mono API)")
+        # how far to sync (days_back)
+        # + буфер, щоб точно покрити потрібні періоди та "перехід доби"
+        if arg == "today":
+            days_back = 2
+        elif arg == "week":
+            days_back = 8
+        elif arg == "month":
+            days_back = 32
+        else:  # all
+            days_back = 90
+
+        await message.answer(f"⏳ Оновлюю транзакції за ~{days_back} днів… (Mono API може бути повільним)")
 
         try:
-            if period == "all":
-                for p in ("today", "week", "month"):
-                    await refresh_period_for_user(p, cfg, store)
-            else:
-                await refresh_period_for_user(period, cfg, store)
+            from ..monobank import MonobankClient
+            from ..monobank.sync import sync_accounts_ledger
+
+            mb = MonobankClient(token=cfg.mono_token)
+            try:
+                res = sync_accounts_ledger(
+                    mb=mb,
+                    tx_store=tx_store,
+                    telegram_user_id=tg_id,
+                    account_ids=account_ids,
+                    days_back=days_back,
+                )
+            finally:
+                mb.close()
+
+            # recompute today/week/month facts from ledger and save to ReportStore
+            await _compute_and_cache_reports_for_user(tg_id, account_ids)
+
         except Exception as e:
             await message.answer(f"❌ Помилка оновлення: {md_escape(str(e))}")
             return
 
-        await message.answer("✅ Готово! Дані оновлено.\n\nМожеш дивитись: /today /week /month")
+        await message.answer(
+            "✅ Готово!\n"
+            f"Карток: {res.accounts}\n"
+            f"Запитів до API: {res.fetched_requests}\n"
+            f"Додано транзакцій: {res.appended}\n\n"
+            "Можеш дивитись: /today /week /month",
+            parse_mode=None,
+        )
 
     async def _send_period_report(message: Message, period: str) -> None:
         want_ai = " ai" in (" " + (message.text or "").lower() + " ")
