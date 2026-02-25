@@ -276,18 +276,42 @@ async def main() -> None:
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
     
+    async def sync_user_ledger(tg_id: int, cfg: UserConfig, *, days_back: int) -> object:
+        from ..monobank import MonobankClient
+        from ..monobank.sync import sync_accounts_ledger
+
+        account_ids = list(cfg.selected_account_ids or [])
+        token = cfg.mono_token
+
+        def _run() -> object:
+            mb = MonobankClient(token=token)
+            try:
+                return sync_accounts_ledger(
+                    mb=mb,
+                    tx_store=tx_store,
+                    telegram_user_id=tg_id,
+                    account_ids=account_ids,
+                    days_back=days_back,
+                )
+            finally:
+                mb.close()
+
+        return await asyncio.to_thread(_run)
+
     from .scheduler import create_scheduler, start_jobs
     scheduler = create_scheduler(logger)
     loop=asyncio.get_running_loop()
+
     start_jobs(
         scheduler,
         loop=loop,
         bot=bot,
         users=users,
         report_store=store,
-        refresh_period_for_user=refresh_period_for_user,
         render_report_text=render_report,
         logger=logger,
+        sync_user_ledger=sync_user_ledger,
+        recompute_reports_for_user=_compute_and_cache_reports_for_user
     )
 
     @dp.message(Command("start"))
