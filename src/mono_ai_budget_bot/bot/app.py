@@ -546,40 +546,60 @@ async def main() -> None:
             return
 
         days = 30 if query.data == "boot_30" else 90
-        if query.message:
-            await query.message.edit_text(
-                f"📥 Завантажую історію за {days} днів… Це може зайняти час через ліміти Monobank API.",
-                parse_mode=None,
-            )
-
-        mb = MonobankClient(token=cfg.mono_token)
-        try:
-            res = sync_accounts_ledger(
-                mb=mb,
-                tx_store=tx_store,
-                telegram_user_id=tg_id,
-                account_ids=account_ids,
-                days_back=days,
-            )
-        finally:
-            mb.close()
-
-        await _compute_and_cache_reports_for_user(tg_id, account_ids)
 
         if query.message:
             await query.message.edit_text(
-                "✅ Готово!\n\n"
-                f"Карток: {res.accounts}\n"
-                f"Запитів до API: {res.fetched_requests}\n"
-                f"Додано транзакцій: {res.appended}\n\n"
-                "Тепер можеш:\n"
-                "• /today\n"
-                "• /week\n"
-                "• /month\n"
-                "• /week ai\n",
+                f"📥 Запустив завантаження історії за {days} днів у фоні… "
+                "Це може зайняти час через ліміти Monobank API.\n\n"
+                "Я напишу, коли буде готово ✅",
                 parse_mode=None,
             )
-        await query.answer("Завантажено")
+        await query.answer("Старт")
+
+        chat_id = query.message.chat.id if query.message else None
+        token = cfg.mono_token
+
+        async def job() -> None:
+            try:
+                from ..monobank import MonobankClient
+                from ..monobank.sync import sync_accounts_ledger
+
+                def _run_sync() -> object:
+                    mb = MonobankClient(token=token)
+                    try:
+                        return sync_accounts_ledger(
+                            mb=mb,
+                            tx_store=tx_store,
+                            telegram_user_id=tg_id,
+                            account_ids=account_ids,
+                            days_back=days,
+                        )
+                    finally:
+                        mb.close()
+
+                res = await asyncio.to_thread(_run_sync)
+
+                await _compute_and_cache_reports_for_user(tg_id, account_ids)
+
+                if chat_id is not None:
+                    await bot.send_message(
+                        chat_id,
+                        "✅ Готово!\n\n"
+                        f"Карток: {res.accounts}\n"
+                        f"Запитів до API: {res.fetched_requests}\n"
+                        f"Додано транзакцій: {res.appended}\n\n"
+                        "Тепер можеш:\n"
+                        "• /today\n"
+                        "• /week\n"
+                        "• /month\n"
+                        "• /week ai\n",
+                        parse_mode=None,
+                    )
+            except Exception as e:
+                if chat_id is not None:
+                    await bot.send_message(chat_id, f"❌ Помилка bootstrap: {md_escape(str(e))}", parse_mode=None)
+
+        asyncio.create_task(job())
 
     @dp.message(Command("refresh"))
     async def cmd_refresh(message: Message) -> None:
@@ -605,50 +625,59 @@ async def main() -> None:
             await message.answer("Використання: /refresh today|week|month|all")
             return
 
-        # how far to sync (days_back)
-        # + буфер, щоб точно покрити потрібні періоди та "перехід доби"
         if arg == "today":
             days_back = 2
         elif arg == "week":
             days_back = 8
         elif arg == "month":
             days_back = 32
-        else:  # all
+        else:
             days_back = 90
 
-        await message.answer(f"⏳ Оновлюю транзакції за ~{days_back} днів… (Mono API може бути повільним)")
-
-        try:
-            from ..monobank import MonobankClient
-            from ..monobank.sync import sync_accounts_ledger
-
-            mb = MonobankClient(token=cfg.mono_token)
-            try:
-                res = sync_accounts_ledger(
-                    mb=mb,
-                    tx_store=tx_store,
-                    telegram_user_id=tg_id,
-                    account_ids=account_ids,
-                    days_back=days_back,
-                )
-            finally:
-                mb.close()
-
-            # recompute today/week/month facts from ledger and save to ReportStore
-            await _compute_and_cache_reports_for_user(tg_id, account_ids)
-
-        except Exception as e:
-            await message.answer(f"❌ Помилка оновлення: {md_escape(str(e))}")
-            return
-
         await message.answer(
-            "✅ Готово!\n"
-            f"Карток: {res.accounts}\n"
-            f"Запитів до API: {res.fetched_requests}\n"
-            f"Додано транзакцій: {res.appended}\n\n"
-            "Можеш дивитись: /today /week /month",
+            f"⏳ Запустив оновлення за ~{days_back} днів у фоні…\n"
+            "Я напишу, коли буде готово ✅",
             parse_mode=None,
         )
+
+        chat_id = message.chat.id
+        token = cfg.mono_token
+
+        async def job() -> None:
+            try:
+                from ..monobank import MonobankClient
+                from ..monobank.sync import sync_accounts_ledger
+
+                def _run_sync() -> object:
+                    mb = MonobankClient(token=token)
+                    try:
+                        return sync_accounts_ledger(
+                            mb=mb,
+                            tx_store=tx_store,
+                            telegram_user_id=tg_id,
+                            account_ids=account_ids,
+                            days_back=days_back,
+                        )
+                    finally:
+                        mb.close()
+
+                res = await asyncio.to_thread(_run_sync)
+
+                await _compute_and_cache_reports_for_user(tg_id, account_ids)
+
+                await bot.send_message(
+                    chat_id,
+                    "✅ Оновлено!\n"
+                    f"Карток: {res.accounts}\n"
+                    f"Запитів до API: {res.fetched_requests}\n"
+                    f"Додано транзакцій: {res.appended}\n\n"
+                    "Можеш дивитись: /today /week /month",
+                    parse_mode=None,
+                )
+            except Exception as e:
+                await bot.send_message(chat_id, f"❌ Помилка оновлення: {md_escape(str(e))}", parse_mode=None)
+
+        asyncio.create_task(job())
 
     async def _send_period_report(message: Message, period: str) -> None:
         want_ai = " ai" in (" " + (message.text or "").lower() + " ")
