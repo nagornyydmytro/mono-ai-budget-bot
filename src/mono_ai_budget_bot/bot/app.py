@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
@@ -12,10 +13,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import load_settings
 from ..logging_setup import setup_logging
-from ..storage.report_store import ReportStore
 from ..storage.user_store import UserStore
 
-import time
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.monobank.sync import sync_accounts_ledger
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
@@ -24,6 +23,9 @@ from mono_ai_budget_bot.core.time_ranges import range_today, range_week, range_m
 
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
+
+from mono_ai_budget_bot.llm.nlq_router import parse_finance_intent
+from mono_ai_budget_bot.nlq.executor import execute_intent
 
 store = ReportStore()
 tx_store = TxStore()
@@ -782,6 +784,17 @@ async def main() -> None:
 
         cfg2 = users.load(tg_id)
         await message.answer(f"Автозвіти: {'ON' if cfg2 and cfg2.autojobs_enabled else 'OFF'}")
+
+    @dp.message(F.text & ~F.text.startswith("/"))
+    async def handle_plain_text(message: Message) -> None:
+        user_id = message.from_user.id
+
+        try:
+            intent = parse_finance_intent(message.text)
+            answer = execute_intent(user_id, intent)
+            await message.answer(answer)
+        except Exception:
+            await message.answer("Сталася помилка при обробці запиту.")
 
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)

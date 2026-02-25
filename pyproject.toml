@@ -23,6 +23,7 @@ pydantic-settings = "^2.13.1"
 tzdata = "^2025.3"
 apscheduler = "^3.10.4"
 cryptography = "^46.0.5"
+openai = "^2.24.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
