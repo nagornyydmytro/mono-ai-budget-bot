@@ -272,6 +272,10 @@ async def main() -> None:
     )
 
     dp = Dispatcher()
+
+    from collections import defaultdict
+    user_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+    
     users = UserStore()
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
@@ -313,6 +317,9 @@ async def main() -> None:
         sync_user_ledger=sync_user_ledger,
         recompute_reports_for_user=_compute_and_cache_reports_for_user
     )
+
+    from collections import defaultdict
+    user_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
@@ -585,40 +592,41 @@ async def main() -> None:
 
         async def job() -> None:
             try:
-                from ..monobank import MonobankClient
-                from ..monobank.sync import sync_accounts_ledger
+                async with user_locks[tg_id]:
+                    from ..monobank import MonobankClient
+                    from ..monobank.sync import sync_accounts_ledger
 
-                def _run_sync() -> object:
-                    mb = MonobankClient(token=token)
-                    try:
-                        return sync_accounts_ledger(
-                            mb=mb,
-                            tx_store=tx_store,
-                            telegram_user_id=tg_id,
-                            account_ids=account_ids,
-                            days_back=days,
+                    def _run_sync() -> object:
+                        mb = MonobankClient(token=token)
+                        try:
+                            return sync_accounts_ledger(
+                                mb=mb,
+                                tx_store=tx_store,
+                                telegram_user_id=tg_id,
+                                account_ids=account_ids,
+                                days_back=days,
+                            )
+                        finally:
+                            mb.close()
+
+                    res = await asyncio.to_thread(_run_sync)
+
+                    await _compute_and_cache_reports_for_user(tg_id, account_ids)
+
+                    if chat_id is not None:
+                        await bot.send_message(
+                            chat_id,
+                            "✅ Готово!\n\n"
+                            f"Карток: {res.accounts}\n"
+                            f"Запитів до API: {res.fetched_requests}\n"
+                            f"Додано транзакцій: {res.appended}\n\n"
+                            "Тепер можеш:\n"
+                            "• /today\n"
+                            "• /week\n"
+                            "• /month\n"
+                            "• /week ai\n",
+                            parse_mode=None,
                         )
-                    finally:
-                        mb.close()
-
-                res = await asyncio.to_thread(_run_sync)
-
-                await _compute_and_cache_reports_for_user(tg_id, account_ids)
-
-                if chat_id is not None:
-                    await bot.send_message(
-                        chat_id,
-                        "✅ Готово!\n\n"
-                        f"Карток: {res.accounts}\n"
-                        f"Запитів до API: {res.fetched_requests}\n"
-                        f"Додано транзакцій: {res.appended}\n\n"
-                        "Тепер можеш:\n"
-                        "• /today\n"
-                        "• /week\n"
-                        "• /month\n"
-                        "• /week ai\n",
-                        parse_mode=None,
-                    )
             except Exception as e:
                 if chat_id is not None:
                     await bot.send_message(chat_id, f"❌ Помилка bootstrap: {md_escape(str(e))}", parse_mode=None)
@@ -669,35 +677,36 @@ async def main() -> None:
 
         async def job() -> None:
             try:
-                from ..monobank import MonobankClient
-                from ..monobank.sync import sync_accounts_ledger
+                async with user_locks[tg_id]:
+                    from ..monobank import MonobankClient
+                    from ..monobank.sync import sync_accounts_ledger
 
-                def _run_sync() -> object:
-                    mb = MonobankClient(token=token)
-                    try:
-                        return sync_accounts_ledger(
-                            mb=mb,
-                            tx_store=tx_store,
-                            telegram_user_id=tg_id,
-                            account_ids=account_ids,
-                            days_back=days_back,
-                        )
-                    finally:
-                        mb.close()
+                    def _run_sync() -> object:
+                        mb = MonobankClient(token=token)
+                        try:
+                            return sync_accounts_ledger(
+                                mb=mb,
+                                tx_store=tx_store,
+                                telegram_user_id=tg_id,
+                                account_ids=account_ids,
+                                days_back=days_back,
+                            )
+                        finally:
+                            mb.close()
 
-                res = await asyncio.to_thread(_run_sync)
+                    res = await asyncio.to_thread(_run_sync)
 
-                await _compute_and_cache_reports_for_user(tg_id, account_ids)
+                    await _compute_and_cache_reports_for_user(tg_id, account_ids)
 
-                await bot.send_message(
-                    chat_id,
-                    "✅ Оновлено!\n"
-                    f"Карток: {res.accounts}\n"
-                    f"Запитів до API: {res.fetched_requests}\n"
-                    f"Додано транзакцій: {res.appended}\n\n"
-                    "Можеш дивитись: /today /week /month",
-                    parse_mode=None,
-                )
+                    await bot.send_message(
+                        chat_id,
+                        "✅ Оновлено!\n"
+                        f"Карток: {res.accounts}\n"
+                        f"Запитів до API: {res.fetched_requests}\n"
+                        f"Додано транзакцій: {res.appended}\n\n"
+                        "Можеш дивитись: /today /week /month",
+                        parse_mode=None,
+                    )
             except Exception as e:
                 await bot.send_message(chat_id, f"❌ Помилка оновлення: {md_escape(str(e))}", parse_mode=None)
 
