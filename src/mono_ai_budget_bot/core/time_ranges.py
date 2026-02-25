@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-KYIV_TZ = ZoneInfo("Europe/Kyiv")
+try:
+    KYIV_TZ = ZoneInfo("Europe/Kyiv")
+except ZoneInfoNotFoundError:
+    KYIV_TZ = ZoneInfo("UTC")
 
 @dataclass(frozen=True)
 class DateRange:
