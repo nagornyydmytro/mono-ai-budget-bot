@@ -6,7 +6,6 @@ from ..core.cache import JsonDiskCache
 from ..core.rate_limit import FileRateLimiter
 from .models import MonoClientInfo, MonoStatementItem
 
-
 class MonobankClient:
     CLIENT_INFO_MIN_INTERVAL = 60
     STATEMENT_MIN_INTERVAL = 60
@@ -85,7 +84,7 @@ class MonobankClient:
         raise RuntimeError(f"Monobank request failed after retries: {path}. Last error: {last_err}")
 
     def client_info(self) -> MonoClientInfo:
-        cache_key = "mono:client-info"
+        cache_key = f"mono:client-info:{self._token_hash}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             return MonoClientInfo.model_validate(cached)
@@ -98,14 +97,18 @@ class MonobankClient:
         return MonoClientInfo.model_validate(data)
 
     def statement(self, account: str, date_from: int, date_to: int) -> list[MonoStatementItem]:
-        cache_key = f"mono:statement:{account}:{date_from}:{date_to}"
+        cache_key = f"mono:statement:{self._token_hash}:{account}:{date_from}:{date_to}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             return [MonoStatementItem.model_validate(x) for x in cached]
 
         # rate limit protection (Monobank: statement is limited too)
-        self._limiter.throttle(f"mono:client-info:{self._token_hash}", self.CLIENT_INFO_MIN_INTERVAL, wait=True)
-        
+        self._limiter.throttle(
+            f"mono:statement:{self._token_hash}:{account}",
+            self.STATEMENT_MIN_INTERVAL,
+            wait=True,
+        )
+
         data = self._request_json(f"/personal/statement/{account}/{date_from}/{date_to}")
         # Monobank returns list
         self._cache.set(cache_key, data, ttl_seconds=self.STATEMENT_TTL)
