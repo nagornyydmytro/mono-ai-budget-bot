@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
-
+from .ledger_meta_store import LedgerMetaStore
 
 @dataclass(frozen=True)
 class TxRecord:
@@ -29,6 +29,7 @@ class TxStore:
     def __init__(self, root_dir: Path | None = None):
         self.root_dir = root_dir or (Path(".cache") / "tx")
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self._meta = LedgerMetaStore(self.root_dir)
 
     def _user_dir(self, telegram_user_id: int) -> Path:
         d = self.root_dir / str(telegram_user_id)
@@ -39,13 +40,18 @@ class TxStore:
         return self._user_dir(telegram_user_id) / f"{account_id}.jsonl"
 
     def last_ts(self, telegram_user_id: int, account_id: str) -> int | None:
+        # 1️⃣ Fast path: try meta
+        meta = self._meta.get(telegram_user_id, account_id)
+        if meta.last_ts is not None:
+            return meta.last_ts
+
+        # 2️⃣ Fallback: scan JSONL once
         path = self._path(telegram_user_id, account_id)
         if not path.exists():
             return None
 
         last: int | None = None
         try:
-            # Read from end-ish: for MVP just scan all lines (ok for <= 3 months)
             for line in path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
                     continue
@@ -55,6 +61,11 @@ class TxStore:
                     last = t
         except Exception:
             return None
+
+        # 3️⃣ Persist into meta for future fast access
+        if last is not None:
+            self._meta.update(telegram_user_id, account_id, last_ts=last)
+
         return last
 
     def _load_ids_set(self, telegram_user_id: int, account_id: str) -> set[str]:
@@ -91,6 +102,16 @@ class TxStore:
                 f.write(json.dumps(it, ensure_ascii=False) + "\n")
                 ids.add(tid)
                 appended += 1
+        if appended > 0:
+            max_t: int | None = None
+            for it in items:
+                try:
+                    t = int(it.get("time", 0))
+                except Exception:
+                    continue
+                if max_t is None or t > max_t:
+                    max_t = t
+            self._meta.update(telegram_user_id, account_id, last_ts=max_t)
         return appended
 
     def load_range(
