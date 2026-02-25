@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
-
+from mono_ai_budget_bot.security.crypto import encrypt_token, decrypt_token
 
 @dataclass(frozen=True)
 class UserConfig:
@@ -15,7 +15,6 @@ class UserConfig:
     chat_id: int | None
     autojobs_enabled: bool
     updated_at: float  # unix timestamp
-
 
 class UserStore:
     """
@@ -38,16 +37,20 @@ class UserStore:
         chat_id: int | None = None,
         autojobs_enabled: bool | None = None,
     ) -> Path:
-        """
-        Upsert behavior:
-        - If file exists, keeps old values unless overridden by passed args.
-        - mono_token can be None to keep existing token.
-        """
         existing = self.load_raw(telegram_user_id)
+
+        # --- determine plain token ---
+        if mono_token is not None:
+            token_plain = mono_token
+        else:
+            token_plain = existing.get("mono_token", "")
+
+        # --- encrypt before storing ---
+        token_enc = encrypt_token(token_plain) if token_plain else ""
 
         payload: dict[str, Any] = {
             "telegram_user_id": telegram_user_id,
-            "mono_token": (mono_token if mono_token is not None else existing.get("mono_token", "")),
+            "mono_token": token_enc,
             "selected_account_ids": (
                 selected_account_ids
                 if selected_account_ids is not None
@@ -83,9 +86,21 @@ class UserStore:
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+
+            token_stored = str(data.get("mono_token", ""))
+
+            # Migration: if token is plain, encrypt it
+            if token_stored and not token_stored.startswith("gAAAAA"):
+                token_enc = encrypt_token(token_stored)
+                data["mono_token"] = token_enc
+                path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                token_stored = token_enc
+
+            token_plain = decrypt_token(token_stored) if token_stored else ""
+
             return UserConfig(
                 telegram_user_id=int(data["telegram_user_id"]),
-                mono_token=str(data.get("mono_token", "")),
+                mono_token=token_plain,
                 selected_account_ids=list(data.get("selected_account_ids", [])),
                 chat_id=(int(data["chat_id"]) if data.get("chat_id") is not None else None),
                 autojobs_enabled=bool(data.get("autojobs_enabled", True)),
