@@ -26,14 +26,16 @@ class ScheduleConfig:
     weekly_cron: str
     monthly_cron: str
     refresh_minutes: int
+    daily_refresh_cron: str
 
 
 def load_schedule_config() -> ScheduleConfig:
     """
     Env:
-    - SCHED_TEST_MODE=1 -> refresh every 1 min, weekly кажні 2 хв, monthly кожні 3 хв (для dev)
+    - SCHED_TEST_MODE=1 -> refresh every 1 min, weekly every 2 min, monthly every 3 min (dev)
     - SCHED_TZ=Europe/Kyiv (default)
-    - SCHED_REFRESH_MINUTES=120  (prod: раз на 1-3 години)
+    - SCHED_REFRESH_MINUTES=120  (prod: every 1-3 hours)
+    - SCHED_DAILY_REFRESH_CRON="0 6 * * *" (daily refresh at 06:00)
     - SCHED_WEEKLY_CRON="0 9 * * 1"  (Mon 09:00)
     - SCHED_MONTHLY_CRON="0 9 1 * *" (1st day 09:00)
     """
@@ -42,6 +44,7 @@ def load_schedule_config() -> ScheduleConfig:
 
     weekly_cron = os.getenv("SCHED_WEEKLY_CRON", "0 9 * * 1").strip()
     monthly_cron = os.getenv("SCHED_MONTHLY_CRON", "0 9 1 * *").strip()
+    daily_refresh_cron = os.getenv("SCHED_DAILY_REFRESH_CRON", "0 6 * * *").strip()
 
     refresh_minutes_str = os.getenv("SCHED_REFRESH_MINUTES", "120").strip()
     try:
@@ -52,6 +55,7 @@ def load_schedule_config() -> ScheduleConfig:
     if test_mode:
         weekly_cron = "*/2 * * * *"
         monthly_cron = "*/3 * * * *"
+        daily_refresh_cron = "*/2 * * * *"
         refresh_minutes = 1
 
     return ScheduleConfig(
@@ -60,6 +64,7 @@ def load_schedule_config() -> ScheduleConfig:
         weekly_cron=weekly_cron,
         monthly_cron=monthly_cron,
         refresh_minutes=refresh_minutes,
+        daily_refresh_cron=daily_refresh_cron,
     )
 
 
@@ -111,7 +116,7 @@ def start_jobs(
     report_store,
     render_report_text,
     logger: logging.Logger,
-    # new callbacks (provided by app.py)
+    # callbacks (provided by app.py)
     sync_user_ledger,  # async (tg_id, cfg, days_back) -> SyncResult-like
     recompute_reports_for_user,  # async (tg_id, account_ids) -> None
 ) -> None:
@@ -142,16 +147,21 @@ def start_jobs(
             logger.warning("Refresh error for user=%s: %s", getattr(u, "telegram_user_id", "?"), e)
             return False
 
-    async def job_refresh_all_users() -> None:
-        logger.info("Scheduler: refresh_all_users started")
+    async def job_refresh_all_users(*, days_back: int) -> None:
+        logger.info("Scheduler: refresh_all_users started (days_back=%s)", days_back)
         refreshed = 0
         scanned = 0
         for u in users.iter_all():
             scanned += 1
-            ok = await _refresh_user(u, days_back=2)
+            ok = await _refresh_user(u, days_back=days_back)
             if ok:
                 refreshed += 1
-        logger.info("Scheduler: refresh_all_users done. scanned=%s refreshed=%s", scanned, refreshed)
+        logger.info(
+            "Scheduler: refresh_all_users done. scanned=%s refreshed=%s (days_back=%s)",
+            scanned,
+            refreshed,
+            days_back,
+        )
 
     async def job_weekly_report() -> None:
         logger.info("Scheduler: weekly_report started")
@@ -187,8 +197,13 @@ def start_jobs(
         logger.info("Scheduler: monthly_report done")
 
     # APScheduler calls sync callables — we schedule async jobs onto the running loop
-    def refresh_wrapper() -> None:
-        loop.create_task(job_refresh_all_users())
+    def refresh_wrapper_interval() -> None:
+        # lightweight incremental refresh for "recent" changes
+        loop.create_task(job_refresh_all_users(days_back=2))
+
+    def refresh_wrapper_daily() -> None:
+        # daily refresh with larger lookback (safer catch-up)
+        loop.create_task(job_refresh_all_users(days_back=8))
 
     def weekly_wrapper() -> None:
         loop.create_task(job_weekly_report())
@@ -196,14 +211,24 @@ def start_jobs(
     def monthly_wrapper() -> None:
         loop.create_task(job_monthly_report())
 
-    # periodic refresh
+    # periodic refresh (every N minutes)
     scheduler.add_job(
-        refresh_wrapper,
+        refresh_wrapper_interval,
         IntervalTrigger(minutes=cfg.refresh_minutes),
         id="refresh_all_users",
         replace_existing=True,
     )
 
+    # daily refresh (cron)
+    daily_trigger = CronTrigger(**_parse_cron(cfg.daily_refresh_cron))
+    scheduler.add_job(
+        refresh_wrapper_daily,
+        daily_trigger,
+        id="daily_refresh_all_users",
+        replace_existing=True,
+    )
+
+    # weekly/monthly reports
     weekly_trigger = CronTrigger(**_parse_cron(cfg.weekly_cron))
     monthly_trigger = CronTrigger(**_parse_cron(cfg.monthly_cron))
 
@@ -212,9 +237,10 @@ def start_jobs(
 
     scheduler.start()
     logger.info(
-        "Scheduler started (test_mode=%s). refresh_every=%s min weekly='%s' monthly='%s'",
+        "Scheduler started (test_mode=%s). refresh_every=%s min daily='%s' weekly='%s' monthly='%s'",
         cfg.test_mode,
         cfg.refresh_minutes,
+        cfg.daily_refresh_cron,
         cfg.weekly_cron,
         cfg.monthly_cron,
     )
