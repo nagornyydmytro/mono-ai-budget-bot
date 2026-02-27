@@ -16,7 +16,12 @@ def test_render_report_includes_trends_and_anomalies():
             "declining": [{"label": "atb", "delta_uah": -100.0, "pct": -20.0}],
         },
         "anomalies": [
-            {"label": "new_merchant", "last_day_uah": 500.0, "baseline_median_uah": 0.0, "reason": "first_time_large"}
+            {
+                "label": "new_merchant",
+                "last_day_uah": 500.0,
+                "baseline_median_uah": 0.0,
+                "reason": "first_time_large",
+            }
         ],
     }
 

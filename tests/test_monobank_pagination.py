@@ -18,7 +18,9 @@ class DummyLimiter:
 
 
 def _mk_batch(start_time: int, count: int) -> list[dict]:
-    return [{"id": f"tx_{start_time - i}", "time": start_time - i, "amount": 100} for i in range(count)]
+    return [
+        {"id": f"tx_{start_time - i}", "time": start_time - i, "amount": 100} for i in range(count)
+    ]
 
 
 def test_statement_paginates_when_500_and_dedups_and_caches(monkeypatch):

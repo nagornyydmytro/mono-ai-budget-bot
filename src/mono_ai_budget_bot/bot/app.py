@@ -12,11 +12,11 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from mono_ai_budget_bot.analytics.anomalies import detect_anomalies
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
 from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
 from mono_ai_budget_bot.analytics.trends import compute_trends
-from mono_ai_budget_bot.analytics.anomalies import detect_anomalies
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq.executor import execute_intent
@@ -29,7 +29,6 @@ from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..storage.profile_store import ProfileStore
 from ..storage.user_store import UserConfig, UserStore
-
 
 store = ReportStore()
 tx_store = TxStore()
@@ -178,20 +177,24 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
         declining = trends.get("declining") or []
         if growing or declining:
             lines.append("*Тренди (7 днів vs попередні 7):*")
-            for x in (growing[:3] if isinstance(growing, list) else []):
+            for x in growing[:3] if isinstance(growing, list) else []:
                 lab = md_escape(str(x.get("label", "—")))
                 dlt = float(x.get("delta_uah", 0.0))
                 pct = x.get("pct")
                 sign = "+" if dlt >= 0 else ""
                 pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
-                lines.append(f"📈 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
-            for x in (declining[:3] if isinstance(declining, list) else []):
+                lines.append(
+                    f"📈 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})"
+                )
+            for x in declining[:3] if isinstance(declining, list) else []:
                 lab = md_escape(str(x.get("label", "—")))
                 dlt = float(x.get("delta_uah", 0.0))
                 pct = x.get("pct")
                 sign = "+" if dlt >= 0 else ""
                 pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
-                lines.append(f"📉 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+                lines.append(
+                    f"📉 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})"
+                )
             lines.append("")
 
     anomalies = facts.get("anomalies") or []
@@ -208,7 +211,9 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
                 why = "сплеск vs медіана"
             else:
                 why = reason or "аномалія"
-            lines.append(f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} (база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}")
+            lines.append(
+                f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} (база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}"
+            )
         lines.append("")
 
     if isinstance(comparison, dict):

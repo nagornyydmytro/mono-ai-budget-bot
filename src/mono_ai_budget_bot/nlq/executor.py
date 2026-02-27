@@ -4,13 +4,17 @@ import time
 from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
+from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
+from mono_ai_budget_bot.nlq.memory_store import (
+    load_memory,
+    pop_pending_intent,
+    resolve_merchant_alias,
+    save_recipient_alias,
+    set_pending_intent,
+)
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
-from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias, load_memory, set_pending_intent
-from mono_ai_budget_bot.nlq.memory_store import pop_pending_intent, save_recipient_alias
-from mono_ai_budget_bot.analytics.profile import compute_baseline
-from mono_ai_budget_bot.analytics.profile_store import save_profile
-from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
+
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
@@ -36,21 +40,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         )
 
     if intent == "compare_to_baseline":
-        r = compare_yesterday_to_baseline(rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28)
+        r = compare_yesterday_to_baseline(
+            rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28
+        )
         sign = "+" if r.delta_cents >= 0 else ""
         return f"Вчора: {r.yesterday_cents/100:.2f} грн. Зазвичай (медіана): {r.baseline_median_cents/100:.2f} грн. Різниця: {sign}{r.delta_cents/100:.2f} грн."
-
-        b = compute_baseline(rows, window_days=28)
-        save_profile(
-            telegram_user_id,
-            {
-                "window_days": b.window_days,
-                "total_spend_cents": b.total_spend_cents,
-                "daily_avg_cents": b.daily_avg_cents,
-                "daily_median_cents": b.daily_median_cents,
-            },
-        )
-        return "Профіль оновлено."
 
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
@@ -59,7 +53,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if pending:
         alias = (pending.get("recipient_alias") or "").strip().lower()
         if alias:
-            save_recipient_alias(telegram_user_id, alias, intent_payload.get("merchant_contains") or "")
+            save_recipient_alias(
+                telegram_user_id, alias, intent_payload.get("merchant_contains") or ""
+            )
             return execute_intent(telegram_user_id, pending)
 
     days_raw = intent_payload.get("days")
@@ -69,7 +65,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         days = 30
     days = max(1, min(days, 31))
 
-    merchant_filter = resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
+    merchant_filter = (
+        resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
+    )
 
     user_store = UserStore()
     cfg = user_store.load(telegram_user_id)

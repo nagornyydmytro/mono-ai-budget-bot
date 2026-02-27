@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 BASE_DIR = Path(".cache") / "memory"
 DEFAULT_MERCHANT_ALIASES = {
     "мак": "mcdonalds",
@@ -14,6 +13,7 @@ DEFAULT_MERCHANT_ALIASES = {
     "mcd": "mcdonalds",
     "mc": "mcdonalds",
 }
+
 
 def _default_memory() -> dict[str, Any]:
     return {
@@ -88,6 +88,7 @@ def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None)
 
     return raw
 
+
 def set_pending_intent(telegram_user_id: int, payload: dict[str, Any]) -> None:
     mem = load_memory(telegram_user_id)
     mem["pending_intent"] = payload
@@ -100,6 +101,7 @@ def pop_pending_intent(telegram_user_id: int) -> dict[str, Any] | None:
     mem["pending_intent"] = None
     save_memory(telegram_user_id, mem)
     return p if isinstance(p, dict) else None
+
 
 def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) -> None:
     mem = load_memory(telegram_user_id)

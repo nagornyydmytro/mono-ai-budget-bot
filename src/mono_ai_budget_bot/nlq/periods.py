@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,9 @@ def parse_period_range(text: str, now_ts: int) -> PeriodRange | None:
         today0 = _utc_day_start(now_ts)
         return PeriodRange(today0 - 86400, today0)
 
-    m = re.search(r"\b(за\s+останні\s+|за\s+последние\s+|last\s+)(\d{1,3})\s*(дн(і|ів)?|дней|days)\b", s)
+    m = re.search(
+        r"\b(за\s+останні\s+|за\s+последние\s+|last\s+)(\d{1,3})\s*(дн(і|ів)?|дней|days)\b", s
+    )
     if m:
         n = int(m.group(2))
         end = now_ts

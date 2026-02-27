@@ -58,6 +58,7 @@ def test_executor_merchant_alias_resolution(tmp_path, monkeypatch):
     s = ex.execute_intent(1, {"intent": "spend_sum", "days": 30, "merchant_contains": "мак"})
     assert "150.00" in s
 
+
 def test_auto_cache_alias(tmp_path, monkeypatch):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
 
@@ -70,10 +71,12 @@ def test_auto_cache_alias(tmp_path, monkeypatch):
     m2 = ms.load_memory(1)
     assert m2["merchant_aliases"].get("макдональдс") == "mcdonalds"
 
+
 def test_transfer_requires_recipient_mapping_sets_pending(tmp_path, monkeypatch):
+    import time as timemod
+
     import mono_ai_budget_bot.nlq.executor as exmod
     import mono_ai_budget_bot.nlq.memory_store as msmod
-    import time as timemod
 
     monkeypatch.setattr(msmod, "BASE_DIR", tmp_path / "memory")
     monkeypatch.setattr(exmod, "load_memory", msmod.load_memory)
@@ -83,23 +86,29 @@ def test_transfer_requires_recipient_mapping_sets_pending(tmp_path, monkeypatch)
     monkeypatch.setattr(exmod, "TxStore", lambda: DummyTxStore())
     monkeypatch.setattr(timemod, "time", lambda: 2000)
 
-    s = exmod.execute_intent(1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"})
+    s = exmod.execute_intent(
+        1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"}
+    )
     assert "Кого саме" in s
 
     mem = msmod.load_memory(1)
     assert isinstance(mem.get("pending_intent"), dict)
 
+
 def test_followup_completes_and_saves_mapping(tmp_path, monkeypatch):
+    import time as timemod
+
     import mono_ai_budget_bot.nlq.executor as exmod
     import mono_ai_budget_bot.nlq.memory_store as msmod
-    import time as timemod
 
     monkeypatch.setattr(msmod, "BASE_DIR", tmp_path / "memory")
     monkeypatch.setattr(exmod, "UserStore", lambda: DummyUserStore())
     monkeypatch.setattr(exmod, "TxStore", lambda: DummyTxStore())
     monkeypatch.setattr(timemod, "time", lambda: 2000)
 
-    s = exmod.execute_intent(1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"})
+    s = exmod.execute_intent(
+        1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"}
+    )
     assert "Кого саме" in s
 
     s2 = exmod.execute_intent(1, {"intent": "spend_sum", "merchant_contains": "McDonalds"})

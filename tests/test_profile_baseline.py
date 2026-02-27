@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 from mono_ai_budget_bot.analytics.profile import compute_baseline
 
 

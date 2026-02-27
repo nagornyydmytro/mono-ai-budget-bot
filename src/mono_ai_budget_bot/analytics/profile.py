@@ -54,6 +54,7 @@ def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
         spend_by_kind_cents=spend_by_kind,
     )
 
+
 def build_user_profile(rows: list[Any], window_days: int = 28) -> dict[str, int]:
     b = compute_baseline(rows, window_days=window_days)
     return {

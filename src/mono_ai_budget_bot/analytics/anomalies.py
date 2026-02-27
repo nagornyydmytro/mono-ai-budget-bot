@@ -82,7 +82,11 @@ def detect_anomalies(
             )
             continue
 
-        if base_med > 0 and last_cents >= int(spike_mult * base_med) and last_cents >= min_threshold_cents:
+        if (
+            base_med > 0
+            and last_cents >= int(spike_mult * base_med)
+            and last_cents >= min_threshold_cents
+        ):
             out.append(
                 AnomalyItem(
                     label=label,
