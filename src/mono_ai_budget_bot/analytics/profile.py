@@ -1,48 +1,44 @@
 from __future__ import annotations
 
-from collections import Counter
 from typing import Any
 
+from .compute import compute_facts
 from .from_ledger import rows_from_ledger
-from .compute import minor_to_uah
+
+
+def _top5_from_amount_map(d: dict[str, float]) -> list[dict[str, Any]]:
+    items = sorted(d.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    return [{"name": k, "amount_uah": float(v)} for k, v in items]
 
 
 def build_user_profile(records: list) -> dict[str, Any]:
+    """
+    Lightweight profile derived from computed facts (robust to TxRow internals).
+    Uses long-term ledger slice (e.g. last 90 days).
+    """
     rows = rows_from_ledger(records)
-
     if not rows:
         return {}
 
-    spend_rows = [r for r in rows if r.direction == "spend"]
+    facts = compute_facts(rows)
 
-    total_spend_minor = sum(r.amount_minor for r in spend_rows)
-    tx_count = len(spend_rows)
+    totals = facts.get("totals", {}) or {}
 
-    avg_check = (
-        minor_to_uah(total_spend_minor // tx_count) if tx_count > 0 else 0.0
-    )
+    real_spend_total_uah = float(totals.get("real_spend_total_uah", 0.0) or 0.0)
 
-    cat_counter = Counter()
-    merchant_counter = Counter()
+    spend_tx_count = int(facts.get("real_spend_tx_count") or facts.get("spend_tx_count") or totals.get("spend_tx_count") or 0)
+    if spend_tx_count <= 0:
+        spend_tx_count = max(0, int(facts.get("tx_count") or 0))
 
-    for r in spend_rows:
-        cat_counter[r.category] += r.amount_minor
-        merchant_counter[r.merchant] += r.amount_minor
+    avg_check_uah = round(real_spend_total_uah / spend_tx_count, 2) if spend_tx_count > 0 else 0.0
 
-    top_categories = [
-        {"category": k, "amount_uah": minor_to_uah(v)}
-        for k, v in cat_counter.most_common(5)
-    ]
-
-    top_merchants = [
-        {"merchant": k, "amount_uah": minor_to_uah(v)}
-        for k, v in merchant_counter.most_common(5)
-    ]
+    categories = facts.get("categories_real_spend", {}) or {}
+    merchants = facts.get("merchants_real_spend", {}) or {}
 
     return {
-        "avg_check_uah": avg_check,
-        "total_spend_uah": minor_to_uah(total_spend_minor),
-        "spend_tx_count": tx_count,
-        "top_categories_long_term": top_categories,
-        "top_merchants_long_term": top_merchants,
+        "avg_check_uah": avg_check_uah,
+        "total_real_spend_uah": real_spend_total_uah,
+        "real_spend_tx_count": spend_tx_count,
+        "top_categories_long_term": _top5_from_amount_map(categories),
+        "top_merchants_long_term": _top5_from_amount_map(merchants),
     }
