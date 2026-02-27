@@ -7,12 +7,20 @@ from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias, load_memory, set_pending_intent
+from mono_ai_budget_bot.nlq.memory_store import pop_pending_intent, save_recipient_alias
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
 
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
+
+    pending = pop_pending_intent(telegram_user_id)
+    if pending:
+        alias = (pending.get("recipient_alias") or "").strip().lower()
+        if alias:
+            save_recipient_alias(telegram_user_id, alias, intent_payload.get("merchant_contains") or "")
+            return execute_intent(telegram_user_id, pending)
 
     days_raw = intent_payload.get("days")
     try:
@@ -72,10 +80,24 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         elif intent.startswith("transfer_out_"):
             if kind != "transfer_out":
                 continue
+            recipient_alias = (intent_payload.get("recipient_alias") or "").strip().lower()
+            if recipient_alias:
+                mem = load_memory(telegram_user_id)
+                ra = mem.get("recipient_aliases") or {}
+                match_value = ra.get(recipient_alias)
+                if match_value and match_value not in (r.description or "").lower():
+                    continue
 
         elif intent.startswith("transfer_in_"):
             if kind != "transfer_in":
                 continue
+            recipient_alias = (intent_payload.get("recipient_alias") or "").strip().lower()
+            if recipient_alias:
+                mem = load_memory(telegram_user_id)
+                ra = mem.get("recipient_aliases") or {}
+                match_value = ra.get(recipient_alias)
+                if match_value and match_value not in (r.description or "").lower():
+                    continue
 
         else:
             continue

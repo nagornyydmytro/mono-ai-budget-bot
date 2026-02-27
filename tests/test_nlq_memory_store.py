@@ -88,3 +88,20 @@ def test_transfer_requires_recipient_mapping_sets_pending(tmp_path, monkeypatch)
 
     mem = msmod.load_memory(1)
     assert isinstance(mem.get("pending_intent"), dict)
+
+def test_followup_completes_and_saves_mapping(tmp_path, monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as exmod
+    import mono_ai_budget_bot.nlq.memory_store as msmod
+    import time as timemod
+
+    monkeypatch.setattr(msmod, "BASE_DIR", tmp_path / "memory")
+    monkeypatch.setattr(exmod, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(exmod, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(timemod, "time", lambda: 2000)
+
+    s = exmod.execute_intent(1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"})
+    assert "Кого саме" in s
+
+    s2 = exmod.execute_intent(1, {"intent": "spend_sum", "merchant_contains": "McDonalds"})
+    mem = msmod.load_memory(1)
+    assert "дівчині" in mem.get("recipient_aliases", {})

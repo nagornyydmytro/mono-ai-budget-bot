@@ -100,3 +100,12 @@ def pop_pending_intent(telegram_user_id: int) -> dict[str, Any] | None:
     mem["pending_intent"] = None
     save_memory(telegram_user_id, mem)
     return p if isinstance(p, dict) else None
+
+def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) -> None:
+    mem = load_memory(telegram_user_id)
+    ra = mem.get("recipient_aliases") or {}
+    if not isinstance(ra, dict):
+        ra = {}
+    ra[alias.strip().lower()] = match_value.strip().lower()
+    mem["recipient_aliases"] = ra
+    save_memory(telegram_user_id, mem)
