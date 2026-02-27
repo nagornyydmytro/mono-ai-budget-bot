@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
@@ -32,7 +33,6 @@ from mono_ai_budget_bot.analytics.period_report import build_period_report_from_
 from ..analytics.profile import build_user_profile
 from ..storage.profile_store import ProfileStore
 
-profile_store = ProfileStore(settings.cache_dir / "profiles")
 store = ReportStore()
 tx_store = TxStore()
 
@@ -259,9 +259,50 @@ def build_ai_block(summary: str, changes: list[str], recs: list[str], next_step:
     lines.append(f"• {md_escape(next_step)}")
     return "\n".join(lines)
 
+async def _compute_and_cache_reports_for_user(
+    tg_id: int,
+    account_ids: list[str],
+    profile_store: ProfileStore,
+) -> None:
+    dr = range_today()
+    ts_from, ts_to = dr.to_unix()
+    records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
+    rows = rows_from_ledger(records)
+    facts = compute_facts(rows)
+    store.save(tg_id, "today", facts)
+
+    now_ts = int(time.time())
+    profile_from = now_ts - 90 * 24 * 60 * 60
+    profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
+    profile = build_user_profile(profile_records)
+    profile_store.save(tg_id, profile)
+
+    for period, days_back in (("week", 7), ("month", 30)):
+        now_ts = int(time.time())
+        ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
+        ts_to = now_ts
+
+        records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
+        report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
+
+        current_facts = report["current"]
+        current_facts["comparison"] = {
+            "prev_period": {
+                "dt_from": report["period"]["previous"]["start_iso_utc"],
+                "dt_to": report["period"]["previous"]["end_iso_utc"],
+                "totals": report["previous"].get("totals", {}),
+                "categories_real_spend": report["previous"].get("categories_real_spend", {}),
+            },
+            "totals": report["compare"]["totals"],
+            "categories": report["compare"]["categories_real_spend"],
+        }
+
+        store.save(tg_id, period, current_facts)
+
 async def main() -> None:
     settings = load_settings()
     setup_logging(settings.log_level)
+    profile_store = ProfileStore(Path(".cache") / "profiles")
 
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
@@ -314,7 +355,7 @@ async def main() -> None:
         render_report_text=render_report,
         logger=logger,
         sync_user_ledger=sync_user_ledger,
-        recompute_reports_for_user=_compute_and_cache_reports_for_user
+        recompute_reports_for_user=lambda tg_id, account_ids: _compute_and_cache_reports_for_user(tg_id, account_ids, profile_store)
     )
 
     @dp.message(Command("start"))
@@ -599,7 +640,7 @@ async def main() -> None:
 
                     res = await asyncio.to_thread(_run_sync)
 
-                    await _compute_and_cache_reports_for_user(tg_id, account_ids)
+                    await _compute_and_cache_reports_for_user(tg_id, account_ids, profile_store)
 
                     if chat_id is not None:
                         await bot.send_message(
@@ -684,7 +725,7 @@ async def main() -> None:
 
                     res = await asyncio.to_thread(_run_sync)
 
-                    await _compute_and_cache_reports_for_user(tg_id, account_ids)
+                    await _compute_and_cache_reports_for_user(tg_id, account_ids, profile_store)
 
                     await bot.send_message(
                         chat_id,
@@ -805,44 +846,6 @@ async def main() -> None:
 
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
-
-async def _compute_and_cache_reports_for_user(tg_id: int, account_ids: list[str]) -> None:
-    dr = range_today()
-    ts_from, ts_to = dr.to_unix()
-    records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
-    rows = rows_from_ledger(records)
-    facts = compute_facts(rows)
-    store.save(tg_id, "today", facts)
-
-    now_ts = int(time.time())
-    profile_from = now_ts - 90 * 24 * 60 * 60
-
-    profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
-    profile = build_user_profile(profile_records)
-    profile_store.save(tg_id, profile)
-
-    for period, days_back in (("week", 7), ("month", 30)):
-        now_ts = int(time.time())
-        ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
-        ts_to = now_ts
-
-        records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
-        report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
-
-        current_facts = report["current"]
-
-        current_facts["comparison"] = {
-            "prev_period": {
-                "dt_from": report["period"]["previous"]["start_iso_utc"],
-                "dt_to": report["period"]["previous"]["end_iso_utc"],
-                "totals": report["previous"].get("totals", {}),
-                "categories_real_spend": report["previous"].get("categories_real_spend", {}),
-            },
-            "totals": report["compare"]["totals"],
-            "categories": report["compare"]["categories_real_spend"],
-        }
-
-        store.save(tg_id, period, current_facts)
 
 if __name__ == "__main__":
     asyncio.run(main())

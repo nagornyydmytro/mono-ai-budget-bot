@@ -25,14 +25,12 @@ class LLMReportV2(BaseModel):
     next_step: str = Field(min_length=1)
 
     def clean(self) -> "LLMReportV2":
-        # Trim + remove empties + cap sizes
         self.summary = self.summary.strip()
         self.next_step = self.next_step.strip()
 
         self.changes = [str(x).strip() for x in self.changes if str(x).strip()][:5]
         self.recs = [str(x).strip() for x in self.recs if str(x).strip()][:7]
 
-        # Ensure at least some content
         if not self.changes:
             self.changes = []
         if not self.recs:
@@ -55,12 +53,10 @@ def _extract_json_object(text: str) -> Optional[str]:
     if not text:
         return None
 
-    # common case: model returns pure json already
     s = text.strip()
     if s.startswith("{") and s.endswith("}"):
         return s
 
-    # try to extract the largest {...} block
     m = re.search(r"\{.*\}", s, flags=re.DOTALL)
     if m:
         return m.group(0).strip()
@@ -116,10 +112,12 @@ class OpenAIClient:
         """
         system = (
             "Ти — помічник з фінансової грамотності. "
-            "Ти аналізуєш ТІЛЬКИ надані цифри (facts JSON). "
+            "Ти працюєш у режимі 'grounded': використовуй ТІЛЬКИ дані з facts JSON. "
             "Не вигадуй дані і не припускай того, чого немає у facts. "
             "Не давай інвестиційних, медичних або юридичних порад. "
             "Не обіцяй гарантованих результатів. "
+            "Ти отримуєш два блоки: period_facts (поточний період) і user_profile (довгостроковий профіль). "
+            "Якщо user_profile порожній — не згадуй його. "
             "Поверни ВИКЛЮЧНО валідний JSON без markdown."
         )
 
@@ -132,31 +130,35 @@ class OpenAIClient:
 
         user = (
             f"Період: {period_label}\n"
-            "Згенеруй короткий аналіз витрат та конкретні рекомендації.\n"
-            "Вимоги:\n"
-            "- summary: 2–4 речення\n"
-            "- changes: 2–5 пунктів (з цифрами/%)\n"
-            "- recs: 3–7 пунктів (кожен прив'язаний до facts)\n"
-            "- next_step: 1 дія на 7 днів\n"
-            "- НЕ використовуй markdown\n"
-            "- Поверни ТІЛЬКИ JSON\n\n"
+            "У facts є:\n"
+            "- period_facts: метрики за період (total, top categories/merchants, compare)\n"
+            "- user_profile: довгострокова норма користувача (avg_check, топи, частота) — може бути порожнім\n\n"
+            "Завдання:\n"
+            "1) summary: 2–4 речення. Поясни загальну картину по period_facts.\n"
+            "2) changes: 2–5 пунктів. Якщо є compare — опиши найбільші зміни.\n"
+            "3) recs: 3–7 рекомендацій. КОЖНА рекомендація має містити:\n"
+            "   - на що вона спирається (категорія/мерчант/сума/частка)\n"
+            "   - коротку дію (що зробити)\n"
+            "   - якщо доречно: порівняння з user_profile (наприклад 'вище вашої норми' / 'нетипово')\n"
+            "4) next_step: 1 конкретна дія на 7 днів (вимірювана).\n\n"
+            "Правила:\n"
+            "- Не вигадуй відсотки/суми, яких немає у facts. Якщо рахуєш частку — явно вкажи з чого (наприклад від real_spend_total).\n"
+            "- Якщо у previous period 0 (percent = null/—) — не роби висновків про %.\n"
+            "- Не згадуй перекази як витрати; фокусуйся на real spend.\n"
+            "- Поверни ТІЛЬКИ JSON за схемою.\n\n"
             f"JSON schema hint: {json.dumps(schema_hint, ensure_ascii=False)}\n\n"
             f"facts: {json.dumps(facts, ensure_ascii=False)}"
         )
 
         raw = self._chat(system=system, user=user, temperature=0.2)
 
-        # 1) Parse + validate
         try:
             obj = _parse_llm_json(raw)
             rep = LLMReportV2.model_validate(obj).clean()
-            # Minimal sanity: require at least 1 rec if possible
             if not rep.recs:
-                # still acceptable, but try repair once
                 raise ValidationError.from_exception_data("LLMReportV2", [])
             return LLMResult(report=rep, raw_text=raw)
         except Exception:
-            # 2) Repair once: ask model to fix JSON only
             repair_system = (
                 "Ти — JSON-ремонтник. "
                 "Твоя задача: перетворити текст у ВАЛІДНИЙ JSON за заданою схемою. "
