@@ -198,11 +198,17 @@ MASTER_KEY
 Демо (для інтернатури)
 ----------------------
 
-- docs/demo/connect.png
-- docs/demo/accounts.png
-- docs/demo/week.png
-- docs/demo/nlq.png
+### Connect flow
+![Connect flow](docs/demo/connect.png)
 
+### Accounts flow
+![Accounts flow](docs/demo/accounts.png)
+
+### Weekly report
+![Weekly report](docs/demo/week.png)
+
+### NLQ example
+![NLQ example](docs/demo/nlq.png)
 
 Статус проєкту
 --------------
