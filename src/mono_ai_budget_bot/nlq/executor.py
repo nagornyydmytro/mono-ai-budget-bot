@@ -8,9 +8,43 @@ from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias, load_memory, set_pending_intent
 from mono_ai_budget_bot.nlq.memory_store import pop_pending_intent, save_recipient_alias
+from mono_ai_budget_bot.analytics.profile import compute_baseline
+from mono_ai_budget_bot.analytics.profile_store import save_profile
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
+
+    if intent == "profile_refresh":
+        user_store = UserStore()
+        cfg = user_store.load(telegram_user_id)
+        if cfg is None or not cfg.mono_token:
+            return "Спочатку підключи Monobank через /connect."
+        account_ids = cfg.selected_account_ids or []
+        if not account_ids:
+            return "Обери картки для аналізу через /accounts."
+
+        ts_to = int(time.time())
+        ts_from = ts_to - 28 * 86400
+
+        tx_store = TxStore()
+        rows = tx_store.load_range(
+            telegram_user_id=telegram_user_id,
+            account_ids=account_ids,
+            ts_from=ts_from,
+            ts_to=ts_to,
+        )
+
+        b = compute_baseline(rows, window_days=28)
+        save_profile(
+            telegram_user_id,
+            {
+                "window_days": b.window_days,
+                "total_spend_cents": b.total_spend_cents,
+                "daily_avg_cents": b.daily_avg_cents,
+                "daily_median_cents": b.daily_median_cents,
+            },
+        )
+        return "Профіль оновлено."
 
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
