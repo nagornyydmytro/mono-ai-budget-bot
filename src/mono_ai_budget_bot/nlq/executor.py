@@ -33,10 +33,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return "Обери картки для аналізу через /accounts."
 
     ts_to = int(intent_payload.get("end_ts") or time.time())
-    ts_from = intent_payload.get("start_ts")
-    if ts_from is None:
+    ts_from_raw = intent_payload.get("start_ts")
+    if ts_from_raw is None:
         ts_from = ts_to - days * 24 * 60 * 60
-    ts_from = int(ts_from)
+    else:
+        ts_from = int(ts_from_raw)
 
     tx_store = TxStore()
     rows = tx_store.load_range(
@@ -50,10 +51,25 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     for r in rows:
         kind = classify_kind(r.amount, r.mcc, r.description)
 
-        if kind != "spend":
-            continue
+        if intent.startswith("spend_"):
+            if kind != "spend":
+                continue
+            if merchant_filter and merchant_filter not in (r.description or "").lower():
+                continue
 
-        if merchant_filter and merchant_filter not in (r.description or "").lower():
+        elif intent.startswith("income_"):
+            if kind != "income":
+                continue
+
+        elif intent.startswith("transfer_out_"):
+            if kind != "transfer_out":
+                continue
+
+        elif intent.startswith("transfer_in_"):
+            if kind != "transfer_in":
+                continue
+
+        else:
             continue
 
         filtered.append(r)
@@ -64,5 +80,26 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "spend_count":
         return f"За останні {days} днів було {len(filtered)} витрат."
+
+    if intent == "income_sum":
+        total_cents = sum(r.amount for r in filtered)
+        return f"За останні {days} днів було поповнень на {total_cents/100:.2f} грн."
+
+    if intent == "income_count":
+        return f"За останні {days} днів було {len(filtered)} поповнень."
+
+    if intent == "transfer_out_sum":
+        total_cents = sum(-r.amount for r in filtered)
+        return f"За останні {days} днів ти переказав {total_cents/100:.2f} грн."
+
+    if intent == "transfer_out_count":
+        return f"За останні {days} днів було {len(filtered)} переказів."
+
+    if intent == "transfer_in_sum":
+        total_cents = sum(r.amount for r in filtered)
+        return f"За останні {days} днів ти отримав {total_cents/100:.2f} грн."
+
+    if intent == "transfer_in_count":
+        return f"За останні {days} днів було {len(filtered)} вхідних переказів."
 
     return "Поки що цей тип запиту не реалізовано."
