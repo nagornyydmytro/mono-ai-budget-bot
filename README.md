@@ -159,6 +159,23 @@ Scheduler (optional):
 - SCHED_REFRESH_MINUTES
 - SCHED_DAILY_REFRESH_CRON / SCHED_WEEKLY_CRON / SCHED_MONTHLY_CRON
 
+1-minute walkthrough
+-----------------------------------
+
+1) Запуск і перевірка оточення:
+- poetry install
+- cp .env.example .env
+- (згенеруй MASTER_KEY та встав у .env)
+- poetry run monobot status-env
+- poetry run pytest
+
+2) Демонстрація user flow в Telegram:
+- /connect → додай Monobank token
+- /accounts → обери рахунки/картки
+- bootstrap → обери 1 або 3 місяці (первинне завантаження)
+- /week або /month → подивись звіт + compare з попереднім періодом
+- Напиши NLQ: “Скільки я за останні 15 днів витратив на Макдональдс?”
+
 Демо (для інтернатури)
 ----------------------
 
