@@ -124,6 +124,20 @@ Monobank API: обмеження і як ми їх обходимо
 - activate
 - python -m mono_ai_budget_bot.bot.app
 
+Швидка перевірка після встановлення
+-----------------------------------
+
+1) Перевір конфігурацію:
+- poetry run monobot status-env
+
+2) Перевір, що CLI працює:
+- poetry run monobot health
+
+3) Запусти тести:
+- poetry run pytest
+
+Якщо OPENAI_API_KEY не задано — бот працює у facts-only режимі (без AI-інсайтів), але повністю функціональний.
+
 ENV змінні (мінімальний набір)
 ------------------------------
 
@@ -136,6 +150,9 @@ OPTIONAL:
 - OPENAI_MODEL
 - CACHE_DIR
 - LOG_LEVEL
+
+Примітка:
+MONO_TOKEN не потрібен для MVP — Monobank token вводиться користувачем через /connect і зберігається зашифрованим.
 
 Scheduler (optional):
 - SCHED_TZ
