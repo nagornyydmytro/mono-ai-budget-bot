@@ -29,6 +29,10 @@ from mono_ai_budget_bot.nlq.executor import execute_intent
 
 from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
 
+from ..analytics.profile import build_user_profile
+from ..storage.profile_store import ProfileStore
+
+profile_store = ProfileStore(settings.cache_dir / "profiles")
 store = ReportStore()
 tx_store = TxStore()
 
@@ -729,7 +733,14 @@ async def main() -> None:
 
                         client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
                         try:
-                            res = client.generate_report(stored.facts, period_label=period_label)
+                            profile = profile_store.load(tg_id) or {}
+
+                            facts_with_profile = {
+                                "period_facts": stored.facts,
+                                "user_profile": profile,
+                            }
+
+                            res = client.generate_report(facts_with_profile, period_label=period_label)
                         finally:
                             client.close()
 
@@ -803,6 +814,13 @@ async def _compute_and_cache_reports_for_user(tg_id: int, account_ids: list[str]
     facts = compute_facts(rows)
     store.save(tg_id, "today", facts)
 
+    now_ts = int(time.time())
+    profile_from = now_ts - 90 * 24 * 60 * 60
+
+    profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
+    profile = build_user_profile(profile_records)
+    profile_store.save(tg_id, profile)
+
     for period, days_back in (("week", 7), ("month", 30)):
         now_ts = int(time.time())
         ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
@@ -812,6 +830,7 @@ async def _compute_and_cache_reports_for_user(tg_id: int, account_ids: list[str]
         report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
         current_facts = report["current"]
+
         current_facts["comparison"] = {
             "prev_period": {
                 "dt_from": report["period"]["previous"]["start_iso_utc"],
