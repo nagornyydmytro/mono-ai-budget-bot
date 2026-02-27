@@ -6,7 +6,7 @@ from typing import Any
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
-
+from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
@@ -21,7 +21,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         days = 30
     days = max(1, min(days, 31))
 
-    merchant_filter = (intent_payload.get("merchant_contains") or "").strip().lower()
+    merchant_filter = resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
 
     user_store = UserStore()
     cfg = user_store.load(telegram_user_id)
