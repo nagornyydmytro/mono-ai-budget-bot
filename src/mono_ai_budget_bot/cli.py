@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import argparse
+import asyncio
 import logging
 
 from . import __version__
@@ -13,311 +16,88 @@ def mask(value: str | None, show: int = 4) -> str:
         return "*" * len(value)
     return value[:show] + "*" * (len(value) - show)
 
-def main() -> int:
-    parser = argparse.ArgumentParser(prog="mono-ai-budget-bot")
-    parser.add_argument("--version", action="store_true", help="Print version and exit")
-    parser.add_argument(
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="monobot", description="Mono AI Budget Bot CLI")
+    p.add_argument("--version", action="store_true", help="Print version and exit")
+
+    p.add_argument(
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "mono-client-info", "mono-statement", "range", "analytics", "refresh-facts", "show-facts","bot"],
+        choices=["health", "status-env", "range", "bot"],
         help="Command to run",
     )
-
-    parser.add_argument(
+    p.add_argument(
         "--period",
         choices=["today", "week", "month"],
         default="today",
-        help="Calendar period in Kyiv timezone (used with range / mono-statement). Default: today",
+        help="Calendar period in Kyiv timezone (used with range)",
     )
-    parser.add_argument(
-        "--account",
-        type=str,
-        default=None,
-        help="Monobank account id to fetch statement for (used with mono-statement). "
-        "If omitted, the first account from client-info will be used.",
-    )
+    return p
 
+
+def cmd_health() -> int:
+    print("ok")
+    return 0
+
+
+def cmd_status_env() -> int:
+    settings = load_settings()
+    setup_logging(settings.log_level)
+    logging.getLogger(__name__).info("Loaded settings")
+
+    print("TELEGRAM_BOT_TOKEN =", mask(settings.telegram_bot_token))
+    print("MASTER_KEY =", mask(settings.master_key))
+    print("CACHE_DIR =", str(settings.cache_dir))
+    print("OPENAI_API_KEY =", mask(settings.openai_api_key))
+    print("OPENAI_MODEL =", settings.openai_model)
+    print("LOG_LEVEL =", settings.log_level)
+    print("MONO_TOKEN =", mask(settings.mono_token), "(optional debug)")
+    return 0
+
+
+def cmd_range(period: str) -> int:
+    from .core.time_ranges import range_month, range_today, range_week
+
+    if period == "today":
+        dr = range_today()
+    elif period == "week":
+        dr = range_week()
+    else:
+        dr = range_month()
+
+    date_from, date_to = dr.to_unix()
+    print("period =", period)
+    print("dt_from =", dr.dt_from.isoformat())
+    print("dt_to =", dr.dt_to.isoformat())
+    print("unix_from =", date_from)
+    print("unix_to =", date_to)
+    return 0
+
+
+def cmd_bot() -> int:
+    from .bot.app import main as bot_main
+
+    asyncio.run(bot_main())
+    return 0
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.version:
         print(__version__)
         return 0
 
-    settings = load_settings()
-    setup_logging(settings.log_level)
-
-    logger = logging.getLogger(__name__)
-
     if args.command == "health":
-        logger.info("Application started successfully.")
-        print("ok")
-        return 0
-
+        return cmd_health()
     if args.command == "status-env":
-        print("TELEGRAM_BOT_TOKEN =", mask(settings.telegram_bot_token))
-        print("MONO_TOKEN =", mask(settings.mono_token))
-        print("OPENAI_API_KEY =", mask(settings.openai_api_key))
-        print("OPENAI_MODEL =", settings.openai_model)
-        print("LOG_LEVEL =", settings.log_level)
-        return 0
-
+        return cmd_status_env()
     if args.command == "range":
-        from .core.time_ranges import range_month, range_today, range_week
-
-        if args.period == "today":
-            dr = range_today()
-        elif args.period == "week":
-            dr = range_week()
-        else:
-            dr = range_month()
-
-        date_from, date_to = dr.to_unix()
-        print("period =", args.period)
-        print("dt_from =", dr.dt_from.isoformat())
-        print("dt_to   =", dr.dt_to.isoformat())
-        print("unix_from =", date_from)
-        print("unix_to   =", date_to)
-        return 0
-
-    if args.command == "mono-client-info":
-        from .monobank import MonobankClient
-
-        mb = MonobankClient(token=settings.mono_token)
-        try:
-            info = mb.client_info()
-        finally:
-            mb.close()
-
-        accounts_count = len(info.accounts)
-        print("client_name =", info.name)
-        print("accounts_count =", accounts_count)
-
-        for acc in info.accounts[:5]:
-            masked = acc.maskedPan[:1] if acc.maskedPan else []
-            print(
-                "account:",
-                acc.id,
-                "currencyCode=",
-                acc.currencyCode,
-                "balance=",
-                acc.balance,
-                "maskedPan=",
-                masked,
-            )
-
-        if accounts_count > 5:
-            print(f"... and {accounts_count - 5} more accounts")
-        return 0
-
-    if args.command == "mono-statement":
-        from .core.time_ranges import range_month, range_today, range_week
-        from .monobank import MonobankClient
-
-        if args.period == "today":
-            dr = range_today()
-        elif args.period == "week":
-            dr = range_week()
-        else:
-            dr = range_month()
-
-        date_from, date_to = dr.to_unix()
-
-        mb = MonobankClient(token=settings.mono_token)
-        try:
-            info = mb.client_info()
-            account_id = args.account or (info.accounts[0].id if info.accounts else None)
-            if not account_id:
-                raise RuntimeError("No accounts returned by Monobank client-info.")
-
-            items = mb.statement(account=account_id, date_from=date_from, date_to=date_to)
-        finally:
-            mb.close()
-
-        print("period =", args.period)
-        print("account_id =", account_id)
-        print("transactions_count =", len(items))
-
-        for it in items[:10]:
-            desc = (it.description or "").replace("\n", " ").strip()
-            if len(desc) > 80:
-                desc = desc[:77] + "..."
-            print("tx:", it.time, "amount=", it.amount, "mcc=", it.mcc, "desc=", desc)
-
-        if len(items) > 10:
-            print(f"... and {len(items) - 10} more transactions")
-        return 0
-
-    if args.command == "analytics":
-        from .core.time_ranges import range_month, range_today, range_week, previous_period
-        from .monobank import MonobankClient
-        from .analytics.from_monobank import rows_from_statement
-        from .analytics.compute import compute_facts
-        from .analytics.compare import compare_totals, compare_categories
-
-        # pick current period range
-        if args.period == "today":
-            current_dr = range_today()
-            duration_days = 1
-        elif args.period == "week":
-            current_dr = range_week()
-            duration_days = 7
-        else:
-            current_dr = range_month()
-            duration_days = 30
-
-        current_from, current_to = current_dr.to_unix()
-
-        mb = MonobankClient(token=settings.mono_token)
-        try:
-            info = mb.client_info()
-
-            # accounts to process
-            if args.account:
-                account_ids = [args.account]
-            else:
-                account_ids = [a.id for a in info.accounts]
-
-            if not account_ids:
-                raise RuntimeError("No accounts returned by Monobank client-info.")
-
-            # current rows (merged across accounts)
-            rows = []
-            for aid in account_ids:
-                items = mb.statement(account=aid, date_from=current_from, date_to=current_to)
-                rows.extend(rows_from_statement(aid, items))
-            current_facts = compute_facts(rows)
-
-            # add comparison for week/month
-            if args.period in ("week", "month"):
-                prev_dr = previous_period(current_dr, days=duration_days)
-                prev_from, prev_to = prev_dr.to_unix()
-
-                prev_rows = []
-                for aid in account_ids:
-                    prev_items = mb.statement(account=aid, date_from=prev_from, date_to=prev_to)
-                    prev_rows.extend(rows_from_statement(aid, prev_items))
-                prev_facts = compute_facts(prev_rows)
-
-                current_facts["comparison"] = {
-                    "prev_period": {
-                        "dt_from": prev_dr.dt_from.isoformat(),
-                        "dt_to": prev_dr.dt_to.isoformat(),
-                        "totals": prev_facts["totals"],
-                        "categories_real_spend": prev_facts.get("categories_real_spend", {}),
-                    },
-                    "totals": compare_totals(current_facts, prev_facts),
-                    "categories": compare_categories(
-                        current_facts.get("categories_real_spend", {}),
-                        prev_facts.get("categories_real_spend", {}),
-                    ),
-                }
-
-        finally:
-            mb.close()
-
-        print(f"period = {args.period}")
-        print(f"accounts = {len(account_ids)}")
-        print(current_facts)
-        return 0
-
-    if args.command == "refresh-facts":
-        from .core.time_ranges import range_month, range_today, range_week, previous_period
-        from .monobank import MonobankClient
-        from .analytics.from_monobank import rows_from_statement
-        from .analytics.compute import compute_facts
-        from .analytics.compare import compare_totals, compare_categories
-        from .storage.report_store import ReportStore
-
-        # pick current period range
-        if args.period == "today":
-            current_dr = range_today()
-            duration_days = 1
-        elif args.period == "week":
-            current_dr = range_week()
-            duration_days = 7
-        else:
-            current_dr = range_month()
-            duration_days = 30
-
-        current_from, current_to = current_dr.to_unix()
-
-        mb = MonobankClient(token=settings.mono_token)
-        try:
-            info = mb.client_info()
-
-            # accounts to process (default: all)
-            if args.account:
-                account_ids = [args.account]
-            else:
-                account_ids = [a.id for a in info.accounts]
-
-            if not account_ids:
-                raise RuntimeError("No accounts returned by Monobank client-info.")
-
-            # current rows merged across accounts
-            rows = []
-            for aid in account_ids:
-                items = mb.statement(account=aid, date_from=current_from, date_to=current_to)
-                rows.extend(rows_from_statement(aid, items))
-            current_facts = compute_facts(rows)
-
-            # comparison for week/month
-            if args.period in ("week", "month"):
-                prev_dr = previous_period(current_dr, days=duration_days)
-                prev_from, prev_to = prev_dr.to_unix()
-
-                prev_rows = []
-                for aid in account_ids:
-                    prev_items = mb.statement(account=aid, date_from=prev_from, date_to=prev_to)
-                    prev_rows.extend(rows_from_statement(aid, prev_items))
-                prev_facts = compute_facts(prev_rows)
-
-                current_facts["comparison"] = {
-                    "prev_period": {
-                        "dt_from": prev_dr.dt_from.isoformat(),
-                        "dt_to": prev_dr.dt_to.isoformat(),
-                        "totals": prev_facts["totals"],
-                        "categories_real_spend": prev_facts.get("categories_real_spend", {}),
-                    },
-                    "totals": compare_totals(current_facts, prev_facts),
-                    "categories": compare_categories(
-                        current_facts.get("categories_real_spend", {}),
-                        prev_facts.get("categories_real_spend", {}),
-                    ),
-                }
-
-        finally:
-            mb.close()
-
-        store = ReportStore()
-        saved_path = store.save(args.period, current_facts)
-        print(f"saved = {saved_path.as_posix()}")
-        print(f"period = {args.period}")
-        print(f"accounts = {len(account_ids)}")
-        return 0
-
-    if args.command == "show-facts":
-        from datetime import datetime
-        from .storage.report_store import ReportStore
-
-        store = ReportStore()
-        stored = store.load(cfg.telegram_user_id, args.period)
-        if stored is None:
-            print(f"no cached facts for period '{args.period}'. Run: refresh-facts --period {args.period}")
-            return 1
-
-        ts = datetime.fromtimestamp(stored.generated_at).isoformat(timespec="seconds")
-        print(f"period = {stored.period}")
-        print(f"generated_at = {ts}")
-        print(stored.facts)
-        return 0
-
+        return cmd_range(args.period)
     if args.command == "bot":
-        from .bot.app import main as bot_main
-        import asyncio
-
-        asyncio.run(bot_main())
-        return 0
+        return cmd_bot()
 
     return 1
