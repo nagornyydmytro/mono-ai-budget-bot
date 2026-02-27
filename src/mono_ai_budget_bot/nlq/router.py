@@ -23,7 +23,6 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
 
     t = text.lower()
 
-    # intent
     count_markers = ["транзакц", "операц", "покуп", "скільки було витрат", "кількість витрат", "скільки витрат було"]
     if any(m in t for m in count_markers):
         intent = "spend_count"
@@ -32,7 +31,6 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
     else:
         intent = "unsupported"
 
-    # days
     days = None
     m = _DAYS_RE.search(t)
     if m:
@@ -51,8 +49,6 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
     if days is not None:
         days = max(1, min(days, 31))
 
-    # merchant extraction (very simple):
-    # "на Макдональдс за 15 днів" -> "макдональдс"
     merchant = None
     m2 = re.search(r"\bна\s+(.+?)(?:\s+за\s+|\s+за\s+останні\s+|$)", t)
     if m2:
