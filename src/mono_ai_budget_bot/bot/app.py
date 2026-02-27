@@ -15,6 +15,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
 from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
+from mono_ai_budget_bot.analytics.trends import compute_trends
+from mono_ai_budget_bot.analytics.anomalies import detect_anomalies
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq.executor import execute_intent
@@ -27,6 +29,7 @@ from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..storage.profile_store import ProfileStore
 from ..storage.user_store import UserConfig, UserStore
+
 
 store = ReportStore()
 tx_store = TxStore()
@@ -169,6 +172,45 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
             lines.append(f"{i}. {m}: {md_escape(_fmt_money(amt))}")
         lines.append("")
 
+    trends = facts.get("trends") or {}
+    if isinstance(trends, dict):
+        growing = trends.get("growing") or []
+        declining = trends.get("declining") or []
+        if growing or declining:
+            lines.append("*Тренди (7 днів vs попередні 7):*")
+            for x in (growing[:3] if isinstance(growing, list) else []):
+                lab = md_escape(str(x.get("label", "—")))
+                dlt = float(x.get("delta_uah", 0.0))
+                pct = x.get("pct")
+                sign = "+" if dlt >= 0 else ""
+                pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
+                lines.append(f"📈 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+            for x in (declining[:3] if isinstance(declining, list) else []):
+                lab = md_escape(str(x.get("label", "—")))
+                dlt = float(x.get("delta_uah", 0.0))
+                pct = x.get("pct")
+                sign = "+" if dlt >= 0 else ""
+                pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
+                lines.append(f"📉 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+            lines.append("")
+
+    anomalies = facts.get("anomalies") or []
+    if isinstance(anomalies, list) and anomalies:
+        lines.append("*Аномалії (остання доба):*")
+        for x in anomalies[:5]:
+            lab = md_escape(str(x.get("label", "—")))
+            last_uah = float(x.get("last_day_uah", 0.0))
+            base_uah = float(x.get("baseline_median_uah", 0.0))
+            reason = str(x.get("reason", ""))
+            if reason == "first_time_large":
+                why = "вперше великий чек"
+            elif reason == "spike_vs_median":
+                why = "сплеск vs медіана"
+            else:
+                why = reason or "аномалія"
+            lines.append(f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} (база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}")
+        lines.append("")
+
     if isinstance(comparison, dict):
         totals_cmp = comparison.get("totals", {})
         delta = totals_cmp.get("delta", {}) if isinstance(totals_cmp, dict) else {}
@@ -250,6 +292,42 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
 
     current_facts = report["current"]
 
+    t = compute_trends(records, now_ts=now_ts, window_days=7)
+    current_facts["trends"] = {
+        "window_days": t.window_days,
+        "growing": [
+            {
+                "label": x.label,
+                "prev_uah": x.prev_cents / 100.0,
+                "last_uah": x.last_cents / 100.0,
+                "delta_uah": x.delta_cents / 100.0,
+                "pct": x.delta_pct * 100.0,
+            }
+            for x in t.top_growing
+        ],
+        "declining": [
+            {
+                "label": x.label,
+                "prev_uah": x.prev_cents / 100.0,
+                "last_uah": x.last_cents / 100.0,
+                "delta_uah": x.delta_cents / 100.0,
+                "pct": x.delta_pct * 100.0,
+            }
+            for x in t.top_declining
+        ],
+    }
+
+    a = detect_anomalies(records, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
+    current_facts["anomalies"] = [
+        {
+            "label": x.label,
+            "last_day_uah": x.last_day_cents / 100.0,
+            "baseline_median_uah": x.baseline_median_cents / 100.0,
+            "reason": x.reason,
+        }
+        for x in a
+    ]
+
     current_facts["comparison"] = {
         "prev_period": {
             "dt_from": report["period"]["previous"]["start_iso_utc"],
@@ -313,6 +391,43 @@ async def _compute_and_cache_reports_for_user(
         report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
         current_facts = report["current"]
+
+        t = compute_trends(records, now_ts=now_ts, window_days=7)
+        current_facts["trends"] = {
+            "window_days": t.window_days,
+            "growing": [
+                {
+                    "label": x.label,
+                    "prev_uah": x.prev_cents / 100.0,
+                    "last_uah": x.last_cents / 100.0,
+                    "delta_uah": x.delta_cents / 100.0,
+                    "pct": x.delta_pct * 100.0,
+                }
+                for x in t.top_growing
+            ],
+            "declining": [
+                {
+                    "label": x.label,
+                    "prev_uah": x.prev_cents / 100.0,
+                    "last_uah": x.last_cents / 100.0,
+                    "delta_uah": x.delta_cents / 100.0,
+                    "pct": x.delta_pct * 100.0,
+                }
+                for x in t.top_declining
+            ],
+        }
+
+        a = detect_anomalies(records, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
+        current_facts["anomalies"] = [
+            {
+                "label": x.label,
+                "last_day_uah": x.last_day_cents / 100.0,
+                "baseline_median_uah": x.baseline_median_cents / 100.0,
+                "reason": x.reason,
+            }
+            for x in a
+        ]
+
         current_facts["comparison"] = {
             "prev_period": {
                 "dt_from": report["period"]["previous"]["start_iso_utc"],
