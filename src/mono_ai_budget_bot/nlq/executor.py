@@ -5,7 +5,7 @@ from typing import Any
 
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
-
+from mono_ai_budget_bot.analytics.classify import classify_kind
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
@@ -13,17 +13,15 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
 
-    # days: default 30
     days_raw = intent_payload.get("days")
     try:
         days = int(days_raw) if days_raw is not None else 30
     except Exception:
         days = 30
-    days = max(1, min(days, 31))  # безпечно в межах statement window
+    days = max(1, min(days, 31))
 
     merchant_filter = (intent_payload.get("merchant_contains") or "").strip().lower()
 
-    # беремо обрані рахунки/картки користувача
     user_store = UserStore()
     cfg = user_store.load(telegram_user_id)
     if cfg is None or not cfg.mono_token:
@@ -46,14 +44,18 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     filtered = []
     for r in rows:
-        if r.amount >= 0:
+        kind = classify_kind(r.amount, r.mcc, r.description)
+
+        if kind != "spend":
             continue
+
         if merchant_filter and merchant_filter not in (r.description or "").lower():
             continue
+
         filtered.append(r)
 
     if intent == "spend_sum":
-        total_cents = sum(-r.amount for r in filtered)  # amount негативний
+        total_cents = sum(-r.amount for r in filtered)
         return f"За останні {days} днів ти витратив {total_cents/100:.2f} грн."
 
     if intent == "spend_count":

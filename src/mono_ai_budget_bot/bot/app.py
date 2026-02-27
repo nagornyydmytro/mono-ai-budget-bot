@@ -25,7 +25,7 @@ from mono_ai_budget_bot.core.time_ranges import range_today, range_week, range_m
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 
-from mono_ai_budget_bot.llm.nlq_router import parse_finance_intent
+from mono_ai_budget_bot.nlq.router import parse_nlq_intent
 from mono_ai_budget_bot.nlq.executor import execute_intent
 
 from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
@@ -838,7 +838,7 @@ async def main() -> None:
         user_id = message.from_user.id
 
         try:
-            intent = parse_finance_intent(message.text)
+            intent = parse_nlq_intent(message.text)
             answer = execute_intent(user_id, intent)
             await message.answer(answer)
         except Exception:
