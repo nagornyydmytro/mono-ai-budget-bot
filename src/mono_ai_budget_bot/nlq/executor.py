@@ -32,8 +32,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if not account_ids:
         return "Обери картки для аналізу через /accounts."
 
-    ts_to = int(time.time())
-    ts_from = ts_to - days * 24 * 60 * 60
+    ts_to = int(intent_payload.get("end_ts") or time.time())
+    ts_from = intent_payload.get("start_ts")
+    if ts_from is None:
+        ts_from = ts_to - days * 24 * 60 * 60
+    ts_from = int(ts_from)
 
     tx_store = TxStore()
     rows = tx_store.load_range(

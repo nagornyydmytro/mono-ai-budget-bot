@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mono_ai_budget_bot.nlq.periods import parse_period_range
+
 _DAYS_RE = re.compile(r"(\d{1,2})\s*(?:дн|днів|дня|days)\b", re.IGNORECASE)
 
 
@@ -21,6 +23,11 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
         return {"intent": "unsupported", "days": None, "merchant_contains": None}
 
     t = text.lower()
+
+    now_ts = __import__("time").time()
+    pr = parse_period_range(t, int(now_ts))
+    start_ts = pr.start_ts if pr is not None else None
+    end_ts = pr.end_ts if pr is not None else None
 
     count_markers = [
         "транзакц",
@@ -62,4 +69,10 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
         if candidate:
             merchant = candidate
 
-    return {"intent": intent, "days": days, "merchant_contains": merchant}
+    return {
+        "intent": intent,
+        "days": days,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "merchant_contains": merchant,
+    }
