@@ -27,6 +27,8 @@ from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.llm.nlq_router import parse_finance_intent
 from mono_ai_budget_bot.nlq.executor import execute_intent
 
+from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
+
 store = ReportStore()
 tx_store = TxStore()
 
@@ -185,68 +187,60 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
 
     return "\n".join(lines).strip()
 
-
 async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
-    from ..analytics.compare import compare_categories, compare_totals
-    from ..analytics.compute import compute_facts
-    from ..analytics.from_monobank import rows_from_statement
-    from ..core.time_ranges import previous_period, range_month, range_today, range_week
-    from ..monobank import MonobankClient
+    """
+    Ledger-based refresh (no direct Monobank calls).
+    Assumes ledger was synced earlier by sync job / refresh command.
+
+    period: "today" | "week" | "month"
+    """
+    if not cfg.selected_account_ids:
+        # Немає вибраних карток — нема що рахувати
+        return
+
+    account_ids = list(cfg.selected_account_ids)
 
     if period == "today":
-        current_dr = range_today()
-        duration_days = 1
-    elif period == "week":
-        current_dr = range_week()
-        duration_days = 7
+        dr = range_today()
+        ts_from, ts_to = dr.to_unix()
+        records = tx_store.load_range(cfg.telegram_user_id, account_ids, ts_from, ts_to)
+        rows = rows_from_ledger(records)
+        facts = compute_facts(rows)
+        store.save(cfg.telegram_user_id, period, facts)
+        return
+
+    if period == "week":
+        days_back = 7
     else:
-        current_dr = range_month()
-        duration_days = 30
+        # month
+        days_back = 30
 
-    current_from, current_to = current_dr.to_unix()
+    now_ts = int(time.time())
 
-    mb = MonobankClient(token=cfg.mono_token)
-    try:
-        info = mb.client_info()
-        if cfg.selected_account_ids:
-            account_ids = cfg.selected_account_ids
-        else:
-            account_ids = [a.id for a in info.accounts]
+    # Для compare нам треба current + previous, тобто мінімум 2*days_back.
+    # Додаю +1 день запасу щоб не ловити "порожній край" на межах.
+    ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
+    ts_to = now_ts
 
-        rows = []
-        for aid in account_ids:
-            items = mb.statement(account=aid, date_from=current_from, date_to=current_to)
-            rows.extend(rows_from_statement(aid, items))
-        current_facts = compute_facts(rows)
+    records = tx_store.load_range(cfg.telegram_user_id, account_ids, ts_from, ts_to)
 
-        if period in ("week", "month"):
-            prev_dr = previous_period(current_dr, days=duration_days)
-            prev_from, prev_to = prev_dr.to_unix()
+    report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
-            prev_rows = []
-            for aid in account_ids:
-                prev_items = mb.statement(account=aid, date_from=prev_from, date_to=prev_to)
-                prev_rows.extend(rows_from_statement(aid, prev_items))
-            prev_facts = compute_facts(prev_rows)
+    current_facts = report["current"]
 
-            current_facts["comparison"] = {
-                "prev_period": {
-                    "dt_from": prev_dr.dt_from.isoformat(),
-                    "dt_to": prev_dr.dt_to.isoformat(),
-                    "totals": prev_facts["totals"],
-                    "categories_real_spend": prev_facts.get("categories_real_spend", {}),
-                },
-                "totals": compare_totals(current_facts, prev_facts),
-                "categories": compare_categories(
-                    current_facts.get("categories_real_spend", {}),
-                    prev_facts.get("categories_real_spend", {}),
-                ),
-            }
-    finally:
-        mb.close()
+    # Підкладаємо compare у формат, який твій render_report вже очікує
+    current_facts["comparison"] = {
+        "prev_period": {
+            "dt_from": report["period"]["previous"]["start_iso_utc"],
+            "dt_to": report["period"]["previous"]["end_iso_utc"],
+            "totals": report["previous"].get("totals", {}),
+            "categories_real_spend": report["previous"].get("categories_real_spend", {}),
+        },
+        "totals": report["compare"]["totals"],
+        "categories": report["compare"]["categories_real_spend"],
+    }
 
     store.save(cfg.telegram_user_id, period, current_facts)
-
 
 def build_ai_block(summary: str, insights: list[str], next_step: str) -> str:
     lines: list[str] = []
@@ -319,9 +313,6 @@ async def main() -> None:
         sync_user_ledger=sync_user_ledger,
         recompute_reports_for_user=_compute_and_cache_reports_for_user
     )
-
-    from collections import defaultdict
-    user_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
@@ -800,21 +791,34 @@ async def main() -> None:
     await dp.start_polling(bot)
 
 async def _compute_and_cache_reports_for_user(tg_id: int, account_ids: list[str]) -> None:
-    for period in ["today", "week", "month"]:
+    dr = range_today()
+    ts_from, ts_to = dr.to_unix()
+    records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
+    rows = rows_from_ledger(records)
+    facts = compute_facts(rows)
+    store.save(tg_id, "today", facts)
 
-        if period == "today":
-            dr = range_today()
-        elif period == "week":
-            dr = range_week()
-        else:  # month
-            dr = range_month()
-
-        ts_from, ts_to = dr.to_unix()
+    for period, days_back in (("week", 7), ("month", 30)):
+        now_ts = int(time.time())
+        ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
+        ts_to = now_ts
 
         records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
-        rows = rows_from_ledger(records)
-        facts = compute_facts(rows)
-        store.save(tg_id, period, facts)
+        report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
+
+        current_facts = report["current"]
+        current_facts["comparison"] = {
+            "prev_period": {
+                "dt_from": report["period"]["previous"]["start_iso_utc"],
+                "dt_to": report["period"]["previous"]["end_iso_utc"],
+                "totals": report["previous"].get("totals", {}),
+                "categories_real_spend": report["previous"].get("categories_real_spend", {}),
+            },
+            "totals": report["compare"]["totals"],
+            "categories": report["compare"]["categories_real_spend"],
+        }
+
+        store.save(tg_id, period, current_facts)
 
 if __name__ == "__main__":
     asyncio.run(main())

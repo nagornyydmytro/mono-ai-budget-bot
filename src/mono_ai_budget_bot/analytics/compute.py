@@ -63,7 +63,8 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
             transfer_in_total += r.amount
             by_account[r.account_id]["transfer_in"] += r.amount
 
-    real_spend_total = spend_total - transfer_out_total
+    cash_out_total = spend_total + transfer_out_total
+    real_spend_total = spend_total
 
     top_merchants = sorted(merchant_spend.items(), key=lambda x: x[1], reverse=True)[:10]
     top_mcc = sorted(mcc_spend.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -73,7 +74,7 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
         "transactions_count": tx_count,
         "totals": {
             "income_total_uah": minor_to_uah(income_total),
-            "spend_total_uah": minor_to_uah(spend_total),
+            "spend_total_uah": minor_to_uah(cash_out_total),
             "transfer_in_total_uah": minor_to_uah(transfer_in_total),
             "transfer_out_total_uah": minor_to_uah(transfer_out_total),
             "real_spend_total_uah": minor_to_uah(real_spend_total),
