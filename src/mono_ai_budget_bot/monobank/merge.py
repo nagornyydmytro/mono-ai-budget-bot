@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .client import MonobankClient
 from ..monobank.models import MonoAccount, MonoStatementItem
+from .client import MonobankClient
 
 
 @dataclass(frozen=True)

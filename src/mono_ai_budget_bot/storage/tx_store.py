@@ -4,7 +4,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
 from .ledger_meta_store import LedgerMetaStore
+
 
 @dataclass(frozen=True)
 class TxRecord:
@@ -85,7 +87,9 @@ class TxStore:
             return ids
         return ids
 
-    def append_many(self, telegram_user_id: int, account_id: str, items: Iterable[dict[str, Any]]) -> int:
+    def append_many(
+        self, telegram_user_id: int, account_id: str, items: Iterable[dict[str, Any]]
+    ) -> int:
         """
         Append new transactions (dedupe by tx id). Returns count of appended rows.
         """
@@ -142,7 +146,11 @@ class TxStore:
                             amount=int(obj.get("amount", 0)),
                             description=str(obj.get("description", "") or "").strip(),
                             mcc=(int(obj["mcc"]) if obj.get("mcc") is not None else None),
-                            currencyCode=(int(obj["currencyCode"]) if obj.get("currencyCode") is not None else None),
+                            currencyCode=(
+                                int(obj["currencyCode"])
+                                if obj.get("currencyCode") is not None
+                                else None
+                            ),
                         )
                     )
             except Exception:

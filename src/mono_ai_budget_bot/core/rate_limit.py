@@ -40,7 +40,9 @@ class FileRateLimiter:
                 if wait:
                     time.sleep(remaining)
                 else:
-                    raise RuntimeError(f"Rate limit: wait {remaining:.1f}s before calling '{key}' again")
+                    raise RuntimeError(
+                        f"Rate limit: wait {remaining:.1f}s before calling '{key}' again"
+                    )
 
         # record call time as "now" (after potential sleep)
         state[key] = time.time()

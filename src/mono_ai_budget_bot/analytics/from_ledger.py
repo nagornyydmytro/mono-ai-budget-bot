@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from ..storage.tx_store import TxRecord
 from .classify import classify_kind
 from .models import TxRow
-from ..storage.tx_store import TxRecord
 
 
 def rows_from_ledger(records: list[TxRecord]) -> list[TxRow]:

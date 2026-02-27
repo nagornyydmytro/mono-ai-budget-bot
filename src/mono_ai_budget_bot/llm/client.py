@@ -1,5 +1,6 @@
-from openai import OpenAI
 import os
+
+from openai import OpenAI
 
 
 def get_openai_client() -> OpenAI:

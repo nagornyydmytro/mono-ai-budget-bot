@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from .client import MonobankClient
 from .models import MonoStatementItem
 
-
 MAX_RANGE_SECONDS = 31 * 24 * 3600 + 3600  # 31 days + 1 hour
+
 
 def iter_statement_windows(start_ts: int, end_ts: int, max_span_seconds: int = MAX_RANGE_SECONDS):
     """
@@ -31,6 +31,7 @@ def iter_statement_windows(start_ts: int, end_ts: int, max_span_seconds: int = M
             raise RuntimeError(f"Invalid window progression: cur={cur}, nxt={nxt}, end={end_ts}")
         yield cur, nxt
         cur = nxt
+
 
 @dataclass(frozen=True)
 class SyncResult:
@@ -83,4 +84,6 @@ def sync_accounts_ledger(
             normalized = [_normalize_item(acc_id, it) for it in items]
             appended_total += tx_store.append_many(telegram_user_id, acc_id, normalized)
 
-    return SyncResult(accounts=len(account_ids), fetched_requests=fetched_requests, appended=appended_total)
+    return SyncResult(
+        accounts=len(account_ids), fetched_requests=fetched_requests, appended=appended_total
+    )

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from ..monobank.models import MonoStatementItem
 from .classify import classify_kind
 from .models import TxRow
-from ..monobank.models import MonoStatementItem
 
 
 def rows_from_statement(account_id: str, items: list[MonoStatementItem]) -> list[TxRow]:

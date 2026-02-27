@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 _DAYS_RE = re.compile(r"(\d{1,2})\s*(?:дн|днів|дня|days)\b", re.IGNORECASE)
 
 
@@ -23,7 +22,14 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
 
     t = text.lower()
 
-    count_markers = ["транзакц", "операц", "покуп", "скільки було витрат", "кількість витрат", "скільки витрат було"]
+    count_markers = [
+        "транзакц",
+        "операц",
+        "покуп",
+        "скільки було витрат",
+        "кількість витрат",
+        "скільки витрат було",
+    ]
     if any(m in t for m in count_markers):
         intent = "spend_count"
     elif "скільки" in t or "витратив" in t or "витрати" in t or "spent" in t:

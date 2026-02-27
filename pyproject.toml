@@ -2,16 +2,12 @@
 name = "mono-ai-budget-bot"
 version = "0.1.0"
 description = "Telegram bot that analyzes Monobank transactions and generates AI-based spending reports."
-authors = ["Your Name <you@example.com>"]
+authors = ["Your Name"]
 readme = "README.md"
 packages = [{ include = "mono_ai_budget_bot", from = "src" }]
 
 [tool.poetry.scripts]
 monobot = "mono_ai_budget_bot.cli:main"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -29,9 +25,20 @@ openai = "^2.24.0"
 pytest = "^8.0.0"
 ruff = "^0.3.0"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"] # line-length контролимо форматером + line-length=100
+
+[tool.ruff.lint.isort]
+known-first-party = ["mono_ai_budget_bot"]
 
 [build-system]
 requires = ["poetry-core"]

@@ -9,29 +9,24 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from ..config import load_settings
-from ..logging_setup import setup_logging
-from ..storage.user_store import UserStore
-
-from mono_ai_budget_bot.monobank import MonobankClient
-from mono_ai_budget_bot.monobank.sync import sync_accounts_ledger
-from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
 from mono_ai_budget_bot.analytics.compute import compute_facts
-from mono_ai_budget_bot.core.time_ranges import range_today, range_week, range_month
-
+from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
+from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
+from mono_ai_budget_bot.core.time_ranges import range_today
+from mono_ai_budget_bot.monobank import MonobankClient
+from mono_ai_budget_bot.nlq.executor import execute_intent
+from mono_ai_budget_bot.nlq.router import parse_nlq_intent
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 
-from mono_ai_budget_bot.nlq.router import parse_nlq_intent
-from mono_ai_budget_bot.nlq.executor import execute_intent
-
-from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
-
 from ..analytics.profile import build_user_profile
+from ..config import load_settings
+from ..logging_setup import setup_logging
 from ..storage.profile_store import ProfileStore
+from ..storage.user_store import UserConfig, UserStore
 
 store = ReportStore()
 tx_store = TxStore()
@@ -51,6 +46,7 @@ def md_escape(text: str) -> str:
             out.append(ch)
     return "".join(out)
 
+
 def _map_monobank_error(e: Exception) -> str | None:
     """
     Map Monobank client RuntimeError messages to user-friendly text.
@@ -59,10 +55,14 @@ def _map_monobank_error(e: Exception) -> str | None:
     s = str(e)
 
     if "Monobank API error: 401" in s or "Monobank API error: 403" in s:
-        return "❌ Токен Monobank недійсний або прострочений. Зроби /connect і додай актуальний токен."
+        return (
+            "❌ Токен Monobank недійсний або прострочений. Зроби /connect і додай актуальний токен."
+        )
 
     if "Monobank API error: 429" in s:
-        return "⏳ Забагато запитів до Monobank. Я оновлю пізніше — спробуй ще раз через ~1 хвилину."
+        return (
+            "⏳ Забагато запитів до Monobank. Я оновлю пізніше — спробуй ще раз через ~1 хвилину."
+        )
 
     if "Monobank API error:" in s:
         return "⚠️ Monobank тимчасово недоступний або повернув помилку. Спробуй пізніше."
@@ -72,6 +72,7 @@ def _map_monobank_error(e: Exception) -> str | None:
 
 def _map_llm_error(_: Exception) -> str:
     return "🤖 AI зараз недоступний. Надішлю звіт без AI-інсайтів."
+
 
 def _fmt_money(v: float) -> str:
     return f"{v:,.2f} ₴".replace(",", " ")
@@ -101,7 +102,9 @@ def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: l
     users.save(telegram_user_id, mono_token=cfg.mono_token, selected_account_ids=selected)
 
 
-def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, InlineKeyboardBuilder]:
+def render_accounts_screen(
+    accounts: list[dict], selected_ids: set[str]
+) -> tuple[str, InlineKeyboardBuilder]:
     lines: list[str] = []
     lines.append("🧾 *Вибір карток для аналізу*")
     lines.append("")
@@ -209,6 +212,7 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
 
     return "\n".join(lines).strip()
 
+
 async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     """
     Ledger-based refresh (no direct Monobank calls).
@@ -259,6 +263,7 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
 
     store.save(cfg.telegram_user_id, period, current_facts)
 
+
 def build_ai_block(summary: str, changes: list[str], recs: list[str], next_step: str) -> str:
     lines: list[str] = []
     lines.append(f"• {md_escape(summary)}")
@@ -279,6 +284,7 @@ def build_ai_block(summary: str, changes: list[str], recs: list[str], next_step:
     lines.append("*Наступний крок (7 днів):*")
     lines.append(f"• {md_escape(next_step)}")
     return "\n".join(lines)
+
 
 async def _compute_and_cache_reports_for_user(
     tg_id: int,
@@ -305,7 +311,7 @@ async def _compute_and_cache_reports_for_user(
 
         records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
         report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
- 
+
         current_facts = report["current"]
         current_facts["comparison"] = {
             "prev_period": {
@@ -319,6 +325,7 @@ async def _compute_and_cache_reports_for_user(
         }
 
         store.save(tg_id, period, current_facts)
+
 
 async def main() -> None:
     settings = load_settings()
@@ -336,12 +343,13 @@ async def main() -> None:
     dp = Dispatcher()
 
     from collections import defaultdict
+
     user_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-    
+
     users = UserStore()
 
     logger = logging.getLogger("mono_ai_budget_bot.bot")
-    
+
     async def sync_user_ledger(tg_id: int, cfg: UserConfig, *, days_back: int) -> object:
         from ..monobank.sync import sync_accounts_ledger
 
@@ -364,8 +372,9 @@ async def main() -> None:
         return await asyncio.to_thread(_run)
 
     from .scheduler import create_scheduler, start_jobs
+
     scheduler = create_scheduler(logger)
-    loop=asyncio.get_running_loop()
+    loop = asyncio.get_running_loop()
 
     start_jobs(
         scheduler,
@@ -376,7 +385,9 @@ async def main() -> None:
         render_report_text=render_report,
         logger=logger,
         sync_user_ledger=sync_user_ledger,
-        recompute_reports_for_user=lambda tg_id, account_ids: _compute_and_cache_reports_for_user(tg_id, account_ids, profile_store)
+        recompute_reports_for_user=lambda tg_id, account_ids: _compute_and_cache_reports_for_user(
+            tg_id, account_ids, profile_store
+        ),
     )
 
     @dp.message(Command("start"))
@@ -475,7 +486,7 @@ async def main() -> None:
         lines.append("")
         lines.append("*Статус кешу:*")
         for p in ("today", "week", "month"):
-            stored = store.load(cfg.telegram_user_id,p)
+            stored = store.load(cfg.telegram_user_id, p)
             if stored is None:
                 lines.append(f"• {p}: немає (зроби /refresh {p})")
             else:
@@ -503,12 +514,17 @@ async def main() -> None:
             info = mb.client_info()
         except Exception as e:
             msg = _map_monobank_error(e)
-            await message.answer(msg or f"❌ Помилка Monobank: {md_escape(str(e))}", parse_mode=None)
+            await message.answer(
+                msg or f"❌ Помилка Monobank: {md_escape(str(e))}", parse_mode=None
+            )
             return
         finally:
             mb.close()
 
-        accounts = [{"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan} for a in info.accounts]
+        accounts = [
+            {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
+            for a in info.accounts
+        ]
         selected_ids = set(cfg.selected_account_ids or [])
         text, kb = render_accounts_screen(accounts, selected_ids)
         await message.answer(text, reply_markup=kb.as_markup())
@@ -547,7 +563,10 @@ async def main() -> None:
         finally:
             mb.close()
 
-        accounts = [{"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan} for a in info.accounts]
+        accounts = [
+            {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
+            for a in info.accounts
+        ]
         text, kb = render_accounts_screen(accounts, set(selected))
 
         if query.message:
@@ -576,7 +595,10 @@ async def main() -> None:
         finally:
             mb.close()
 
-        accounts = [{"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan} for a in info.accounts]
+        accounts = [
+            {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
+            for a in info.accounts
+        ]
         text, kb = render_accounts_screen(accounts, set())
 
         if query.message:
@@ -619,7 +641,7 @@ async def main() -> None:
         if cfg is None or not cfg.mono_token:
             await query.answer("Спочатку /connect", show_alert=True)
             return
- 
+
         account_ids = list(cfg.selected_account_ids or [])
         if not account_ids:
             await query.answer("Спочатку вибери картки: /accounts", show_alert=True)
@@ -730,8 +752,7 @@ async def main() -> None:
             days_back = 90
 
         await message.answer(
-            f"⏳ Запустив оновлення за ~{days_back} днів у фоні…\n"
-            "Я напишу, коли буде готово ✅",
+            f"⏳ Запустив оновлення за ~{days_back} днів у фоні…\n" "Я напишу, коли буде готово ✅",
             parse_mode=None,
         )
 
@@ -772,8 +793,10 @@ async def main() -> None:
                     )
             except Exception as e:
                 msg = _map_monobank_error(e)
-                await bot.send_message(chat_id, f"❌ Помилка оновлення: {md_escape(msg or str(e))}", parse_mode=None)
-        
+                await bot.send_message(
+                    chat_id, f"❌ Помилка оновлення: {md_escape(msg or str(e))}", parse_mode=None
+                )
+
         asyncio.create_task(job())
 
     async def _send_period_report(message: Message, period: str) -> None:
@@ -799,15 +822,19 @@ async def main() -> None:
             if not settings.openai_api_key:
                 await message.answer("OPENAI_API_KEY не задано в .env — AI недоступний.")
             else:
-                period_label = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}.get(
-                    period, period
-                )
+                period_label = {
+                    "today": "Сьогодні",
+                    "week": "Останні 7 днів",
+                    "month": "Останні 30 днів",
+                }.get(period, period)
                 if settings.openai_api_key:
                     await message.answer("🤖 Генерую AI інсайти…")
                     try:
                         from ..llm.openai_client import OpenAIClient
 
-                        client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+                        client = OpenAIClient(
+                            api_key=settings.openai_api_key, model=settings.openai_model
+                        )
                         try:
                             profile = profile_store.load(tg_id) or {}
 
@@ -816,7 +843,9 @@ async def main() -> None:
                                 "user_profile": profile,
                             }
 
-                            res = client.generate_report(facts_with_profile, period_label=period_label)
+                            res = client.generate_report(
+                                facts_with_profile, period_label=period_label
+                            )
                         finally:
                             client.close()
 
@@ -882,6 +911,7 @@ async def main() -> None:
 
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

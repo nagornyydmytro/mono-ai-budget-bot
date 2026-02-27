@@ -3,9 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
-from mono_ai_budget_bot.analytics.classify import classify_kind
+
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()

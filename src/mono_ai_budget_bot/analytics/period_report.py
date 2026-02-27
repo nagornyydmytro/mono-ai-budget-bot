@@ -4,11 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ..storage.tx_store import TxRecord
 from .compare import compare_categories, compare_totals
 from .compute import compute_facts
 from .from_ledger import rows_from_ledger
-from ..storage.tx_store import TxRecord
-
 
 SECONDS_IN_DAY = 24 * 60 * 60
 
@@ -16,7 +15,7 @@ SECONDS_IN_DAY = 24 * 60 * 60
 @dataclass(frozen=True)
 class PeriodWindow:
     start_ts: int  # inclusive
-    end_ts: int    # exclusive
+    end_ts: int  # exclusive
 
     @property
     def days(self) -> int:
@@ -32,7 +31,9 @@ def _filter_records(records: list[TxRecord], window: PeriodWindow) -> list[TxRec
     return [r for r in records if window.start_ts <= int(r.time) < window.end_ts]
 
 
-def build_period_windows(days_back: int, now_ts: int | None = None) -> tuple[PeriodWindow, PeriodWindow]:
+def build_period_windows(
+    days_back: int, now_ts: int | None = None
+) -> tuple[PeriodWindow, PeriodWindow]:
     """
     Returns (current_window, previous_window) of equal length.
 
@@ -51,7 +52,9 @@ def build_period_windows(days_back: int, now_ts: int | None = None) -> tuple[Per
     prev_end = start_ts
     prev_start = prev_end - (days_back * SECONDS_IN_DAY)
 
-    return PeriodWindow(start_ts=start_ts, end_ts=end_ts), PeriodWindow(start_ts=prev_start, end_ts=prev_end)
+    return PeriodWindow(start_ts=start_ts, end_ts=end_ts), PeriodWindow(
+        start_ts=prev_start, end_ts=prev_end
+    )
 
 
 def build_period_report_from_ledger(

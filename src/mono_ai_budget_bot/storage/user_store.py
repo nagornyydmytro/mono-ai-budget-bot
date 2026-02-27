@@ -5,7 +5,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
-from mono_ai_budget_bot.security.crypto import encrypt_token, decrypt_token
+
+from mono_ai_budget_bot.security.crypto import decrypt_token, encrypt_token
+
 
 @dataclass(frozen=True)
 class UserConfig:
@@ -15,6 +17,7 @@ class UserConfig:
     chat_id: int | None
     autojobs_enabled: bool
     updated_at: float  # unix timestamp
+
 
 class UserStore:
     """

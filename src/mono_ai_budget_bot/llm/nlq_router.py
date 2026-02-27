@@ -5,7 +5,6 @@ from typing import Any
 
 from mono_ai_budget_bot.llm.client import get_openai_client
 
-
 SYSTEM_PROMPT = """
 You are a STRICT finance intent parser for a personal spending bot.
 

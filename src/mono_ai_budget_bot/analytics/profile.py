@@ -26,7 +26,12 @@ def build_user_profile(records: list) -> dict[str, Any]:
 
     real_spend_total_uah = float(totals.get("real_spend_total_uah", 0.0) or 0.0)
 
-    spend_tx_count = int(facts.get("real_spend_tx_count") or facts.get("spend_tx_count") or totals.get("spend_tx_count") or 0)
+    spend_tx_count = int(
+        facts.get("real_spend_tx_count")
+        or facts.get("spend_tx_count")
+        or totals.get("spend_tx_count")
+        or 0
+    )
     if spend_tx_count <= 0:
         spend_tx_count = max(0, int(facts.get("tx_count") or 0))
 

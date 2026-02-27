@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.compare import compare_totals, pct_change
+from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.models import TxRow
-from mono_ai_budget_bot.core.time_ranges import range_week, range_last_days
+from mono_ai_budget_bot.core.time_ranges import range_last_days, range_week
 
 
 def test_range_week_is_7_days_and_valid():
@@ -22,7 +22,9 @@ def test_range_last_days_basic():
 
 def test_compute_facts_totals_and_categories():
     rows = [
-        TxRow(account_id="acc1", ts=1, amount=-10000, description="McDonalds", mcc=5814, kind="spend"),
+        TxRow(
+            account_id="acc1", ts=1, amount=-10000, description="McDonalds", mcc=5814, kind="spend"
+        ),
         TxRow(account_id="acc1", ts=2, amount=-5000, description="Cafe", mcc=5812, kind="spend"),
         TxRow(account_id="acc2", ts=3, amount=-20000, description="Uber", mcc=4121, kind="spend"),
         TxRow(account_id="acc1", ts=4, amount=30000, description="Salary", mcc=None, kind="income"),

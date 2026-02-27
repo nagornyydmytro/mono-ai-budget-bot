@@ -16,6 +16,7 @@ class MonoClientInfo(BaseModel):
     name: str | None = None
     accounts: list[MonoAccount] = Field(default_factory=list)
 
+
 class MonoStatementItem(BaseModel):
     id: str
     time: int

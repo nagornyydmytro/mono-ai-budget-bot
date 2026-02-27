@@ -9,6 +9,7 @@ try:
 except ZoneInfoNotFoundError:
     KYIV_TZ = ZoneInfo("UTC")
 
+
 @dataclass(frozen=True)
 class DateRange:
     dt_from: datetime
@@ -44,6 +45,7 @@ def range_week() -> DateRange:
 
 def range_month() -> DateRange:
     return range_last_days(30)
+
 
 def previous_period(dr: DateRange, days: int) -> DateRange:
     """

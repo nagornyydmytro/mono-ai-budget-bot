@@ -1,10 +1,14 @@
+import hashlib
+import random
+import time
 from pathlib import Path
 
-import httpx, random, time, hashlib
+import httpx
 
 from ..core.cache import JsonDiskCache
 from ..core.rate_limit import FileRateLimiter
 from .models import MonoClientInfo, MonoStatementItem
+
 
 class MonobankClient:
     CLIENT_INFO_MIN_INTERVAL = 60
@@ -90,7 +94,9 @@ class MonobankClient:
             return MonoClientInfo.model_validate(cached)
 
         # rate limit protection
-        self._limiter.throttle(f"mono:client-info:{self._token_hash}", self.CLIENT_INFO_MIN_INTERVAL, wait=True)
+        self._limiter.throttle(
+            f"mono:client-info:{self._token_hash}", self.CLIENT_INFO_MIN_INTERVAL, wait=True
+        )
 
         data = self._request_json("/personal/client-info")
         self._cache.set(cache_key, data, ttl_seconds=self.CLIENT_INFO_TTL)
