@@ -39,6 +39,7 @@ class DummyTxStore:
 def test_memory_file_created(tmp_path, monkeypatch):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
     m = ms.load_memory(1)
+    assert m["merchant_aliases"].get("мак") == "mcdonalds"
     assert "merchant_aliases" in m
     assert (ms.BASE_DIR / "1.json").exists()
 
@@ -56,3 +57,15 @@ def test_executor_merchant_alias_resolution(tmp_path, monkeypatch):
 
     s = ex.execute_intent(1, {"intent": "spend_sum", "days": 30, "merchant_contains": "мак"})
     assert "150.00" in s
+
+def test_auto_cache_alias(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    m = ms.load_memory(1)
+    ms.save_memory(1, m)
+
+    r = ms.resolve_merchant_alias(1, "макдональдс")
+    assert r == "mcdonalds"
+
+    m2 = ms.load_memory(1)
+    assert m2["merchant_aliases"].get("макдональдс") == "mcdonalds"

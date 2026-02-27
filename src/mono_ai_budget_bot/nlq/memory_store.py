@@ -6,11 +6,18 @@ from typing import Any
 
 
 BASE_DIR = Path(".cache") / "memory"
-
+DEFAULT_MERCHANT_ALIASES = {
+    "мак": "mcdonalds",
+    "макдак": "mcdonalds",
+    "макдональдс": "mcdonalds",
+    "макд": "mcdonalds",
+    "mcd": "mcdonalds",
+    "mc": "mcdonalds",
+}
 
 def _default_memory() -> dict[str, Any]:
     return {
-        "merchant_aliases": {},
+        "merchant_aliases": dict(DEFAULT_MERCHANT_ALIASES),
         "recipient_aliases": {},
         "pending_intent": None,
     }
@@ -53,13 +60,30 @@ def save_memory(telegram_user_id: int, data: dict[str, Any]) -> None:
 def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None) -> str | None:
     if not merchant_contains:
         return None
+
+    raw = merchant_contains.strip().lower()
+    if not raw:
+        return None
+
     mem = load_memory(telegram_user_id)
     aliases = mem.get("merchant_aliases") or {}
     if not isinstance(aliases, dict):
-        return merchant_contains
+        return raw
 
-    key = merchant_contains.strip().lower()
-    v = aliases.get(key)
-    if isinstance(v, str) and v.strip():
-        return v.strip().lower()
-    return key
+    if raw in aliases and isinstance(aliases[raw], str) and aliases[raw].strip():
+        return aliases[raw].strip().lower()
+
+    for k, v in aliases.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            continue
+        kk = k.strip().lower()
+        vv = v.strip().lower()
+        if not kk or not vv:
+            continue
+        if raw == kk or raw in kk or kk in raw:
+            aliases[raw] = vv
+            mem["merchant_aliases"] = aliases
+            save_memory(telegram_user_id, mem)
+            return vv
+
+    return raw
