@@ -32,8 +32,6 @@ from mono_ai_budget_bot.analytics.period_report import build_period_report_from_
 store = ReportStore()
 tx_store = TxStore()
 
-# --- Markdown (NOT MarkdownV2) escaping for dynamic text ---
-# In Telegram Markdown, these chars can break formatting if they appear in user/merchant/category strings.
 _MD_SPECIAL = "\\`*_[]()"
 
 
@@ -87,7 +85,6 @@ def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tupl
 
     kb = InlineKeyboardBuilder()
 
-    # кнопки не парсяться як Markdown, але текст кнопок ми все одно робимо простим і без форматування
     for acc in accounts:
         acc_id = acc["id"]
         masked = " / ".join(acc.get("maskedPan") or []) or "без картки"
@@ -195,7 +192,6 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     period: "today" | "week" | "month"
     """
     if not cfg.selected_account_ids:
-        # Немає вибраних карток — нема що рахувати
         return
 
     account_ids = list(cfg.selected_account_ids)
@@ -212,13 +208,10 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     if period == "week":
         days_back = 7
     else:
-        # month
         days_back = 30
 
     now_ts = int(time.time())
 
-    # Для compare нам треба current + previous, тобто мінімум 2*days_back.
-    # Додаю +1 день запасу щоб не ловити "порожній край" на межах.
     ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
     ts_to = now_ts
 
@@ -228,7 +221,6 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
 
     current_facts = report["current"]
 
-    # Підкладаємо compare у формат, який твій render_report вже очікує
     current_facts["comparison"] = {
         "prev_period": {
             "dt_from": report["period"]["previous"]["start_iso_utc"],
@@ -242,13 +234,22 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
 
     store.save(cfg.telegram_user_id, period, current_facts)
 
-def build_ai_block(summary: str, insights: list[str], next_step: str) -> str:
+def build_ai_block(summary: str, changes: list[str], recs: list[str], next_step: str) -> str:
     lines: list[str] = []
     lines.append(f"• {md_escape(summary)}")
-    lines.append("")
-    lines.append("*Рекомендації:*")
-    for s in insights[:7]:
-        lines.append(f"• {md_escape(s)}")
+
+    if changes:
+        lines.append("")
+        lines.append("*Що змінилось:*")
+        for s in changes[:5]:
+            lines.append(f"• {md_escape(s)}")
+
+    if recs:
+        lines.append("")
+        lines.append("*Рекомендації:*")
+        for s in recs[:7]:
+            lines.append(f"• {md_escape(s)}")
+
     lines.append("")
     lines.append("*Наступний крок (7 днів):*")
     lines.append(f"• {md_escape(next_step)}")
@@ -261,7 +262,6 @@ async def main() -> None:
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    # Telegram "Markdown" (not V2) so *bold* works and parentheses/arrows won't explode parsing.
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode="Markdown"),
@@ -277,7 +277,6 @@ async def main() -> None:
     logger = logging.getLogger("mono_ai_budget_bot.bot")
     
     async def sync_user_ledger(tg_id: int, cfg: UserConfig, *, days_back: int) -> object:
-        from ..monobank import MonobankClient
         from ..monobank.sync import sync_accounts_ledger
 
         account_ids = list(cfg.selected_account_ids or [])
@@ -403,7 +402,6 @@ async def main() -> None:
             lines.append("🔐 Monobank: не підключено")
             lines.append("Підключи: /connect <monobank token>")
         else:
-            # token mask may contain '*' which is markdown special, escape it
             masked = md_escape(_mask_secret(cfg.mono_token))
             lines.append(f"🔐 Monobank: підключено ({masked})")
             lines.append(f"📌 Вибрані картки: {len(cfg.selected_account_ids)}")
@@ -724,19 +722,26 @@ async def main() -> None:
                 period_label = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}.get(
                     period, period
                 )
-                await message.answer("🤖 Генерую AI інсайти…")
-                try:
-                    from ..llm.openai_client import OpenAIClient
-
-                    client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+                if settings.openai_api_key:
+                    await message.answer("🤖 Генерую AI інсайти…")
                     try:
-                        res = client.generate_report(stored.facts, period_label=period_label)
-                    finally:
-                        client.close()
+                        from ..llm.openai_client import OpenAIClient
 
-                    ai_block = build_ai_block(res.summary, res.insights, res.next_step)
-                except Exception as e:
-                    await message.answer(f"❌ AI помилка: {md_escape(str(e))}")
+                        client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+                        try:
+                            res = client.generate_report(stored.facts, period_label=period_label)
+                        finally:
+                            client.close()
+
+                        ai_block = build_ai_block(
+                            res.report.summary,
+                            res.report.changes,
+                            res.report.recs,
+                            res.report.next_step,
+                        )
+                    except Exception as e:
+                        logger.warning("LLM unavailable, sending facts-only. err=%s", e)
+                        ai_block = None
 
         text = render_report(period, stored.facts, ai_block=ai_block)
         await message.answer(text)
