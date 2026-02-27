@@ -102,12 +102,56 @@ class MonobankClient:
         if cached is not None:
             return [MonoStatementItem.model_validate(x) for x in cached]
 
-        self._limiter.throttle(
-            f"mono:statement:{self._token_hash}:{account}",
-            self.STATEMENT_MIN_INTERVAL,
-            wait=True,
-        )
+        limiter_key = f"mono:statement:{self._token_hash}:{account}"
 
-        data = self._request_json(f"/personal/statement/{account}/{date_from}/{date_to}")
-        self._cache.set(cache_key, data, ttl_seconds=self.STATEMENT_TTL)
-        return [MonoStatementItem.model_validate(x) for x in data]
+        out: list[dict] = []
+        seen: set[str] = set()
+
+        cur_to = int(date_to)
+        date_from = int(date_from)
+
+        while True:
+            if cur_to <= date_from:
+                break
+
+            self._limiter.throttle(
+                limiter_key,
+                self.STATEMENT_MIN_INTERVAL,
+                wait=True,
+            )
+
+            batch = self._request_json(f"/personal/statement/{account}/{date_from}/{cur_to}")
+            if not isinstance(batch, list):
+                raise RuntimeError("Monobank statement response is not a list")
+
+            for x in batch:
+                if not isinstance(x, dict):
+                    continue
+                tx_id = x.get("id")
+                if isinstance(tx_id, str):
+                    if tx_id in seen:
+                        continue
+                    seen.add(tx_id)
+                out.append(x)
+
+            if len(batch) < 500:
+                break
+
+            oldest_time: int | None = None
+            for x in batch:
+                if isinstance(x, dict):
+                    t = x.get("time")
+                    if isinstance(t, int):
+                        if oldest_time is None or t < oldest_time:
+                            oldest_time = t
+
+            if oldest_time is None:
+                break
+
+            new_to = oldest_time - 1
+            if new_to >= cur_to:
+                new_to = cur_to - 1
+            cur_to = new_to
+
+        self._cache.set(cache_key, out, ttl_seconds=self.STATEMENT_TTL)
+        return [MonoStatementItem.model_validate(x) for x in out]
