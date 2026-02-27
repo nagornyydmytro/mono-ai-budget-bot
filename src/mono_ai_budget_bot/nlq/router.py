@@ -20,7 +20,7 @@ _TRANSFER_IN_RE = re.compile(
     re.IGNORECASE,
 )
 _COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
-
+_RECIPIENT_ALIAS_RE = re.compile(r"\b(дівчин(і|е|у|а)|мам(і|е|у|а)|тат(ові|у|а)|оренд(а|і|у)|квартир(а|і|у))\b", re.IGNORECASE)
 
 def parse_nlq_intent(user_text: str) -> dict[str, Any]:
     text = (user_text or "").strip()
@@ -92,11 +92,16 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
         if candidate:
             merchant = candidate
 
+    recipient_alias = None
+    m3 = _RECIPIENT_ALIAS_RE.search(t)
+    if m3:
+        recipient_alias = m3.group(1).lower()
+
     return {
         "intent": intent,
         "days": days,
         "start_ts": start_ts,
         "end_ts": end_ts,
         "merchant_contains": merchant,
-        "recipient_alias": None,
+        "recipient_alias": recipient_alias,
     }

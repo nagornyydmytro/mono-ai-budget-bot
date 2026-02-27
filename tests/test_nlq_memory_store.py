@@ -69,3 +69,22 @@ def test_auto_cache_alias(tmp_path, monkeypatch):
 
     m2 = ms.load_memory(1)
     assert m2["merchant_aliases"].get("макдональдс") == "mcdonalds"
+
+def test_transfer_requires_recipient_mapping_sets_pending(tmp_path, monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as exmod
+    import mono_ai_budget_bot.nlq.memory_store as msmod
+    import time as timemod
+
+    monkeypatch.setattr(msmod, "BASE_DIR", tmp_path / "memory")
+    monkeypatch.setattr(exmod, "load_memory", msmod.load_memory)
+    monkeypatch.setattr(exmod, "set_pending_intent", msmod.set_pending_intent)
+
+    monkeypatch.setattr(exmod, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(exmod, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(timemod, "time", lambda: 2000)
+
+    s = exmod.execute_intent(1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"})
+    assert "Кого саме" in s
+
+    mem = msmod.load_memory(1)
+    assert isinstance(mem.get("pending_intent"), dict)

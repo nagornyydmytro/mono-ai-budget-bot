@@ -87,3 +87,16 @@ def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None)
             return vv
 
     return raw
+
+def set_pending_intent(telegram_user_id: int, payload: dict[str, Any]) -> None:
+    mem = load_memory(telegram_user_id)
+    mem["pending_intent"] = payload
+    save_memory(telegram_user_id, mem)
+
+
+def pop_pending_intent(telegram_user_id: int) -> dict[str, Any] | None:
+    mem = load_memory(telegram_user_id)
+    p = mem.get("pending_intent")
+    mem["pending_intent"] = None
+    save_memory(telegram_user_id, mem)
+    return p if isinstance(p, dict) else None

@@ -6,7 +6,7 @@ from typing import Any
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
-from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias
+from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias, load_memory, set_pending_intent
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
@@ -38,6 +38,14 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         ts_from = ts_to - days * 24 * 60 * 60
     else:
         ts_from = int(ts_from_raw)
+
+    recipient_alias = (intent_payload.get("recipient_alias") or "").strip().lower()
+    if intent.startswith("transfer_") and recipient_alias:
+        mem = load_memory(telegram_user_id)
+        ra = mem.get("recipient_aliases") or {}
+        if not isinstance(ra, dict) or recipient_alias not in ra:
+            set_pending_intent(telegram_user_id, intent_payload)
+            return f"Кого саме маєш на увазі під '{recipient_alias}'? Напиши точне ім'я отримувача як у виписці."
 
     tx_store = TxStore()
     rows = tx_store.load_range(
