@@ -51,6 +51,27 @@ def md_escape(text: str) -> str:
             out.append(ch)
     return "".join(out)
 
+def _map_monobank_error(e: Exception) -> str | None:
+    """
+    Map Monobank client RuntimeError messages to user-friendly text.
+    MonobankClient currently raises RuntimeError("Monobank API error: <code> ...").
+    """
+    s = str(e)
+
+    if "Monobank API error: 401" in s or "Monobank API error: 403" in s:
+        return "❌ Токен Monobank недійсний або прострочений. Зроби /connect і додай актуальний токен."
+
+    if "Monobank API error: 429" in s:
+        return "⏳ Забагато запитів до Monobank. Я оновлю пізніше — спробуй ще раз через ~1 хвилину."
+
+    if "Monobank API error:" in s:
+        return "⚠️ Monobank тимчасово недоступний або повернув помилку. Спробуй пізніше."
+
+    return None
+
+
+def _map_llm_error(_: Exception) -> str:
+    return "🤖 AI зараз недоступний. Надішлю звіт без AI-інсайтів."
 
 def _fmt_money(v: float) -> str:
     return f"{v:,.2f} ₴".replace(",", " ")
@@ -284,7 +305,7 @@ async def _compute_and_cache_reports_for_user(
 
         records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
         report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
-
+ 
         current_facts = report["current"]
         current_facts["comparison"] = {
             "prev_period": {
@@ -480,6 +501,10 @@ async def main() -> None:
         mb = MonobankClient(token=cfg.mono_token)
         try:
             info = mb.client_info()
+        except Exception as e:
+            msg = _map_monobank_error(e)
+            await message.answer(msg or f"❌ Помилка Monobank: {md_escape(str(e))}", parse_mode=None)
+            return
         finally:
             mb.close()
 
@@ -515,6 +540,10 @@ async def main() -> None:
         mb = MonobankClient(token=cfg.mono_token)
         try:
             info = mb.client_info()
+        except Exception as e:
+            msg = _map_monobank_error(e)
+            await query.answer(msg or "Помилка Monobank", show_alert=True)
+            return
         finally:
             mb.close()
 
@@ -590,7 +619,7 @@ async def main() -> None:
         if cfg is None or not cfg.mono_token:
             await query.answer("Спочатку /connect", show_alert=True)
             return
-
+ 
         account_ids = list(cfg.selected_account_ids or [])
         if not account_ids:
             await query.answer("Спочатку вибери картки: /accounts", show_alert=True)
@@ -658,7 +687,12 @@ async def main() -> None:
                         )
             except Exception as e:
                 if chat_id is not None:
-                    await bot.send_message(chat_id, f"❌ Помилка bootstrap: {md_escape(str(e))}", parse_mode=None)
+                    msg = _map_monobank_error(e)
+                    await bot.send_message(
+                        chat_id,
+                        f"❌ Помилка bootstrap: {md_escape(msg or str(e))}",
+                        parse_mode=None,
+                    )
 
         asyncio.create_task(job())
 
@@ -737,8 +771,9 @@ async def main() -> None:
                         parse_mode=None,
                     )
             except Exception as e:
-                await bot.send_message(chat_id, f"❌ Помилка оновлення: {md_escape(str(e))}", parse_mode=None)
-
+                msg = _map_monobank_error(e)
+                await bot.send_message(chat_id, f"❌ Помилка оновлення: {md_escape(msg or str(e))}", parse_mode=None)
+        
         asyncio.create_task(job())
 
     async def _send_period_report(message: Message, period: str) -> None:
@@ -793,6 +828,7 @@ async def main() -> None:
                         )
                     except Exception as e:
                         logger.warning("LLM unavailable, sending facts-only. err=%s", e)
+                        await message.answer(_map_llm_error(e), parse_mode=None)
                         ai_block = None
 
         text = render_report(period, stored.facts, ai_block=ai_block)
