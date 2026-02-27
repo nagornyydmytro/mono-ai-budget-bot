@@ -12,6 +12,12 @@ def minor_to_uah(value: int) -> float:
     return round(value / 100.0, 2)
 
 
+def _shares(amounts_uah: dict[str, float], total_uah: float) -> dict[str, float]:
+    if total_uah <= 0:
+        return {k: 0.0 for k in amounts_uah.keys()}
+    return {k: round((v / total_uah) * 100.0, 1) for k, v in amounts_uah.items()}
+
+
 def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
     tx_count = len(rows)
 
@@ -24,7 +30,7 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
         lambda: {"spend": 0, "income": 0, "transfer_out": 0, "transfer_in": 0, "count": 0}
     )
 
-    # For "real spend" tops: exclude transfers and only amount < 0
+    # For "real spend" tops: exclude transfers and only kind == spend
     merchant_spend = defaultdict(int)
     mcc_spend = defaultdict(int)
 
@@ -41,6 +47,7 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
             by_account[r.account_id]["spend"] += amt
 
             merchant_spend[r.description] += amt
+
             if r.mcc is not None:
                 mcc_spend[str(r.mcc)] += amt
 
@@ -70,6 +77,16 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
     top_mcc = sorted(mcc_spend.items(), key=lambda x: x[1], reverse=True)[:10]
     top_named_categories = sorted(category_real_spend.items(), key=lambda x: x[1], reverse=True)[:10]
 
+    # Prepare UAH maps for shares
+    categories_uah = {k: minor_to_uah(v) for k, v in sorted(category_real_spend.items())}
+    real_spend_total_uah = minor_to_uah(real_spend_total)
+
+    # Shares (% of real_spend_total_uah)
+    category_shares = _shares(categories_uah, real_spend_total_uah)
+
+    top_merchants_uah = {k: minor_to_uah(v) for k, v in top_merchants}
+    top_merchants_shares = _shares(top_merchants_uah, real_spend_total_uah)
+
     facts: dict[str, Any] = {
         "transactions_count": tx_count,
         "totals": {
@@ -77,10 +94,14 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
             "spend_total_uah": minor_to_uah(cash_out_total),
             "transfer_in_total_uah": minor_to_uah(transfer_in_total),
             "transfer_out_total_uah": minor_to_uah(transfer_out_total),
-            "real_spend_total_uah": minor_to_uah(real_spend_total),
+            "real_spend_total_uah": real_spend_total_uah,
         },
         "category_method": "mcc",
-        "categories_real_spend": {k: minor_to_uah(v) for k, v in sorted(category_real_spend.items())},
+        "categories_real_spend": categories_uah,
+        # NEW: grounded shares
+        "category_shares_real_spend": category_shares,
+        "top_merchants_shares_real_spend": top_merchants_shares,
+        # Existing “tops”
         "top_categories_named_real_spend": [
             {"category": k, "amount_uah": minor_to_uah(v)} for k, v in top_named_categories
         ],
@@ -98,4 +119,5 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
             for acc_id, v in by_account.items()
         },
     }
+
     return facts
