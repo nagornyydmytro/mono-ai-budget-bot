@@ -29,7 +29,7 @@ def test_compute_facts_shares_sum_to_100_or_less():
 
     shares = facts["category_shares_real_spend"]
     total_share = sum(shares.values())
-    assert 0 <= total_share <= 100.1 
+    assert 0 <= total_share <= 100.1
 
 
 def test_compute_facts_top_merchants_shares_present():

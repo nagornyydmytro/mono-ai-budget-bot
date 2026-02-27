@@ -3,7 +3,11 @@ name = "mono-ai-budget-bot"
 version = "0.1.0"
 description = "Telegram bot that analyzes Monobank transactions and generates AI-based spending reports."
 authors = ["Dmytro Nagornyy (@y3k_notfound)"]
+license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/nagornyydmytro/mono-ai-budget-bot"
+repository = "https://github.com/nagornyydmytro/mono-ai-budget-bot"
+keywords = ["telegram", "bot", "monobank", "finance", "analytics", "llm", "openai", "ai"]
 packages = [{ include = "mono_ai_budget_bot", from = "src" }]
 
 [tool.poetry.scripts]
