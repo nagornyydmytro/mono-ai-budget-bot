@@ -102,6 +102,12 @@ class MonobankClient:
         if cached is not None:
             return [MonoStatementItem.model_validate(x) for x in cached]
 
+        out = self._statement_paginated(account=account, date_from=date_from, date_to=date_to)
+
+        self._cache.set(cache_key, out, ttl_seconds=self.STATEMENT_TTL)
+        return [MonoStatementItem.model_validate(x) for x in out]
+
+    def _statement_paginated(self, account: str, date_from: int, date_to: int) -> list[dict]:
         limiter_key = f"mono:statement:{self._token_hash}:{account}"
 
         out: list[dict] = []
@@ -154,5 +160,4 @@ class MonobankClient:
                 new_to = cur_to - 1
             cur_to = new_to
 
-        self._cache.set(cache_key, out, ttl_seconds=self.STATEMENT_TTL)
-        return [MonoStatementItem.model_validate(x) for x in out]
+        return out
