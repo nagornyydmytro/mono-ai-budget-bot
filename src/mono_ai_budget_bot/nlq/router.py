@@ -21,6 +21,8 @@ _TRANSFER_IN_RE = re.compile(
 )
 _COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
 _RECIPIENT_ALIAS_RE = re.compile(r"\b(дівчин(і|е|у|а)|мам(і|е|у|а)|тат(ові|у|а)|оренд(а|і|у)|квартир(а|і|у))\b", re.IGNORECASE)
+_COMPARE_RE = re.compile(r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян|compare)\b", re.IGNORECASE)
+_BASELINE_RE = re.compile(r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline)\b", re.IGNORECASE)
 
 def parse_nlq_intent(user_text: str) -> dict[str, Any]:
     text = (user_text or "").strip()
@@ -60,7 +62,9 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
         days = max(1, min(days, 31))
 
     is_count = _COUNT_RE.search(t) is not None
-
+    
+    want_compare = _COMPARE_RE.search(t) is not None and _BASELINE_RE.search(t) is not None
+    
     intent: str | None = None
     if _INCOME_RE.search(t) is not None:
         intent = "income_count" if is_count else "income_sum"
@@ -78,7 +82,9 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
             "кількість витрат",
             "скільки витрат було",
         ]
-        if any(mk in t for mk in count_markers) or is_count:
+        if want_compare:
+            intent = "compare_to_baseline"
+        elif any(mk in t for mk in count_markers) or is_count:
             intent = "spend_count"
         elif "скільки" in t or "витратив" in t or "витрати" in t or "spent" in t:
             intent = "spend_sum"

@@ -10,6 +10,7 @@ from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias, load_mem
 from mono_ai_budget_bot.nlq.memory_store import pop_pending_intent, save_recipient_alias
 from mono_ai_budget_bot.analytics.profile import compute_baseline
 from mono_ai_budget_bot.analytics.profile_store import save_profile
+from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
     intent = (intent_payload.get("intent") or "unsupported").strip()
@@ -33,6 +34,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             ts_from=ts_from,
             ts_to=ts_to,
         )
+
+    if intent == "compare_to_baseline":
+        r = compare_yesterday_to_baseline(rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28)
+        sign = "+" if r.delta_cents >= 0 else ""
+        return f"Вчора: {r.yesterday_cents/100:.2f} грн. Зазвичай (медіана): {r.baseline_median_cents/100:.2f} грн. Різниця: {sign}{r.delta_cents/100:.2f} грн."
 
         b = compute_baseline(rows, window_days=28)
         save_profile(
