@@ -128,10 +128,11 @@ class MonobankClient:
                 if not isinstance(x, dict):
                     continue
                 tx_id = x.get("id")
-                if isinstance(tx_id, str):
-                    if tx_id in seen:
-                        continue
-                    seen.add(tx_id)
+                if not isinstance(tx_id, str):
+                    continue
+                if tx_id in seen:
+                    continue
+                seen.add(tx_id)
                 out.append(x)
 
             if len(batch) < 500:

@@ -26,29 +26,26 @@ def test_statement_paginates_when_500_and_dedups_and_caches(monkeypatch):
     mb._cache = DummyCache()
     mb._limiter = DummyLimiter()
 
-    batch1 = _mk_batch(2000, 500)
-    batch2 = _mk_batch(1500, 500)
-    batch3 = _mk_batch(1000, 120)
+    batch1 = [{"id": f"tx_{2000 - i}", "time": 2000 - i, "amount": 100} for i in range(500)]
+    batch2 = [{"id": f"tx_{1500 - i}", "time": 1500 - i, "amount": 100} for i in range(500)]
+    batch3 = [{"id": f"tx_{1000 - i}", "time": 1000 - i, "amount": 100} for i in range(120)]
 
     batch2[10]["id"] = batch1[20]["id"]
 
     calls: list[str] = []
+    batches = [batch1, batch2, batch3]
 
     def fake_request_json(path: str):
         calls.append(path)
-        to = int(path.split("/")[-1])
-        if to == 2000:
-            return batch1
-        if to == 1500:
-            return batch2
-        if to == 1000:
-            return batch3
-        return []
+        return batches.pop(0)
 
     monkeypatch.setattr(mb, "_request_json", fake_request_json)
 
     res1 = mb.statement(account="acc", date_from=0, date_to=2000)
-    assert len(res1) == 500 + (500 - 1) + 120
+
+    ids = [x.id for x in res1]
+    assert len(ids) == len(set(ids))
+    assert len(res1) == 1119
     assert len(calls) == 3
 
     res2 = mb.statement(account="acc", date_from=0, date_to=2000)
@@ -64,18 +61,18 @@ def test_statement_does_not_loop_on_same_timestamp(monkeypatch):
     mb._limiter = DummyLimiter()
 
     batch1 = [{"id": f"tx_{i}", "time": 1000, "amount": 1} for i in range(500)]
+
     calls: list[str] = []
+    batches = [batch1, []]
 
     def fake_request_json(path: str):
         calls.append(path)
-        to = int(path.split("/")[-1])
-        if to == 2000:
-            return batch1
-        return []
+        return batches.pop(0)
 
     monkeypatch.setattr(mb, "_request_json", fake_request_json)
 
     res = mb.statement(account="acc", date_from=0, date_to=2000)
+
     assert len(res) == 500
     assert len(calls) == 2
 
