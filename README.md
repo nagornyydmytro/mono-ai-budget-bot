@@ -1,142 +1,234 @@
-# Mono AI Budget Bot
+Mono AI Budget Bot
+=================
 
-Telegram-бот для аналітики витрат Monobank з AI-інсайтами.
+Telegram-бот для аналітики витрат Monobank з контрольованою AI-надбудовою.
 
-Бот підключається до Monobank Personal API по токену користувача, синхронізує транзакції у локальний ledger, рахує фінансові метрики за період і генерує AI-звіт (короткий аналіз + рекомендації).
+Ідея: бот підключається до Monobank Personal API (по токену користувача), синхронізує транзакції по обраним рахункам/карткам, рахує метрики за період (кодом) і формує звіт. AI (LLM) отримує лише агреговані “facts” (JSON) і генерує короткі інсайти та рекомендації, прив’язані до цифр.
 
-LLM (OpenAI) отримує лише агреговані факти (facts JSON). Усі суми та метрики рахує код, а не модель.
+Проєкт зроблений як тестове завдання на AI-інтернатуру: акцент на архітектурі, стабільності, безпеці, обмеженнях API, і “вау”-ефекті від AI без втрати контролю.
 
----
 
-## Основні можливості
+Що вміє (MVP)
+-------------
 
-### Підключення
+1) Підключення Monobank
 - /connect — додати Monobank token
-- /status — перевірити доступ до API
-- /accounts — вибрати рахунки/картки
-- /refresh — примусова синхронізація ledger
+- /status — перевірка доступу до Monobank (client-info / statement)
 
-### Звіти
+2) Вибір рахунків/карток
+- /accounts (або аналогічна команда в твоїй реалізації) — обрати рахунки/картки для аналізу
+- після вибору карток бот пропонує первинне завантаження історії (1 місяць або 3 місяці), далі — інкрементальні sync
+
+3) On-demand звіти
 - /today — витрати за сьогодні
-- /week — витрати за останні 7 днів + порівняння з попередніми 7
-- /month — витрати за останні 30 днів + порівняння з попередніми 30
+- /week — витрати за останні 7 днів + порівняння з попередніми 7 днями
+- /month — витрати за останні 30 днів (в межах 31d+1h API) + порівняння з попередніми 30 днями
 
-### AI-інсайти
-Модель генерує:
-- короткий підсумок змін
-- 3–7 рекомендацій, прив’язаних до конкретних цифр
-- конкретний “наступний крок”
+4) Регулярні звіти
+- weekly / monthly автозвіти в заданий час (через scheduler)
+- refresh/sync у фоні, з локами, щоб один користувач не запускав кілька sync одночасно
 
-Модель не надає інвестиційних, медичних або юридичних порад.
+5) Звіт містить (типова структура)
+- Total spend (опційно income, якщо ввімкнеш)
+- Transactions count
+- Top categories / top merchants
+- Outliers (“дивні” витрати)
+- Breakdown by account (по картках)
+- Compare with previous period
+- AI insights: короткий підсумок + 3–7 конкретних рекомендацій, прив’язаних до цифр
+- Next step: 1 наступний крок (звичка/ліміт/дія) на базі даних
 
-### Scheduler
-- автоматичні weekly / monthly звіти
-- пер-користувацький refresh
-- захист від одночасних sync
 
----
+AI частина: як це працює (важливо)
+---------------------------------
 
-## Архітектура
+Принцип: “Код рахує факти — LLM пише текст”.
 
-Monobank API  
-→ Ledger (jsonl, локально)  
-→ Обчислення facts  
-→ LLM prompt  
-→ Telegram report  
+1) Аналітика (код)
+- збирає транзакції в ledger
+- рахує метрики: totals, counts, топи, розбивки, порівняння періодів, outliers
+- формує facts JSON (структуровані числа та списки)
 
-LLM не працює з сирими транзакціями — лише з агрегованими даними.
+2) Генерація інсайтів (LLM)
+- LLM отримує facts JSON
+- повертає: пояснення змін, рекомендації, next_step
+- guardrails:
+  - без інвестиційних порад
+  - без медичних/юридичних порад
+  - без “гарантій прибутку”
+  - без вигаданих тверджень, які не випливають з facts
 
----
+3) Failure mode
+- якщо LLM недоступний / таймаут / помилка формату → бот не падає
+- показує facts-репорт без AI (graceful fallback)
 
-## Quickstart (Local)
 
-1. Клонувати репозиторій
+Monobank API: обмеження і як ми їх обходимо
+------------------------------------------
 
-git clone https://github.com/nagornyydmytro/mono-ai-budget-bot.git  
-cd mono-ai-budget-bot
+Ключове обмеження Monobank Personal API:
+- Rate limit: 1 request / 60 sec на client-info та statement
+- Statement діапазон: максимум 31 доба + 1 година за один запит (для /month ок, довші періоди треба чанкувати)
 
-2. Створити virtualenv
+Що робить бот:
+- кешує відповіді/стан синхронізації
+- використовує обережний throttling + retry/backoff при 429 (Too Many Requests)
+- тримає per-user locks, щоб не створювати шторм запитів
+- синхронізує інкрементально (оновлення по часу, з невеликим overlap, якщо потрібно)
 
-python -m venv .venv  
-source .venv/bin/activate   (Windows: .venv\Scripts\activate)
 
-3. Встановити залежності
+Зберігання даних (локально до хостингу)
+---------------------------------------
 
-pip install -r requirements.txt
+До деплою/хостингу дані зберігаються локально у директорії .cache:
 
-4. Задати environment variables
+- users: профіль користувача, налаштування, вибрані рахунки/картки
+- token: monobank token (зашифрований)
+- ledger: транзакції (JSONL) по user_id/account_id
+- reports: кеш звітів (опційно)
+- meta: технічний стан синхронізації (last sync timestamp, тощо)
+- llm caches: кеш нормалізацій/профілю (опційно)
 
-Linux / macOS:
-export TELEGRAM_BOT_TOKEN=...
-export OPENAI_API_KEY=...
+Як “очистити для чистого тесту”:
+- видалити директорію .cache (або відповідну директорію storage)
 
-Windows (PowerShell):
-setx TELEGRAM_BOT_TOKEN "..."
-setx OPENAI_API_KEY "..."
 
-Опційно для тестування scheduler:
-SCHED_TEST_MODE=1
+Безпека і приватність
+---------------------
 
-5. Запуск
+- Monobank token зберігається ЗАШИФРОВАНИМ (через MASTER_KEY, fernet)
+- В LLM (OpenAI) не відправляються сирі транзакції (raw statement)
+- В LLM відправляються тільки агреговані facts JSON (суми, топи, метрики)
+- Логи: технічні деталі без витоку токенів
 
-python -m mono_ai_budget_bot.bot
 
----
+Стек / технічні рішення
+-----------------------
 
-## Як отримати Monobank token
+- Telegram bot framework: (aiogram або еквівалент)
+- Scheduler: APScheduler (AsyncIOScheduler)
+- Monobank API client + кеш/тротлінг
+- Local storage: файловий (JSON/JSONL)
+- Encryption: cryptography/fernet (MASTER_KEY)
+- LLM: OpenAI API (Chat Completions), structured output (JSON)
 
-1. Перейти на:
-https://api.monobank.ua/index.html
 
-2. Згенерувати персональний токен
+Встановлення і запуск (локально)
+--------------------------------
 
-3. Надіслати його боту через /connect
+Варіант A (рекомендовано): через Poetry
+1) Встановити залежності
+- poetry install
 
-Важливо: токен дає доступ до персональних фінансових даних. Не передавайте його третім особам.
+2) Створити .env
+Створи файл .env у корені і додай змінні (див. “ENV змінні”)
 
----
+3) Запуск
+- poetry run python -m <твій_пакет_бота>
 
-## Зберігання даних (локально)
+Якщо є CLI entrypoint (наприклад monobot), то:
+- poetry run monobot bot
 
-До деплою всі дані зберігаються у папці .cache/
+Варіант B: без Poetry
+- python -m venv .venv
+- .venv/Scripts/activate (Windows) або source .venv/bin/activate (Linux/Mac)
+- python -m <твій_пакет_бота>
 
-.cache/users/ — конфіг користувача (token, обрані рахунки)  
-.cache/tx/ — ledger транзакцій (jsonl)  
-.cache/reports/ — кешовані звіти  
-.cache/ratelimit* — стан rate limiter  
 
-Щоб повністю видалити дані:
+ENV змінні (мінімальний набір)
+------------------------------
 
-Linux / macOS:
-rm -rf .cache
+TELEGRAM_BOT_TOKEN
+- токен Telegram бота
 
-Windows:
-видалити папку .cache вручну
+OPENAI_API_KEY
+- ключ OpenAI (можна не задавати: тоді бот має працювати у режимі facts-only)
 
----
+MASTER_KEY
+- ключ для шифрування токенів Monobank у storage
+- формат: fernet key (base64)
 
-## Обмеження Monobank API
+Як згенерувати MASTER_KEY:
+- python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
-- statement: максимум 31 день + 1 година за запит
-- rate limit: 1 запит / 60 секунд
-- до 500 транзакцій за відповідь
+Додаткові (опційні):
+- LOG_LEVEL=INFO
+- TZ=Europe/Kyiv
+- CACHE_DIR=.cache
 
-Для дуже активних користувачів можливе неповне покриття (планується покращена пагінація).
 
----
+Команди бота (користувацький гайд)
+----------------------------------
 
-## Privacy
+Підключення:
+- /connect
+  1) бот просить токен Monobank
+  2) після збереження токена — /status або /accounts
 
-- Дані зберігаються локально (до хостингу).
-- LLM отримує лише агреговані facts.
-- Сирі транзакції не передаються в OpenAI.
+Перевірка:
+- /status
+  - показує чи токен валідний, чи API доступне
 
----
+Вибір карток:
+- /accounts
+  - обрати рахунки/картки для аналізу
+  - первинне завантаження: 1 місяць або 3 місяці
+  - далі — інкрементальні оновлення
 
-## Roadmap
+Звіти:
+- /today
+- /week
+- /month
 
-- NLQ: “Скільки я витратив на Макдональдс за 15 днів?”
-- User spending profile
-- Persistent storage (Cloudflare)
-- Async Monobank client
-- CI + automated tests
+Автозвіти:
+- /weekly (або команда/налаштування у твоїй реалізації)
+- /monthly
+
+Довільні запити (NLQ):
+- користувач може написати текстом, наприклад:
+  - “Скільки я за останні 15 днів витратив на Макдональдс?”
+  - “Топ-5 категорій за 30 днів”
+  - “Скільки транзакцій за тиждень?”
+Бот:
+- класифікує intent+slots (allowlist)
+- виконує запит по ledger
+- дає коротку відповідь
+
+
+Демо (для інтернатури)
+----------------------
+
+- docs/demo/connect.png
+- docs/demo/accounts.png
+- docs/demo/week.png
+- docs/demo/nlq.png
+
+
+Статус проєкту
+--------------
+
+MVP фокус:
+- стабільна синхронізація під rate limit
+- коректні weekly/monthly порівняння
+- AI інсайти з guardrails + fallback
+- NLQ запити (швидкі відповіді) з allowlist
+- зрозумілий README і “готовий вигляд” репозиторію
+
+
+Roadmap (після здачі)
+---------------------
+
+Хостинг (Cloudflare):
+- storage interface (local vs persistent)
+- Cloudflare Workers runtime
+- D1/KV для users/ledger/reports/caches
+- global refresh кожні 2–3 години без 429-шторму
+- async http + async rate limit
+
+Полірування:
+- краща деталізація MCC та кастомні категорії
+- складніший outliers (звички/аномалії)
+- більше NLQ інтентів (topN, compare periods, by card)
+- merchant/category normalization (кеш)
+- templates для UI, інлайн-кнопки, налаштування автозвітів
+- структуровані логи та метрики
