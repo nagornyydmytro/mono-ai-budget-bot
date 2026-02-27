@@ -7,7 +7,7 @@ def test_compute_facts_shares_sum_to_100_or_less():
         TxRow(
             account_id="a1",
             ts=1,
-            amount=-100_00,  # 100 UAH spend
+            amount=-100_00,
             description="McDonalds",
             mcc=5814,
             kind="spend",
@@ -15,7 +15,7 @@ def test_compute_facts_shares_sum_to_100_or_less():
         TxRow(
             account_id="a1",
             ts=2,
-            amount=-50_00,  # 50 UAH spend
+            amount=-50_00,
             description="Uber",
             mcc=4121,
             kind="spend",

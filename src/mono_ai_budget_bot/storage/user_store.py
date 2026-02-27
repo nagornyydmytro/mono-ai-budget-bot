@@ -16,7 +16,7 @@ class UserConfig:
     selected_account_ids: list[str]
     chat_id: int | None
     autojobs_enabled: bool
-    updated_at: float  # unix timestamp
+    updated_at: float
 
 
 class UserStore:
@@ -42,13 +42,11 @@ class UserStore:
     ) -> Path:
         existing = self.load_raw(telegram_user_id)
 
-        # --- determine plain token ---
         if mono_token is not None:
             token_plain = mono_token
         else:
             token_plain = existing.get("mono_token", "")
 
-        # --- encrypt before storing ---
         token_enc = encrypt_token(token_plain) if token_plain else ""
 
         payload: dict[str, Any] = {
@@ -92,7 +90,6 @@ class UserStore:
 
             token_stored = str(data.get("mono_token", ""))
 
-            # Migration: if token is plain, encrypt it
             if token_stored and not token_stored.startswith("gAAAAA"):
                 token_enc = encrypt_token(token_stored)
                 data["mono_token"] = token_enc

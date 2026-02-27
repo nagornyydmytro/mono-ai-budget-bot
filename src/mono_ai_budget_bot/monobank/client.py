@@ -14,8 +14,8 @@ class MonobankClient:
     CLIENT_INFO_MIN_INTERVAL = 60
     STATEMENT_MIN_INTERVAL = 60
 
-    CLIENT_INFO_TTL = 600  # 10 min
-    STATEMENT_TTL = 600  # 10 min
+    CLIENT_INFO_TTL = 600
+    STATEMENT_TTL = 600
 
     def __init__(self, token: str, base_url: str = "https://api.monobank.ua"):
         self._token = token
@@ -40,9 +40,8 @@ class MonobankClient:
         self._client.close()
 
     def _request_json(self, path: str) -> object:
-        # robust retries for 429 + transient network errors
         max_attempts = 6
-        base_sleep = 2.0  # seconds
+        base_sleep = 2.0
 
         last_err: Exception | None = None
 
@@ -50,20 +49,17 @@ class MonobankClient:
             try:
                 resp = self._client.get(path)
 
-                # 429 Too Many Requests
                 if resp.status_code == 429:
                     retry_after = resp.headers.get("Retry-After")
                     if retry_after and retry_after.isdigit():
                         sleep_s = float(retry_after)
                     else:
-                        # exponential backoff with jitter
                         sleep_s = min(60.0, base_sleep * (2 ** (attempt - 1)))
                         sleep_s += random.uniform(0.0, 1.5)
 
                     time.sleep(sleep_s)
                     continue
 
-                # other errors
                 try:
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as e:
@@ -75,7 +71,6 @@ class MonobankClient:
 
             except (httpx.TimeoutException, httpx.NetworkError) as e:
                 last_err = e
-                # retry with backoff
                 sleep_s = min(30.0, base_sleep * (2 ** (attempt - 1)))
                 sleep_s += random.uniform(0.0, 1.0)
                 time.sleep(sleep_s)
@@ -93,7 +88,6 @@ class MonobankClient:
         if cached is not None:
             return MonoClientInfo.model_validate(cached)
 
-        # rate limit protection
         self._limiter.throttle(
             f"mono:client-info:{self._token_hash}", self.CLIENT_INFO_MIN_INTERVAL, wait=True
         )
@@ -108,7 +102,6 @@ class MonobankClient:
         if cached is not None:
             return [MonoStatementItem.model_validate(x) for x in cached]
 
-        # rate limit protection (Monobank: statement is limited too)
         self._limiter.throttle(
             f"mono:statement:{self._token_hash}:{account}",
             self.STATEMENT_MIN_INTERVAL,
@@ -116,6 +109,5 @@ class MonobankClient:
         )
 
         data = self._request_json(f"/personal/statement/{account}/{date_from}/{date_to}")
-        # Monobank returns list
         self._cache.set(cache_key, data, ttl_seconds=self.STATEMENT_TTL)
         return [MonoStatementItem.model_validate(x) for x in data]

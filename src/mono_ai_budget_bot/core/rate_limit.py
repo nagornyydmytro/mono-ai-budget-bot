@@ -19,7 +19,6 @@ class FileRateLimiter:
         try:
             data = json.loads(self.state_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                # ensure floats
                 return {k: float(v) for k, v in data.items()}
         except Exception:
             pass
@@ -44,6 +43,5 @@ class FileRateLimiter:
                         f"Rate limit: wait {remaining:.1f}s before calling '{key}' again"
                     )
 
-        # record call time as "now" (after potential sleep)
         state[key] = time.time()
         self._save(state)

@@ -38,10 +38,8 @@ def test_compute_facts_totals_and_categories():
     assert totals["income_total_uah"] == 300.00
     assert totals["spend_total_uah"] == 350.00
 
-    # real_spend_total_uah should be >= spend_total_uah in your logic (transfers excluded etc.)
     assert totals["real_spend_total_uah"] >= totals["spend_total_uah"]
 
-    # categories_real_spend is a dict[str, float] (named categories via MCC mapping)
     assert isinstance(facts["categories_real_spend"], dict)
 
 

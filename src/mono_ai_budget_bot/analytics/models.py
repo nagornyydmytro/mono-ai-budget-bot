@@ -10,7 +10,7 @@ TxKind = Literal["income", "spend", "transfer_in", "transfer_out"]
 class TxRow:
     account_id: str
     ts: int
-    amount: int  # in minor units (kopiyky)
+    amount: int
     description: str
     mcc: int | None
     kind: TxKind

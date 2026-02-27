@@ -8,7 +8,6 @@ from .models import TxRow
 
 
 def minor_to_uah(value: int) -> float:
-    # Monobank returns amounts in minor units for UAH (kopiyky)
     return round(value / 100.0, 2)
 
 
@@ -30,11 +29,9 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
         lambda: {"spend": 0, "income": 0, "transfer_out": 0, "transfer_in": 0, "count": 0}
     )
 
-    # For "real spend" tops: exclude transfers and only kind == spend
     merchant_spend = defaultdict(int)
     mcc_spend = defaultdict(int)
 
-    # Named categories (MCC -> stable buckets)
     category_real_spend = defaultdict(int)
     uncategorized_real_spend = 0
 
@@ -79,11 +76,9 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
         :10
     ]
 
-    # Prepare UAH maps for shares
     categories_uah = {k: minor_to_uah(v) for k, v in sorted(category_real_spend.items())}
     real_spend_total_uah = minor_to_uah(real_spend_total)
 
-    # Shares (% of real_spend_total_uah)
     category_shares = _shares(categories_uah, real_spend_total_uah)
 
     top_merchants_uah = {k: minor_to_uah(v) for k, v in top_merchants}
@@ -100,10 +95,8 @@ def compute_facts(rows: list[TxRow]) -> dict[str, Any]:
         },
         "category_method": "mcc",
         "categories_real_spend": categories_uah,
-        # NEW: grounded shares
         "category_shares_real_spend": category_shares,
         "top_merchants_shares_real_spend": top_merchants_shares,
-        # Existing “tops”
         "top_categories_named_real_spend": [
             {"category": k, "amount_uah": minor_to_uah(v)} for k, v in top_named_categories
         ],

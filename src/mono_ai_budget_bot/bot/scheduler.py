@@ -11,8 +11,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 try:
     from zoneinfo import ZoneInfo
-except Exception:  # pragma: no cover
-    ZoneInfo = None  # type: ignore
+except Exception:
+    ZoneInfo = None
 
 from dotenv import load_dotenv
 
@@ -69,7 +69,6 @@ def load_schedule_config() -> ScheduleConfig:
 
 
 def _parse_cron(expr: str) -> dict:
-    # "min hour day month dow"
     parts = expr.split()
     if len(parts) != 5:
         raise ValueError(f"Invalid cron expression: {expr}")
@@ -116,9 +115,8 @@ def start_jobs(
     report_store,
     render_report_text,
     logger: logging.Logger,
-    # callbacks (provided by app.py)
-    sync_user_ledger,  # async (tg_id, cfg, days_back) -> SyncResult-like
-    recompute_reports_for_user,  # async (tg_id, account_ids) -> None
+    sync_user_ledger,
+    recompute_reports_for_user,
 ) -> None:
     cfg = load_schedule_config()
 
@@ -166,7 +164,6 @@ def start_jobs(
     async def job_weekly_report() -> None:
         logger.info("Scheduler: weekly_report started")
         for u in users.iter_all():
-            # before weekly report: refresh enough to cover week (buffer)
             ok = await _refresh_user(u, days_back=8)
             if not ok:
                 continue
@@ -196,13 +193,10 @@ def start_jobs(
 
         logger.info("Scheduler: monthly_report done")
 
-    # APScheduler calls sync callables — we schedule async jobs onto the running loop
     def refresh_wrapper_interval() -> None:
-        # lightweight incremental refresh for "recent" changes
         loop.create_task(job_refresh_all_users(days_back=2))
 
     def refresh_wrapper_daily() -> None:
-        # daily refresh with larger lookback (safer catch-up)
         loop.create_task(job_refresh_all_users(days_back=8))
 
     def weekly_wrapper() -> None:
@@ -211,7 +205,6 @@ def start_jobs(
     def monthly_wrapper() -> None:
         loop.create_task(job_monthly_report())
 
-    # periodic refresh (every N minutes)
     scheduler.add_job(
         refresh_wrapper_interval,
         IntervalTrigger(minutes=cfg.refresh_minutes),
@@ -219,7 +212,6 @@ def start_jobs(
         replace_existing=True,
     )
 
-    # daily refresh (cron)
     daily_trigger = CronTrigger(**_parse_cron(cfg.daily_refresh_cron))
     scheduler.add_job(
         refresh_wrapper_daily,
@@ -228,7 +220,6 @@ def start_jobs(
         replace_existing=True,
     )
 
-    # weekly/monthly reports
     weekly_trigger = CronTrigger(**_parse_cron(cfg.weekly_cron))
     monthly_trigger = CronTrigger(**_parse_cron(cfg.monthly_cron))
 

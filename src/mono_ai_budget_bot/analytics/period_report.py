@@ -14,8 +14,8 @@ SECONDS_IN_DAY = 24 * 60 * 60
 
 @dataclass(frozen=True)
 class PeriodWindow:
-    start_ts: int  # inclusive
-    end_ts: int  # exclusive
+    start_ts: int
+    end_ts: int
 
     @property
     def days(self) -> int:

@@ -29,7 +29,6 @@ class JsonDiskCache:
             data = json.loads(path.read_text(encoding="utf-8"))
             expires_at = data.get("expires_at", None)
             if expires_at is not None and time.time() >= float(expires_at):
-                # expired
                 try:
                     path.unlink(missing_ok=True)
                 except Exception:
@@ -37,7 +36,6 @@ class JsonDiskCache:
                 return None
             return data.get("value", None)
         except Exception:
-            # corrupted cache entry
             try:
                 path.unlink(missing_ok=True)
             except Exception:

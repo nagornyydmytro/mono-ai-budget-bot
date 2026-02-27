@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from .client import MonobankClient
 from .models import MonoStatementItem
 
-MAX_RANGE_SECONDS = 31 * 24 * 3600 + 3600  # 31 days + 1 hour
+MAX_RANGE_SECONDS = 31 * 24 * 3600 + 3600
 
 
 def iter_statement_windows(start_ts: int, end_ts: int, max_span_seconds: int = MAX_RANGE_SECONDS):
@@ -27,7 +27,6 @@ def iter_statement_windows(start_ts: int, end_ts: int, max_span_seconds: int = M
     while cur < end_ts:
         nxt = min(end_ts, cur + max_span_seconds)
         if nxt <= cur:
-            # Safety: prevent infinite loop if something goes wrong with timestamps
             raise RuntimeError(f"Invalid window progression: cur={cur}, nxt={nxt}, end={end_ts}")
         yield cur, nxt
         cur = nxt
@@ -75,7 +74,7 @@ def sync_accounts_ledger(
         if last is None:
             start = now - days_back * 24 * 3600
         else:
-            start = max(0, last - 3600)  # overlap 1h for safety
+            start = max(0, last - 3600)
 
         for frm, to in iter_statement_windows(start, now):
             items = mb.statement(account=acc_id, date_from=frm, date_to=to)
