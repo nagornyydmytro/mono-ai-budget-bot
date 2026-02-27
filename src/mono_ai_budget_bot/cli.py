@@ -45,15 +45,15 @@ def cmd_health() -> int:
 def cmd_status_env() -> int:
     settings = load_settings()
     setup_logging(settings.log_level)
-    logging.getLogger(__name__).info("Loaded settings")
 
+    logging.getLogger(__name__).info("Loaded settings")
     print("TELEGRAM_BOT_TOKEN =", mask(settings.telegram_bot_token))
-    print("MASTER_KEY =", mask(settings.master_key))
-    print("CACHE_DIR =", str(settings.cache_dir))
-    print("OPENAI_API_KEY =", mask(settings.openai_api_key))
-    print("OPENAI_MODEL =", settings.openai_model)
-    print("LOG_LEVEL =", settings.log_level)
-    print("MONO_TOKEN =", mask(settings.mono_token), "(optional debug)")
+    print("MASTER_KEY         =", mask(settings.master_key))
+    print("CACHE_DIR          =", str(settings.cache_dir))
+    print("OPENAI_API_KEY     =", mask(settings.openai_api_key))
+    print("OPENAI_MODEL       =", settings.openai_model)
+    print("LOG_LEVEL          =", settings.log_level)
+    print("MONO_TOKEN         =", mask(settings.mono_token), "(optional debug)")
     return 0
 
 
@@ -68,11 +68,11 @@ def cmd_range(period: str) -> int:
         dr = range_month()
 
     date_from, date_to = dr.to_unix()
-    print("period =", period)
-    print("dt_from =", dr.dt_from.isoformat())
-    print("dt_to =", dr.dt_to.isoformat())
-    print("unix_from =", date_from)
-    print("unix_to =", date_to)
+    print("period   =", period)
+    print("dt_from  =", dr.dt_from.isoformat())
+    print("dt_to    =", dr.dt_to.isoformat())
+    print("unix_from=", date_from)
+    print("unix_to  =", date_to)
     return 0
 
 

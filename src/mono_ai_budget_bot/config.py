@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """
     Runtime configuration (loaded from .env / environment).
+
     Note: Monobank token is per-user and stored encrypted via UserStore (/connect),
     so MONO_TOKEN is optional and only useful for local debug.
     """
