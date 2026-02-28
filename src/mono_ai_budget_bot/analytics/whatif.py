@@ -66,6 +66,14 @@ def project_savings(
     )
 
 
+def scenario_presets(share_pct: float | None = None) -> list[int]:
+    if share_pct is None:
+        return [10, 20]
+    if share_pct >= 30.0:
+        return [15, 25]
+    return [10, 20]
+
+
 def _sum_spend_uah(rows: list[TxRow], pred) -> float:
     total_minor = 0
     for r in rows:
@@ -97,30 +105,49 @@ def _build_keyword_suggestions(rows: list[TxRow], period_days: int) -> list[dict
 
     out: list[dict[str, Any]] = []
 
-    def maybe_add(key: str, title: str, pct: int, spend: float, min_monthly: float) -> None:
+    def maybe_add(key: str, title: str, spend: float, min_monthly: float) -> None:
         monthly = _project_monthly(spend, period_days)
         if monthly < min_monthly:
             return
-        proj = project_savings(monthly, reduce_pct=pct)
-        if proj.monthly_savings_uah < 100.0:
+
+        presets = scenario_presets(None)
+        scenarios: list[dict[str, Any]] = []
+        for p in presets:
+            sp = project_savings(monthly, reduce_pct=p)
+            if sp.monthly_savings_uah < 100.0:
+                continue
+            scenarios.append(
+                {
+                    "pct": p,
+                    "monthly_savings_uah": sp.monthly_savings_uah,
+                    "projected_monthly_uah": sp.projected_monthly_uah,
+                }
+            )
+
+        if not scenarios:
             return
+
         out.append(
             {
                 "key": key,
                 "title": title,
-                "reduction_pct": pct,
-                "monthly_spend_uah": proj.base_monthly_uah,
-                "monthly_savings_uah": proj.monthly_savings_uah,
-                "projected_monthly_uah": proj.projected_monthly_uah,
+                "monthly_spend_uah": round(monthly, 2),
                 "source": "keyword",
+                "scenarios": scenarios,
             }
         )
 
-    maybe_add("taxi", "Таксі", 20, taxi_spend, 400.0)
-    maybe_add("delivery", "Доставка", 20, delivery_spend, 350.0)
-    maybe_add("cafes", "Кафе/Ресторани", 10, cafes_spend, 600.0)
+    maybe_add("taxi", "Таксі", taxi_spend, 400.0)
+    maybe_add("delivery", "Доставка", delivery_spend, 350.0)
+    maybe_add("cafes", "Кафе/Ресторани", cafes_spend, 600.0)
 
-    out.sort(key=lambda x: x["monthly_savings_uah"], reverse=True)
+    def _top_savings_uah(s: dict) -> float:
+        sc = s.get("scenarios")
+        if not isinstance(sc, list) or not sc:
+            return 0.0
+        return float(max(float(x.get("monthly_savings_uah", 0.0)) for x in sc))
+
+    out.sort(key=_top_savings_uah, reverse=True)
     return out
 
 
@@ -150,7 +177,14 @@ def build_whatif_suggestions(rows: list[TxRow], period_days: int) -> list[dict[s
         category_days.setdefault(cat, set()).add(day)
 
     if total_spend_minor == 0:
-        suggestions.sort(key=lambda x: x["monthly_savings_uah"], reverse=True)
+
+        def _top_savings_uah(s: dict) -> float:
+            sc = s.get("scenarios")
+            if not isinstance(sc, list) or not sc:
+                return 0.0
+            return float(max(float(x.get("monthly_savings_uah", 0.0)) for x in sc))
+
+        suggestions.sort(key=_top_savings_uah, reverse=True)
         return suggestions[:3]
 
     existing_keys = {s.get("key") for s in suggestions}
@@ -178,18 +212,50 @@ def build_whatif_suggestions(rows: list[TxRow], period_days: int) -> list[dict[s
         if key in existing_keys:
             continue
 
+        share_pct = round(share * 100, 1)
+        presets = scenario_presets(share_pct)
+        scenarios: list[dict[str, Any]] = []
+        for p in presets:
+            sp = project_savings(monthly, reduce_pct=p)
+            scenarios.append(
+                {
+                    "pct": p,
+                    "monthly_savings_uah": sp.monthly_savings_uah,
+                    "projected_monthly_uah": sp.projected_monthly_uah,
+                }
+            )
+
         suggestions.append(
             {
                 "key": key,
                 "title": cat,
-                "reduction_pct": pct,
                 "monthly_spend_uah": proj.base_monthly_uah,
-                "monthly_savings_uah": proj.monthly_savings_uah,
-                "projected_monthly_uah": proj.projected_monthly_uah,
-                "share": round(share * 100, 1),
+                "share": share_pct,
                 "source": "category",
+                "scenarios": scenarios,
             }
         )
 
-    suggestions.sort(key=lambda x: x["monthly_savings_uah"], reverse=True)
-    return suggestions[:3]
+    def _top_savings_uah(s: dict) -> float:
+        sc = s.get("scenarios")
+        if not isinstance(sc, list) or not sc:
+            return 0.0
+        best = 0.0
+        for x in sc:
+            v = float(x.get("monthly_savings_uah", 0.0))
+            if v > best:
+                best = v
+        return best
+
+    keyword = [s for s in suggestions if s.get("source") == "keyword"]
+    category = [s for s in suggestions if s.get("source") != "keyword"]
+
+    keyword.sort(key=_top_savings_uah, reverse=True)
+    category.sort(key=_top_savings_uah, reverse=True)
+
+    out: list[dict[str, Any]] = []
+    out.extend(keyword[:2])
+    out.extend(category)
+
+    out.sort(key=_top_savings_uah, reverse=True)
+    return out[:3]

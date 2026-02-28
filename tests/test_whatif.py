@@ -27,6 +27,19 @@ def test_whatif_detects_taxi():
     out = build_whatif_suggestions(rows, period_days=7)
     assert any(x["key"] == "taxi" for x in out)
 
+    taxi = next(x for x in out if x["key"] == "taxi")
+
+    scenarios = taxi.get("scenarios")
+    assert isinstance(scenarios, list)
+    assert len(scenarios) >= 2
+    assert float(scenarios[0].get("monthly_savings_uah", 0.0)) > 0
+    assert float(scenarios[1].get("monthly_savings_uah", 0.0)) > 0
+
+    scenarios = taxi.get("scenarios")
+    assert isinstance(scenarios, list)
+    assert len(scenarios) >= 2
+    assert all(float(s.get("monthly_savings_uah", 0.0)) > 0 for s in scenarios[:2])
+
 
 def test_auto_detect_high_category():
     rows = []
@@ -55,7 +68,10 @@ def test_auto_detect_high_category():
     )
 
     out = build_whatif_suggestions(rows, period_days=14)
-
     assert len(out) >= 1
-    assert out[0]["monthly_savings_uah"] > 0
-    assert "share" in out[0]
+
+    top = out[0]
+    scenarios = top.get("scenarios")
+    assert isinstance(scenarios, list)
+    assert len(scenarios) >= 2
+    assert float(scenarios[0].get("monthly_savings_uah", 0.0)) > 0

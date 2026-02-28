@@ -237,12 +237,18 @@ def _render_facts_block(facts: dict) -> str:
         lines.append("*What-if (цікавий факт):*")
         for w in whatifs[:2]:
             title = md_escape(str(w.get("title", "—")))
-            pct = int(w.get("reduction_pct", 0))
-            sav = float(w.get("monthly_savings_uah", 0.0))
             base = float(w.get("monthly_spend_uah", 0.0))
-            lines.append(
-                f"• {title}: якщо зменшити на {pct}% — зекономиш ~{md_escape(_fmt_money(sav))}/міс (зараз ~{md_escape(_fmt_money(base))}/міс)"
-            )
+            scenarios = w.get("scenarios") or []
+
+            parts: list[str] = []
+            if isinstance(scenarios, list):
+                for s in scenarios[:2]:
+                    pct = int(s.get("pct", 0))
+                    sav = float(s.get("monthly_savings_uah", 0.0))
+                    parts.append(f"-{pct}% → ~{md_escape(_fmt_money(sav))}/міс")
+
+            tail = "; ".join(parts) if parts else "—"
+            lines.append(f"• {title} (зараз ~{md_escape(_fmt_money(base))}/міс): {tail}")
 
     return "\n".join(lines).strip()
 
