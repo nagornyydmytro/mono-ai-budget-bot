@@ -160,7 +160,7 @@ def build_main_menu_keyboard():
     return kb
 
 
-def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
+def _render_facts_block(facts: dict) -> str:
     totals = _safe_get(facts, ["totals"], {}) or {}
     comparison = facts.get("comparison")
 
@@ -170,81 +170,29 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
     tr_in = float(totals.get("transfer_in_total_uah", 0.0))
     tr_out = float(totals.get("transfer_out_total_uah", 0.0))
 
-    title_map = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}
-    title = title_map.get(period, period)
-
     lines: list[str] = []
-    lines.append(f"📊 *{md_escape(title)}*")
-    lines.append("")
     lines.append(f"💸 Реальні витрати (без переказів): *{md_escape(_fmt_money(real_spend))}*")
     lines.append(f"🧾 Всі списання (cash out): {md_escape(_fmt_money(spend))}")
     lines.append(f"💰 Надходження (cash in): {md_escape(_fmt_money(income))}")
     lines.append(f"🔁 Перекази: +{md_escape(_fmt_money(tr_in))} / -{md_escape(_fmt_money(tr_out))}")
-    lines.append("")
 
     top_named = facts.get("top_categories_named_real_spend", []) or []
     if top_named:
+        lines.append("")
         lines.append("*Топ категорій (реальні витрати):*")
         for i, row in enumerate(top_named[:5], start=1):
             cat = md_escape(str(row.get("category", "—")))
             amt = float(row.get("amount_uah", 0.0))
             lines.append(f"{i}. {cat}: {md_escape(_fmt_money(amt))}")
-        lines.append("")
 
     top_merchants = facts.get("top_merchants_real_spend", []) or []
     if top_merchants:
+        lines.append("")
         lines.append("*Топ мерчантів (реальні витрати):*")
         for i, row in enumerate(top_merchants[:5], start=1):
             m = md_escape(str(row.get("merchant", "—")))
             amt = float(row.get("amount_uah", 0.0))
             lines.append(f"{i}. {m}: {md_escape(_fmt_money(amt))}")
-        lines.append("")
-
-    trends = facts.get("trends") or {}
-    if isinstance(trends, dict):
-        growing = trends.get("growing") or []
-        declining = trends.get("declining") or []
-        if growing or declining:
-            lines.append("*Тренди (7 днів vs попередні 7):*")
-            for x in growing[:3] if isinstance(growing, list) else []:
-                lab = md_escape(str(x.get("label", "—")))
-                dlt = float(x.get("delta_uah", 0.0))
-                pct = x.get("pct")
-                sign = "+" if dlt >= 0 else ""
-                pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
-                lines.append(
-                    f"📈 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})"
-                )
-            for x in declining[:3] if isinstance(declining, list) else []:
-                lab = md_escape(str(x.get("label", "—")))
-                dlt = float(x.get("delta_uah", 0.0))
-                pct = x.get("pct")
-                sign = "+" if dlt >= 0 else ""
-                pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
-                lines.append(
-                    f"📉 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})"
-                )
-            lines.append("")
-
-    anomalies = facts.get("anomalies") or []
-    if isinstance(anomalies, list) and anomalies:
-        lines.append("*Аномалії (остання доба):*")
-        for x in anomalies[:5]:
-            lab = md_escape(str(x.get("label", "—")))
-            last_uah = float(x.get("last_day_uah", 0.0))
-            base_uah = float(x.get("baseline_median_uah", 0.0))
-            reason = str(x.get("reason", ""))
-            if reason == "first_time_large":
-                why = "вперше великий чек"
-            elif reason == "spike_vs_median":
-                why = "сплеск vs медіана"
-            else:
-                why = reason or "аномалія"
-            lines.append(
-                f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} "
-                f"(база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}"
-            )
-        lines.append("")
 
     if isinstance(comparison, dict):
         totals_cmp = comparison.get("totals", {})
@@ -256,40 +204,118 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
 
         if d_real is not None:
             sign = "+" if float(d_real) >= 0 else ""
-            pct_txt = "—" if p_real is None else f"{p_real:+.2f}%"
+            pct_txt = "—" if p_real is None else f"{float(p_real):+.2f}%"
+            lines.append("")
             lines.append("*Порівняння з попереднім періодом:*")
             lines.append(
-                f"• Реальні витрати: {md_escape(sign + _fmt_money(float(d_real)))} "
-                f"({md_escape(pct_txt)})"
+                f"• Реальні витрати: {md_escape(sign + _fmt_money(float(d_real)))} ({md_escape(pct_txt)})"
             )
-            lines.append("")
 
             cat_cmp = comparison.get("categories", {})
             if isinstance(cat_cmp, dict) and cat_cmp:
-                items = []
+                items: list[tuple[str, float, float | None]] = []
                 for k, v in cat_cmp.items():
                     if not isinstance(v, dict):
                         continue
                     delta_uah = float(v.get("delta_uah", 0.0))
-                    items.append((k, delta_uah, v.get("pct_change")))
+                    items.append((str(k), delta_uah, v.get("pct_change")))
                 items.sort(key=lambda x: abs(x[1]), reverse=True)
 
-                lines.append("*Найбільші зміни по категоріях:*")
-                for k, dlt, pctv in items[:5]:
-                    sign2 = "+" if dlt >= 0 else ""
-                    pct_txt2 = "—" if pctv is None else f"{pctv:+.2f}%"
-                    lines.append(
-                        f"• {md_escape(str(k))}: {md_escape(sign2 + _fmt_money(dlt))} "
-                        f"({md_escape(pct_txt2)})"
-                    )
-                lines.append("")
-
-    if ai_block:
-        lines.append("🤖 *AI інсайти:*")
-        lines.append(ai_block.strip())
-        lines.append("")
+                if items:
+                    lines.append("")
+                    lines.append("*Найбільші зміни по категоріях:*")
+                    for k, dlt, pctv in items[:5]:
+                        sign2 = "+" if dlt >= 0 else ""
+                        pct_txt2 = "—" if pctv is None else f"{float(pctv):+.2f}%"
+                        lines.append(
+                            f"• {md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
+                        )
 
     return "\n".join(lines).strip()
+
+
+def _render_trends_block(facts: dict) -> str | None:
+    trends = facts.get("trends") or {}
+    if not isinstance(trends, dict):
+        return None
+
+    growing = trends.get("growing") or []
+    declining = trends.get("declining") or []
+    if not (isinstance(growing, list) or isinstance(declining, list)):
+        return None
+
+    lines: list[str] = []
+    lines.append("*Тренди (7 днів vs попередні 7):*")
+
+    for x in growing[:3] if isinstance(growing, list) else []:
+        lab = md_escape(str(x.get("label", "—")))
+        dlt = float(x.get("delta_uah", 0.0))
+        pct = x.get("pct")
+        sign = "+" if dlt >= 0 else ""
+        pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
+        lines.append(f"📈 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+
+    for x in declining[:3] if isinstance(declining, list) else []:
+        lab = md_escape(str(x.get("label", "—")))
+        dlt = float(x.get("delta_uah", 0.0))
+        pct = x.get("pct")
+        sign = "+" if dlt >= 0 else ""
+        pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
+        lines.append(f"📉 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+
+    if len(lines) == 1:
+        return None
+    return "\n".join(lines).strip()
+
+
+def _render_anomalies_block(facts: dict) -> str | None:
+    anomalies = facts.get("anomalies") or []
+    if not (isinstance(anomalies, list) and anomalies):
+        return None
+
+    lines: list[str] = []
+    lines.append("*Аномалії (остання доба):*")
+    for x in anomalies[:5]:
+        lab = md_escape(str(x.get("label", "—")))
+        last_uah = float(x.get("last_day_uah", 0.0))
+        base_uah = float(x.get("baseline_median_uah", 0.0))
+        reason = str(x.get("reason", ""))
+        if reason == "first_time_large":
+            why = "вперше великий чек"
+        elif reason == "spike_vs_median":
+            why = "сплеск vs медіана"
+        else:
+            why = reason or "аномалія"
+        lines.append(
+            f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} (база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}"
+        )
+
+    return "\n".join(lines).strip()
+
+
+def _render_ai_block(ai_block: str | None) -> str | None:
+    if not ai_block:
+        return None
+    return f"🤖 *AI інсайти:*\n{ai_block.strip()}"
+
+
+def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
+    title_map = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}
+    title = title_map.get(period, period)
+
+    header = f"📊 {md_escape(title)}"
+    facts_block = _render_facts_block(facts)
+    trends_block = _render_trends_block(facts)
+    anomalies_block = _render_anomalies_block(facts)
+    insight_block = _render_ai_block(ai_block)
+
+    return templates.report_layout(
+        header=header,
+        facts_block=facts_block,
+        trends_block=trends_block,
+        anomalies_block=anomalies_block,
+        insight_block=insight_block,
+    )
 
 
 async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
