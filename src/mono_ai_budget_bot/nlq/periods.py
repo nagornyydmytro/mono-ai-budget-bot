@@ -67,6 +67,14 @@ def _month_range_utc(year: int, month: int) -> PeriodRange:
     return PeriodRange(int(start.timestamp()), int(end.timestamp()))
 
 
+def _infer_year_for_month(requested_month: int, now_ts: int) -> int:
+    dt = datetime.fromtimestamp(int(now_ts), tz=timezone.utc)
+    year = dt.year
+    if requested_month > dt.month:
+        year -= 1
+    return year
+
+
 def parse_period_range(text: str, now_ts: int) -> PeriodRange | None:
     s = (text or "").strip().lower()
 
@@ -108,9 +116,14 @@ def parse_period_range(text: str, now_ts: int) -> PeriodRange | None:
         return _month_range_utc(y, mth)
 
     for name, month in _MONTHS.items():
+        m_name_year = re.search(rf"\bза\s+{re.escape(name)}\s+(\d{{4}})\b", s)
+        if m_name_year:
+            year = int(m_name_year.group(1))
+            return _month_range_utc(year, month)
+
         if re.search(rf"\bза\s+{re.escape(name)}\b", s):
-            dt = datetime.fromtimestamp(now_ts, tz=timezone.utc)
-            return _month_range_utc(dt.year, month)
+            year = _infer_year_for_month(month, now_ts)
+            return _month_range_utc(year, month)
 
     m2 = re.search(r"\bза\s+(\d{4})[-./](\d{1,2})\b", s)
     if m2:

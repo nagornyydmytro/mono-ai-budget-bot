@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from datetime import timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -91,10 +92,7 @@ def create_scheduler(logger: logging.Logger) -> AsyncIOScheduler:
             tz = ZoneInfo(cfg.tz_name)
         except Exception:
             logger.warning("ZoneInfo timezone not found: %s. Falling back to UTC.", cfg.tz_name)
-            try:
-                tz = ZoneInfo("UTC")
-            except Exception:
-                tz = None
+            tz = timezone.utc
 
     return AsyncIOScheduler(timezone=tz)
 

@@ -45,3 +45,19 @@ def test_last_month_range():
     assert pr is not None
     assert pr.start_ts == _ts(2026, 1, 1, 0, 0, 0)
     assert pr.end_ts == _ts(2026, 2, 1, 0, 0, 0)
+
+
+def test_month_name_year_inference_prev_year():
+    now = _ts(2026, 2, 27, 13, 0, 0)
+    pr = parse_period_range("за грудень", now)
+    assert pr is not None
+    assert pr.start_ts == _ts(2025, 12, 1, 0, 0, 0)
+    assert pr.end_ts == _ts(2026, 1, 1, 0, 0, 0)
+
+
+def test_month_name_with_explicit_year():
+    now = _ts(2026, 2, 27, 13, 0, 0)
+    pr = parse_period_range("за грудень 2024", now)
+    assert pr is not None
+    assert pr.start_ts == _ts(2024, 12, 1, 0, 0, 0)
+    assert pr.end_ts == _ts(2025, 1, 1, 0, 0, 0)
