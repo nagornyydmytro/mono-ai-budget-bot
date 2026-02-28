@@ -125,6 +125,22 @@ def render_accounts_screen(
     return "\n".join(lines), kb
 
 
+def build_main_menu_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="📊 Week", callback_data="menu_week"),
+        InlineKeyboardButton(text="📅 Month", callback_data="menu_month"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="🔎 Status", callback_data="menu_status"),
+        InlineKeyboardButton(text="🧾 Accounts", callback_data="menu_accounts"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="🔄 Refresh week", callback_data="menu_refresh_week"),
+    )
+    return kb
+
+
 def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
     totals = _safe_get(facts, ["totals"], {}) or {}
     comparison = facts.get("comparison")
@@ -506,7 +522,12 @@ async def main() -> None:
             return
 
         users.save(tg_id, chat_id=message.chat.id)
-        await message.answer(templates.start_message())
+
+        kb = build_main_menu_keyboard()
+        await message.answer(
+            templates.start_message(),
+            reply_markup=kb.as_markup(),
+        )
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
@@ -709,6 +730,38 @@ async def main() -> None:
                 reply_markup=kb.as_markup(),
             )
         await query.answer("Готово")
+
+    @dp.callback_query(lambda c: c.data == "menu_week")
+    async def cb_menu_week(query: CallbackQuery) -> None:
+        if query.message:
+            await _send_period_report(query.message, "week")
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "menu_month")
+    async def cb_menu_month(query: CallbackQuery) -> None:
+        if query.message:
+            await _send_period_report(query.message, "month")
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "menu_status")
+    async def cb_menu_status(query: CallbackQuery) -> None:
+        if query.message:
+            await cmd_status(query.message)
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "menu_accounts")
+    async def cb_menu_accounts(query: CallbackQuery) -> None:
+        if query.message:
+            await cmd_accounts(query.message)
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "menu_refresh_week")
+    async def cb_menu_refresh_week(query: CallbackQuery) -> None:
+        if query.message:
+            fake_msg = query.message
+            fake_msg.text = "/refresh week"
+            await cmd_refresh(fake_msg)
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data in ("boot_30", "boot_90", "boot_skip"))
     async def cb_bootstrap(query: CallbackQuery) -> None:
