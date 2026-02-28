@@ -30,8 +30,11 @@ _COMPARE_RE = re.compile(
 _BASELINE_RE = re.compile(r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline)\b", re.IGNORECASE)
 
 
-def parse_nlq_intent(user_text: str) -> dict[str, Any]:
+def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any]:
     text = (user_text or "").strip()
+    if now_ts is None:
+        now_ts = int(time.time())
+    now_ts = int(now_ts)
     if not text:
         return {
             "intent": "unsupported",
@@ -44,7 +47,6 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
 
     t = text.lower()
 
-    now_ts = int(time.time())
     pr = parse_period_range(t, now_ts)
     start_ts = pr.start_ts if pr is not None else None
     end_ts = pr.end_ts if pr is not None else None
@@ -119,7 +121,7 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
 
 
 def route(req: NLQRequest) -> NLQIntent | None:
-    parsed = parse_nlq_intent(req.text)
+    parsed = parse_nlq_intent(req.text, req.now_ts)
     if not parsed or parsed.get("intent") in (None, "unsupported"):
         return None
     return NLQIntent(name=parsed["intent"], slots=parsed)
