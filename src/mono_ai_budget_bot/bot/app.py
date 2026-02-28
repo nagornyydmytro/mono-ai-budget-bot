@@ -550,15 +550,32 @@ async def main() -> None:
             return
 
         mono_token = parts[1].strip()
-        tg_id = message.from_user.id if message.from_user else None
 
+        if len(mono_token) < 20:
+            await message.answer(templates.connect_validation_error())
+            return
+
+        tg_id = message.from_user.id if message.from_user else None
         if tg_id is None:
             await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
+        await message.answer("🔍 Перевіряю токен через Monobank API...")
+
+        try:
+            mb = MonobankClient(token=mono_token)
+            try:
+                mb.client_info()
+            finally:
+                mb.close()
+        except Exception as e:
+            mapped = _map_monobank_error(e)
+            await message.answer(mapped or templates.error("Помилка перевірки токена."))
+            return
+
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
 
-        await message.answer(templates.connect_saved_message())
+        await message.answer(templates.connect_success_confirm())
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:

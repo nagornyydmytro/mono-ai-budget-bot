@@ -275,3 +275,18 @@ def monobank_generic_error_message() -> str:
 
 def llm_unavailable_message() -> str:
     return warning("AI зараз недоступний. Надішлю звіт без AI-інсайтів.")
+
+
+def connect_validation_error() -> str:
+    return error("Токен виглядає некоректно. Перевір, що ти вставив повний Personal API token.")
+
+
+def connect_success_confirm() -> str:
+    parts: list[str] = []
+    parts.append(success("Monobank підключено успішно."))
+    parts.append("")
+    parts.append("🔒 Доступ: тільки read-only (перегляд виписки)")
+    parts.append("🔐 Токен збережено локально (зашифровано)")
+    parts.append("")
+    parts.append("Наступний крок: `/accounts` — вибрати картки для аналізу.")
+    return "\n".join(parts).strip()
