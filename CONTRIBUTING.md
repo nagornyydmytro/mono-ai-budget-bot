@@ -6,6 +6,23 @@ Python version:
 Setup:
 poetry install
 
+Local config:
+- Copy .env.example → .env and fill required variables.
+- Do not commit .env or any .env.* files (only .env.example is tracked).
+
+Local state (stored under .cache/, ignored by git):
+- .cache/users/<telegram_user_id>.json — encrypted token + selected accounts + chat_id
+- .cache/tx/<telegram_user_id>/<account_id>.jsonl — local transaction ledger
+- .cache/reports/<telegram_user_id>/facts_<period>.json — cached period facts (today/week/month)
+- .cache/profiles/<telegram_user_id>.json — baseline profile cache
+- .cache/memory/<telegram_user_id>.json — NLQ aliases + pending follow-ups
+
+Reset to a clean slate:
+- macOS/Linux:
+  rm -rf .cache
+- Windows PowerShell:
+  Remove-Item -Recurse -Force .cache
+
 Run local checks before commit:
 poetry run ruff format .
 poetry run ruff check .
