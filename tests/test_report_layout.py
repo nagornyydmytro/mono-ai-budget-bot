@@ -10,6 +10,7 @@ def _render(**kwargs) -> str:
         trends_block=kwargs.get("trends_block"),
         anomalies_block=kwargs.get("anomalies_block"),
         insight_block=kwargs.get("insight_block"),
+        whatif_block=kwargs.get("whatif_block"),
     )
 
 
@@ -60,8 +61,10 @@ def test_layout_with_trends_and_ai():
 
 
 def test_layout_full_blocks():
-    text = _render(trends_block="TRENDS", anomalies_block="ANOM", insight_block="AI")
-    _assert_order(text, "HEADER", "FACTS", "TRENDS", "ANOM", "AI")
+    text = _render(
+        trends_block="TRENDS", anomalies_block="ANOM", insight_block="AI", whatif_block="WHATIF"
+    )
+    _assert_order(text, "HEADER", "FACTS", "TRENDS", "ANOM", "WHATIF", "AI")
 
     divider = _extract_divider_line(text)
     assert divider is not None

@@ -231,25 +231,6 @@ def _render_facts_block(facts: dict) -> str:
                             f"• {md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
                         )
 
-    whatifs = facts.get("whatif_suggestions") or []
-    if isinstance(whatifs, list) and whatifs:
-        lines.append("")
-        lines.append("*What-if (цікавий факт):*")
-        for w in whatifs[:2]:
-            title = md_escape(str(w.get("title", "—")))
-            base = float(w.get("monthly_spend_uah", 0.0))
-            scenarios = w.get("scenarios") or []
-
-            parts: list[str] = []
-            if isinstance(scenarios, list):
-                for s in scenarios[:2]:
-                    pct = int(s.get("pct", 0))
-                    sav = float(s.get("monthly_savings_uah", 0.0))
-                    parts.append(f"-{pct}% → ~{md_escape(_fmt_money(sav))}/міс")
-
-            tail = "; ".join(parts) if parts else "—"
-            lines.append(f"• {title} (зараз ~{md_escape(_fmt_money(base))}/міс): {tail}")
-
     return "\n".join(lines).strip()
 
 
@@ -312,6 +293,32 @@ def _render_anomalies_block(facts: dict) -> str | None:
     return "\n".join(lines).strip()
 
 
+def _render_whatif_block(facts: dict) -> str | None:
+    whatifs = facts.get("whatif_suggestions") or []
+    if not isinstance(whatifs, list) or not whatifs:
+        return None
+
+    lines: list[str] = []
+    lines.append("*What-if (можлива економія):*")
+
+    for w in whatifs[:2]:
+        title = md_escape(str(w.get("title", "—")))
+        base = float(w.get("monthly_spend_uah", 0.0))
+        scenarios = w.get("scenarios") or []
+
+        parts: list[str] = []
+        if isinstance(scenarios, list):
+            for s in scenarios[:2]:
+                pct = int(s.get("pct", 0))
+                sav = float(s.get("monthly_savings_uah", 0.0))
+                parts.append(f"-{pct}% → ~{md_escape(_fmt_money(sav))}/міс")
+
+        tail = "; ".join(parts) if parts else "—"
+        lines.append(f"• {title} (зараз ~{md_escape(_fmt_money(base))}/міс): {tail}")
+
+    return "\n".join(lines).strip()
+
+
 def _render_ai_block(ai_block: str | None) -> str | None:
     if not ai_block:
         return None
@@ -327,12 +334,14 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
     trends_block = _render_trends_block(facts)
     anomalies_block = _render_anomalies_block(facts)
     insight_block = _render_ai_block(ai_block)
+    whatif_block = _render_whatif_block(facts)
 
     return templates.report_layout(
         header=header,
         facts_block=facts_block,
         trends_block=trends_block,
         anomalies_block=anomalies_block,
+        whatif_block=whatif_block,
         insight_block=insight_block,
     )
 
