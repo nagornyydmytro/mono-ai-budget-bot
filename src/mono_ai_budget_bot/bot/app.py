@@ -231,6 +231,19 @@ def _render_facts_block(facts: dict) -> str:
                             f"• {md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
                         )
 
+    whatifs = facts.get("whatif_suggestions") or []
+    if isinstance(whatifs, list) and whatifs:
+        lines.append("")
+        lines.append("*What-if (цікавий факт):*")
+        for w in whatifs[:2]:
+            title = md_escape(str(w.get("title", "—")))
+            pct = int(w.get("reduction_pct", 0))
+            sav = float(w.get("monthly_savings_uah", 0.0))
+            base = float(w.get("monthly_spend_uah", 0.0))
+            lines.append(
+                f"• {title}: якщо зменшити на {pct}% — зекономиш ~{md_escape(_fmt_money(sav))}/міс (зараз ~{md_escape(_fmt_money(base))}/міс)"
+            )
+
     return "\n".join(lines).strip()
 
 

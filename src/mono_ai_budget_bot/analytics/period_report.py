@@ -8,6 +8,7 @@ from ..storage.tx_store import TxRecord
 from .compare import compare_categories, compare_totals
 from .compute import compute_facts
 from .from_ledger import rows_from_ledger
+from .whatif import build_whatif_suggestions
 
 SECONDS_IN_DAY = 24 * 60 * 60
 
@@ -27,7 +28,6 @@ def _to_iso_utc(ts: int) -> str:
 
 
 def _filter_records(records: list[TxRecord], window: PeriodWindow) -> list[TxRecord]:
-    # TxRecord.time is unix seconds
     return [r for r in records if window.start_ts <= int(r.time) < window.end_ts]
 
 
@@ -78,6 +78,9 @@ def build_period_report_from_ledger(
 
     current_facts = compute_facts(current_rows)
     prev_facts = compute_facts(prev_rows)
+    current_facts["whatif_suggestions"] = build_whatif_suggestions(
+        current_rows, period_days=days_back
+    )
 
     compare_block: dict[str, Any] = {
         "totals": compare_totals(current=current_facts, prev=prev_facts),
