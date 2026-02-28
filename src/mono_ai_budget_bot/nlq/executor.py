@@ -8,6 +8,7 @@ from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
     resolve_merchant_alias,
+    save_memory,
     set_pending_intent,
 )
 from mono_ai_budget_bot.storage.tx_store import TxStore
@@ -15,51 +16,38 @@ from mono_ai_budget_bot.storage.user_store import UserStore
 
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
-    intent = (intent_payload.get("intent") or "unsupported").strip()
+    intent = str(intent_payload.get("intent") or "unsupported").strip()
 
-    if intent == "profile_refresh":
-        user_store = UserStore()
-        cfg = user_store.load(telegram_user_id)
-        if cfg is None or not cfg.mono_token:
-            return "Спочатку підключи Monobank через /connect."
-        account_ids = cfg.selected_account_ids or []
-        if not account_ids:
-            return "Обери картки для аналізу через /accounts."
+    mem = load_memory(telegram_user_id)
+    pending = mem.get("pending_intent")
 
-        ts_to = int(time.time())
-        ts_from = ts_to - 28 * 86400
+    if isinstance(pending, dict):
+        alias = str(pending.get("recipient_alias") or "").strip().lower()
 
-        tx_store = TxStore()
-        rows = tx_store.load_range(
-            telegram_user_id=telegram_user_id,
-            account_ids=account_ids,
-            ts_from=ts_from,
-            ts_to=ts_to,
+        followup_value = (
+            intent_payload.get("merchant_contains")
+            or intent_payload.get("recipient_alias")
+            or intent_payload.get("recipient_contains")
+            or ""
         )
+        followup_value = str(followup_value).strip().lower()
 
-    if intent == "compare_to_baseline":
-        merchant_filter = (
-            resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
-        )
-        r = compare_yesterday_to_baseline(
-            rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28
-        )
-        sign = "+" if r.delta_cents >= 0 else ""
-        return f"Вчора: {r.yesterday_cents/100:.2f} грн. Зазвичай (медіана): {r.baseline_median_cents/100:.2f} грн. Різниця: {sign}{r.delta_cents/100:.2f} грн."
+        if alias and followup_value:
+            ra = mem.get("recipient_aliases")
+            if not isinstance(ra, dict):
+                ra = {}
+            ra[alias] = followup_value
+            mem["recipient_aliases"] = ra
+
+            mem["pending_intent"] = None
+            mem["pending_kind"] = None
+            mem["pending_options"] = None
+            save_memory(telegram_user_id, mem)
+
+            return execute_intent(telegram_user_id, pending)
 
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
-
-    days_raw = intent_payload.get("days")
-    try:
-        days = int(days_raw) if days_raw is not None else 30
-    except Exception:
-        days = 30
-    days = max(1, min(days, 31))
-
-    merchant_filter = (
-        resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
-    )
 
     user_store = UserStore()
     cfg = user_store.load(telegram_user_id)
@@ -70,14 +58,50 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if not account_ids:
         return "Обери картки для аналізу через /accounts."
 
+    # Time range
     ts_to = int(intent_payload.get("end_ts") or time.time())
     ts_from_raw = intent_payload.get("start_ts")
+
+    days_raw = intent_payload.get("days")
+    try:
+        days = int(days_raw) if days_raw is not None else 30
+    except Exception:
+        days = 30
+    days = max(1, min(days, 31))
+
     if ts_from_raw is None:
-        ts_from = ts_to - days * 24 * 60 * 60
+        ts_from = ts_to - days * 86400
     else:
         ts_from = int(ts_from_raw)
 
-    recipient_alias = (intent_payload.get("recipient_alias") or "").strip().lower()
+    tx_store = TxStore()
+    rows = tx_store.load_range(
+        telegram_user_id=telegram_user_id,
+        account_ids=account_ids,
+        ts_from=ts_from,
+        ts_to=ts_to,
+    )
+
+    # Special intents that work on full rows
+    if intent == "profile_refresh":
+        return "Профіль оновлено."
+
+    if intent == "compare_to_baseline":
+        merchant_filter = (
+            resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
+        )
+        r = compare_yesterday_to_baseline(
+            rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28
+        )
+        sign = "+" if r.delta_cents >= 0 else ""
+        return (
+            f"Вчора: {r.yesterday_cents/100:.2f} грн. "
+            f"Зазвичай (медіана): {r.baseline_median_cents/100:.2f} грн. "
+            f"Різниця: {sign}{r.delta_cents/100:.2f} грн."
+        )
+
+    # Recipient follow-up (needs rows)
+    recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
     if intent.startswith("transfer_") and recipient_alias:
         mem = load_memory(telegram_user_id)
         ra = mem.get("recipient_aliases") or {}
@@ -93,17 +117,19 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                     lines.append(f"{i}) {opt}")
                 return "\n".join(lines)
 
-            return f"Кого саме маєш на увазі під '{recipient_alias}'? Напиши точне ім'я отримувача як у виписці."
+            return (
+                f"Кого саме маєш на увазі під '{recipient_alias}'? "
+                "Напиши точне ім'я отримувача як у виписці."
+            )
 
-    tx_store = TxStore()
-    rows = tx_store.load_range(
-        telegram_user_id=telegram_user_id,
-        account_ids=account_ids,
-        ts_from=ts_from,
-        ts_to=ts_to,
+    merchant_filter = (
+        resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
     )
 
     filtered = []
+    mem = None
+    ra = None
+
     for r in rows:
         kind = classify_kind(r.amount, r.mcc, r.description)
 
@@ -120,22 +146,22 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         elif intent.startswith("transfer_out_"):
             if kind != "transfer_out":
                 continue
-            recipient_alias = (intent_payload.get("recipient_alias") or "").strip().lower()
             if recipient_alias:
-                mem = load_memory(telegram_user_id)
-                ra = mem.get("recipient_aliases") or {}
-                match_value = ra.get(recipient_alias)
+                if mem is None:
+                    mem = load_memory(telegram_user_id)
+                    ra = mem.get("recipient_aliases") or {}
+                match_value = ra.get(recipient_alias) if isinstance(ra, dict) else None
                 if match_value and match_value not in (r.description or "").lower():
                     continue
 
         elif intent.startswith("transfer_in_"):
             if kind != "transfer_in":
                 continue
-            recipient_alias = (intent_payload.get("recipient_alias") or "").strip().lower()
             if recipient_alias:
-                mem = load_memory(telegram_user_id)
-                ra = mem.get("recipient_aliases") or {}
-                match_value = ra.get(recipient_alias)
+                if mem is None:
+                    mem = load_memory(telegram_user_id)
+                    ra = mem.get("recipient_aliases") or {}
+                match_value = ra.get(recipient_alias) if isinstance(ra, dict) else None
                 if match_value and match_value not in (r.description or "").lower():
                     continue
 
@@ -176,18 +202,19 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
 
 def _top_recipient_candidates(rows, kind_prefix: str, limit: int = 5) -> list[str]:
-    from mono_ai_budget_bot.analytics.classify import classify_kind
-
     by_desc: dict[str, int] = {}
+
     for r in rows:
         kind = classify_kind(r.amount, r.mcc, r.description)
         if kind_prefix == "transfer_out" and kind != "transfer_out":
             continue
         if kind_prefix == "transfer_in" and kind != "transfer_in":
             continue
+
         desc = (r.description or "").strip()
         if not desc:
             continue
+
         by_desc[desc] = by_desc.get(desc, 0) + abs(int(r.amount))
 
     items = sorted(by_desc.items(), key=lambda kv: kv[1], reverse=True)
