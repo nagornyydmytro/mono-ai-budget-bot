@@ -11,6 +11,7 @@ from mono_ai_budget_bot.nlq.memory_store import (
     save_memory,
     set_pending_intent,
 )
+from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -133,7 +134,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if intent.startswith("spend_"):
             if kind != "spend":
                 continue
-            if merchant_filter and merchant_filter not in (r.description or "").lower():
+            if merchant_filter and norm(merchant_filter) not in norm(r.description or ""):
                 continue
 
         elif intent.startswith("income_"):

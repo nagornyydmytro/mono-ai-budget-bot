@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from mono_ai_budget_bot.nlq.text_norm import norm
+
 BASE_DIR = Path(".cache") / "memory"
 
 DEFAULT_MERCHANT_ALIASES = {
@@ -13,6 +15,24 @@ DEFAULT_MERCHANT_ALIASES = {
     "макд": "mcdonalds",
     "mcd": "mcdonalds",
     "mc": "mcdonalds",
+    "сільпо": "silpo",
+    "силпо": "silpo",
+    "атб": "atb",
+    "atb": "atb",
+    "novus": "novus",
+    "глово": "glovo",
+    "glovo": "glovo",
+    "bolt": "bolt",
+    "uber": "uber",
+    "uklon": "uklon",
+    "уклон": "uklon",
+    "wolt": "wolt",
+    "rozetka": "rozetka",
+    "розетка": "rozetka",
+    "аптека": "apteka",
+    "apteka": "apteka",
+    "eva": "eva",
+    "watsons": "watsons",
 }
 
 
@@ -71,7 +91,7 @@ def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None)
     if not merchant_contains:
         return None
 
-    raw = merchant_contains.strip().lower()
+    raw = norm(merchant_contains)
     if not raw:
         return None
 
@@ -80,21 +100,36 @@ def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None)
     if not isinstance(aliases, dict):
         return raw
 
-    if raw in aliases and isinstance(aliases[raw], str) and aliases[raw].strip():
-        return aliases[raw].strip().lower()
+    direct = aliases.get(raw)
+    if isinstance(direct, str):
+        direct_norm = norm(direct)
+        if direct_norm:
+            return direct_norm
+
+    if len(raw) <= 3:
+        return raw
+
+    best_v: str | None = None
+    best_k_len = 0
 
     for k, v in aliases.items():
         if not isinstance(k, str) or not isinstance(v, str):
             continue
-        kk = k.strip().lower()
-        vv = v.strip().lower()
+        kk = norm(k)
+        vv = norm(v)
         if not kk or not vv:
             continue
+
         if raw == kk or raw in kk or kk in raw:
-            aliases[raw] = vv
-            mem["merchant_aliases"] = aliases
-            save_memory(telegram_user_id, mem)
-            return vv
+            if len(kk) > best_k_len:
+                best_k_len = len(kk)
+                best_v = vv
+
+    if best_v:
+        aliases[raw] = best_v
+        mem["merchant_aliases"] = aliases
+        save_memory(telegram_user_id, mem)
+        return best_v
 
     return raw
 

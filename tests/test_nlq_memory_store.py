@@ -2,6 +2,7 @@ import time
 
 import mono_ai_budget_bot.nlq.executor as ex
 import mono_ai_budget_bot.nlq.memory_store as ms
+from mono_ai_budget_bot.nlq.memory_store import resolve_merchant_alias, save_memory
 from mono_ai_budget_bot.storage.user_store import UserConfig
 
 
@@ -114,3 +115,15 @@ def test_followup_completes_and_saves_mapping(tmp_path, monkeypatch):
     exmod.execute_intent(1, {"intent": "spend_sum", "merchant_contains": "McDonalds"})
     mem = msmod.load_memory(1)
     assert "дівчині" in mem.get("recipient_aliases", {})
+
+
+def test_default_merchant_aliases_contains_mcdonalds(tmp_path):
+    user_id = 1
+    save_memory(user_id, {"merchant_aliases": {"мак": "mcdonalds"}})
+    assert resolve_merchant_alias(user_id, "мак") in ("mcdonald", "mcdonalds")
+
+
+def test_resolve_merchant_alias_normalizes(tmp_path):
+    user_id = 1
+    save_memory(user_id, {"merchant_aliases": {"мак": "mcdonalds"}})
+    assert resolve_merchant_alias(user_id, "  МАК!! ") == "mcdonalds"
