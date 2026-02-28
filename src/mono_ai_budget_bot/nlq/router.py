@@ -56,6 +56,19 @@ _TRANSFER_COUNT_OVERRIDE_RE = re.compile(
     r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\b(переказ|транзакц)",
     re.IGNORECASE,
 )
+_MERCHANT_AFTER_NA_RE = re.compile(
+    r"\bна\s+([^\?\.,!]+?)(?:\s+(ніж|чем)\s+зазвичай|\s+than\s+usual|\s+usual|\s+звичайно|$)",
+    re.IGNORECASE,
+)
+_MERCHANT_TAIL_RE = re.compile(
+    r"\b(?:на|в|у)\s+([^\?\.,!]+)$",
+    re.IGNORECASE,
+)
+
+_MERCHANT_NA_SEGMENT_RE = re.compile(
+    r"\bна\s+([^\?\.,!]+)",
+    re.IGNORECASE,
+)
 
 
 def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any]:
@@ -218,11 +231,24 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             intent = "unsupported"
 
     merchant: str | None = None
-    m2 = re.search(r"\bна\s+(.+?)(?:\s+за\s+|\s+за\s+останні\s+|$)", t)
-    if m2:
-        candidate = m2.group(1).strip(" .,!?:;\"'()[]{}").strip()
-        if candidate:
-            merchant = candidate
+
+    parts: list[str] = []
+    for m in re.finditer(r"\bна\s+([^\?\.,!]+)", t, flags=re.IGNORECASE):
+        cand = m.group(1).strip()
+        if cand:
+            parts.append(cand)
+
+    if parts:
+        cand = parts[-1]
+        cand = re.split(r"\b(ніж|чем|than)\b", cand, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+
+        if re.match(r"^(скільки|сколько|how\s+much|how\s+many)\b", cand, flags=re.IGNORECASE):
+            if " на " in cand:
+                cand = cand.split(" на ")[-1].strip()
+
+        cand = cand.strip(" .,!?:;\"'()[]{}").strip()
+        if cand and not re.search(r"\b(\d+%|\d+)\b", cand):
+            merchant = cand
 
     recipient_alias = None
     m3 = _RECIPIENT_ALIAS_RE.search(t)
