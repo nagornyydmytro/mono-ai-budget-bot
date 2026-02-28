@@ -540,8 +540,15 @@ async def main() -> None:
         kb = build_main_menu_keyboard()
 
         text = templates.start_message()
-        if cfg is None or not cfg.mono_token:
-            text = "\n".join([text, "", templates.info("Почни з `/connect <token>`")]).strip()
+        if cfg is not None and cfg.mono_token:
+            text = "\n".join(
+                [
+                    text,
+                    "",
+                    templates.success("Monobank підключено."),
+                    templates.onboarding_connected_next_steps(),
+                ]
+            ).strip()
 
         await message.answer(text, reply_markup=kb.as_markup())
 
@@ -584,8 +591,18 @@ async def main() -> None:
 
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
 
+        kb = build_main_menu_keyboard()
         await message.answer(templates.connect_success_confirm())
-        await message.answer(templates.info("Далі: /accounts → вибери картки → bootstrap 1м/3м"))
+        await message.answer(
+            "\n".join(
+                [
+                    templates.onboarding_connected_next_steps(),
+                    "",
+                    "Можеш натиснути 🧾 Accounts прямо в меню нижче.",
+                ]
+            ).strip(),
+            reply_markup=kb.as_markup(),
+        )
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:

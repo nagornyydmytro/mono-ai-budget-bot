@@ -136,7 +136,9 @@ def start_message() -> str:
         )
     )
     lines.append("")
-    lines.append("🧭 *Далі:* натисни кнопки меню або введи /connect")
+    lines.append(onboarding_steps_not_connected())
+    lines.append("")
+    lines.append("🧭 Натисни кнопку в меню або введи команду.")
     return "\n".join(lines).strip()
 
 
@@ -355,3 +357,24 @@ def recipient_followup_cancelled() -> str:
 
 def recipient_followup_saved(alias: str, resolved: str) -> str:
     return f"✅ Збережено: {alias} → {resolved}"
+
+
+def onboarding_steps_not_connected() -> str:
+    return section(
+        "Початок (3 кроки)",
+        [
+            "1) `/connect <token>` або кнопка 🔐 Connect",
+            "2) `/accounts` або кнопка 🧾 Accounts — вибери картки",
+            "3) `/bootstrap` — завантаж історію (1м або 3м)",
+        ],
+    )
+
+
+def onboarding_connected_next_steps() -> str:
+    return section(
+        "Далі (2 кроки)",
+        [
+            "1) `/accounts` або кнопка 🧾 Accounts — вибери картки",
+            "2) `/bootstrap` — завантаж історію (1м або 3м)",
+        ],
+    )
