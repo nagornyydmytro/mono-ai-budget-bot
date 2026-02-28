@@ -19,8 +19,8 @@ from mono_ai_budget_bot.analytics.period_report import build_period_report_from_
 from mono_ai_budget_bot.analytics.trends import compute_trends
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.monobank import MonobankClient
-from mono_ai_budget_bot.nlq.executor import execute_intent
-from mono_ai_budget_bot.nlq.router import parse_nlq_intent
+from mono_ai_budget_bot.nlq.pipeline import handle_nlq
+from mono_ai_budget_bot.nlq.types import NLQRequest
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 
@@ -1023,9 +1023,21 @@ async def main() -> None:
         user_id = message.from_user.id
 
         try:
-            intent = parse_nlq_intent(message.text)
-            answer = execute_intent(user_id, intent)
-            await message.answer(answer)
+            resp = handle_nlq(
+                NLQRequest(
+                    telegram_user_id=user_id,
+                    text=message.text,
+                    now_ts=int(time.time()),
+                )
+            )
+
+            if resp.result:
+                await message.answer(resp.result.text)
+                return
+
+            await message.answer(
+                "Не зрозумів запит. Спробуй, наприклад: 'Скільки я витратив на мак за 5 днів?'"
+            )
         except Exception:
             await message.answer("Сталася помилка при обробці запиту.")
 

@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from mono_ai_budget_bot.nlq.periods import parse_period_range
+from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
 
 _DAYS_RE = re.compile(r"(\d{1,3})\s*(?:дн|днів|дня|days)\b", re.IGNORECASE)
 _INCOME_RE = re.compile(
@@ -115,3 +116,10 @@ def parse_nlq_intent(user_text: str) -> dict[str, Any]:
         "merchant_contains": merchant,
         "recipient_alias": recipient_alias,
     }
+
+
+def route(req: NLQRequest) -> NLQIntent | None:
+    parsed = parse_nlq_intent(req.text)
+    if not parsed or parsed.get("intent") in (None, "unsupported"):
+        return None
+    return NLQIntent(name=parsed["intent"], slots=parsed)
