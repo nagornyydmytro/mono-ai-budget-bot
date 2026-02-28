@@ -139,6 +139,9 @@ def build_main_menu_keyboard():
         InlineKeyboardButton(text="🔄 Refresh week", callback_data="menu_refresh_week"),
         InlineKeyboardButton(text="🔎 Status", callback_data="menu_status"),
     )
+    kb.row(
+        InlineKeyboardButton(text="📘 Help", callback_data="menu_help"),
+    )
     return kb
 
 
@@ -535,7 +538,8 @@ async def main() -> None:
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
-        await message.answer(templates.help_message())
+        kb = build_main_menu_keyboard()
+        await message.answer(templates.help_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
@@ -739,6 +743,13 @@ async def main() -> None:
     async def cb_menu_connect(query: CallbackQuery) -> None:
         if query.message:
             await query.message.answer(templates.connect_instructions())
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "menu_help")
+    async def cb_menu_help(query: CallbackQuery) -> None:
+        if query.message:
+            kb = build_main_menu_keyboard()
+            await query.message.answer(templates.help_message(), reply_markup=kb.as_markup())
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_week")
