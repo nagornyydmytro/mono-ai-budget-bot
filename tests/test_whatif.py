@@ -26,3 +26,36 @@ def test_whatif_detects_taxi():
 
     out = build_whatif_suggestions(rows, period_days=7)
     assert any(x["key"] == "taxi" for x in out)
+
+
+def test_auto_detect_high_category():
+    rows = []
+
+    for i in range(10):
+        rows.append(
+            TxRow(
+                account_id="a",
+                ts=(i + 1) * 86400,
+                amount=-40000,
+                description="Restaurant",
+                mcc=5812,
+                kind="spend",
+            )
+        )
+
+    rows.append(
+        TxRow(
+            account_id="a",
+            ts=15 * 86400,
+            amount=-10000,
+            description="Other",
+            mcc=5411,
+            kind="spend",
+        )
+    )
+
+    out = build_whatif_suggestions(rows, period_days=14)
+
+    assert len(out) >= 1
+    assert out[0]["monthly_savings_uah"] > 0
+    assert "share" in out[0]
