@@ -32,3 +32,10 @@ def test_nlq_yesterday_sets_days_1():
     assert intent["intent"] == "income_count"
     assert intent["days"] == 1
     assert intent["period_label"] == "вчора"
+
+
+def test_nlq_transfer_in_count_yesterday():
+    intent = parse_nlq_intent("Скільки вчора було вхідних переказів?")
+    assert intent["intent"] == "transfer_in_count"
+    assert intent["days"] == 1
+    assert intent["period_label"] == "вчора"

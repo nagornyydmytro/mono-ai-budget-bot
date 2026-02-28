@@ -17,7 +17,18 @@ _TRANSFER_OUT_RE = re.compile(
     re.IGNORECASE,
 )
 _TRANSFER_IN_RE = re.compile(
-    r"\b(отрим(ав|ала|ати)?|прийшл(и|о)|надійшл(и|о)|received|got)\b",
+    (
+        r"\b("
+        r"вхідн\w*\s+переказ\w*|"
+        r"входящ\w*\s+перевод\w*|"
+        r"incoming\s+transfer(s)?|"
+        r"inbound\s+transfer(s)?|"
+        r"отрим(ав|ала|ати)?|"
+        r"прийшл(и|о)|"
+        r"надійшл(и|о)|"
+        r"received|got"
+        r")\b"
+    ),
     re.IGNORECASE,
 )
 _COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
