@@ -79,8 +79,8 @@ LLM повертає:
 - recommendations
 - next_step
 
-LLM не:
-- рахує гроші
+LLM:
+- не рахує гроші
 - не має доступу до сирих транзакцій
 - не дає фінансових гарантій
 
@@ -398,17 +398,48 @@ poetry run pytest
 
 ## Demo Screenshots
 
-Connect flow  
-docs/demo/connect.png  
+### Start flow
+![Start flow](docs/demo/start.png)
 
-Accounts picker  
-docs/demo/accounts.png  
+---
 
-Weekly report  
-docs/demo/week.png  
+### Help flow
+![Help flow](docs/demo/help.png)
 
-NLQ example  
-docs/demo/nlq.png  
+---
+
+### Connect flow
+![Connect flow](docs/demo/connect.png)
+
+---
+
+### Accounts picker
+![Accounts picker](docs/demo/accounts.png)
+
+---
+
+### Weekly report
+![Weekly report](docs/demo/week.png)
+
+---
+
+### AI report
+![AI report](docs/demo/week_ai.png)
+
+---
+
+### No cahce
+![No cahce](docs/demo/no_info.png)
+
+---
+
+### NLQ example 1
+![NLQ example 1](docs/demo/nlq_1.png)
+
+---
+
+### NLQ example 2
+![NLQ example 2](docs/demo/nlq_2.png)
 
 ## Roadmap
 
