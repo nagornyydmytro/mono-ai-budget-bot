@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import median
+from statistics import mean, median
 from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
@@ -14,12 +14,14 @@ class Baseline:
     daily_avg_cents: int
     daily_median_cents: int
     spend_by_kind_cents: dict[str, int]
+    weekday_median_cents: dict[int, int]
+    weekday_avg_cents: dict[int, int]
 
 
 def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
     window_days = max(7, min(int(window_days), 90))
 
-    spend_rows = []
+    spend_rows: list[Any] = []
     spend_by_kind: dict[str, int] = {}
 
     for r in rows:
@@ -38,13 +40,22 @@ def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
         day = t // 86400
         by_day[day] = by_day.get(day, 0) + (-int(r.amount))
 
-    if by_day:
-        min_day = min(by_day.keys())
-    else:
-        min_day = 0
-
+    min_day = min(by_day.keys()) if by_day else 0
     daily_vals = [by_day.get(min_day + i, 0) for i in range(window_days)]
-    daily_med = int(median(daily_vals))
+    daily_med = int(median(daily_vals)) if daily_vals else 0
+
+    weekday_vals: dict[int, list[int]] = {}
+    for d, cents in by_day.items():
+        wd = (d + 4) % 7
+        weekday_vals.setdefault(wd, []).append(int(cents))
+
+    weekday_median: dict[int, int] = {}
+    weekday_avg: dict[int, int] = {}
+    for wd, vals in weekday_vals.items():
+        if not vals:
+            continue
+        weekday_median[wd] = int(median(vals))
+        weekday_avg[wd] = int(mean(vals))
 
     return Baseline(
         window_days=window_days,
@@ -52,6 +63,8 @@ def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
         daily_avg_cents=int(daily_avg),
         daily_median_cents=int(daily_med),
         spend_by_kind_cents=spend_by_kind,
+        weekday_median_cents=weekday_median,
+        weekday_avg_cents=weekday_avg,
     )
 
 

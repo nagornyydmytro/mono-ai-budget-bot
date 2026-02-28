@@ -22,3 +22,5 @@ def test_compute_baseline_basic():
     assert b.total_spend_cents == 3500
     assert b.daily_avg_cents == 500
     assert b.daily_median_cents == 0
+    assert isinstance(b.weekday_median_cents, dict)
+    assert isinstance(b.weekday_avg_cents, dict)

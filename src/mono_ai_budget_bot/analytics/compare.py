@@ -101,7 +101,18 @@ def compare_yesterday_to_baseline(
             daily[d] = daily.get(d, 0) + cents
 
     vals = list(daily.values())
-    base = int(median(vals)) if vals else 0
+    overall = int(median(vals)) if vals else 0
+
+    y_day = y0 // 86400
+    y_wd = (y_day + 4) % 7
+
+    weekday_vals: list[int] = []
+    for d, cents in daily.items():
+        wd = (int(d) + 4) % 7
+        if wd == y_wd:
+            weekday_vals.append(int(cents))
+
+    base = int(median(weekday_vals)) if len(weekday_vals) >= 3 else overall
 
     return CompareResult(
         yesterday_cents=int(y_sum),
