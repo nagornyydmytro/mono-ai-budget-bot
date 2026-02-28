@@ -290,3 +290,31 @@ def connect_success_confirm() -> str:
     parts.append("")
     parts.append("Наступний крок: `/accounts` — вибрати картки для аналізу.")
     return "\n".join(parts).strip()
+
+
+def aliases_empty_message() -> str:
+    return "🧠 Збережених alias-ів поки що немає."
+
+
+def aliases_list_message(merchant_aliases: dict, recipient_aliases: dict) -> str:
+    parts: list[str] = []
+    parts.append("🧠 *Збережені alias-и*")
+    parts.append("")
+
+    if merchant_aliases:
+        parts.append("*Мерчанти:*")
+        for k, v in merchant_aliases.items():
+            parts.append(f"• {k} → {v}")
+        parts.append("")
+
+    if recipient_aliases:
+        parts.append("*Отримувачі:*")
+        for k, v in recipient_aliases.items():
+            parts.append(f"• {k} → {v}")
+        parts.append("")
+
+    return "\n".join(parts).strip()
+
+
+def aliases_cleared_message() -> str:
+    return "🧹 Alias-и очищено."

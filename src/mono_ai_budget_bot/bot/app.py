@@ -6,12 +6,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-
-from aiogram import Bot, Dispatcher, F
-from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from typing import TYPE_CHECKING
 
 from mono_ai_budget_bot.analytics.anomalies import detect_anomalies
 from mono_ai_budget_bot.analytics.compute import compute_facts
@@ -20,6 +15,7 @@ from mono_ai_budget_bot.analytics.period_report import build_period_report_from_
 from mono_ai_budget_bot.analytics.trends import compute_trends
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.monobank import MonobankClient
+from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.nlq.pipeline import handle_nlq
 from mono_ai_budget_bot.nlq.types import NLQRequest
 from mono_ai_budget_bot.storage.report_store import ReportStore
@@ -31,6 +27,10 @@ from ..logging_setup import setup_logging
 from ..storage.profile_store import ProfileStore
 from ..storage.user_store import UserConfig, UserStore
 from . import templates
+
+if TYPE_CHECKING:
+    from aiogram.types import CallbackQuery, Message
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 store = ReportStore()
 tx_store = TxStore()
@@ -101,6 +101,8 @@ def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: l
 def render_accounts_screen(
     accounts: list[dict], selected_ids: set[str]
 ) -> tuple[str, InlineKeyboardBuilder]:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     lines: list[str] = []
     lines.append("🧾 *Вибір карток для аналізу*")
     lines.append("")
@@ -126,6 +128,9 @@ def render_accounts_screen(
 
 
 def build_main_menu_keyboard():
+    from aiogram.types import InlineKeyboardButton
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
     kb.row(
         InlineKeyboardButton(text="🔐 Connect", callback_data="menu_connect"),
@@ -459,6 +464,10 @@ async def _compute_and_cache_reports_for_user(
 
 
 async def main() -> None:
+    from aiogram import Bot, Dispatcher, F
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.filters import Command
+
     settings = load_settings()
     setup_logging(settings.log_level)
     profile_store = ProfileStore(Path(".cache") / "profiles")
@@ -728,6 +737,9 @@ async def main() -> None:
 
     @dp.callback_query(lambda c: c.data == "acc_done")
     async def cb_done_accounts(query: CallbackQuery) -> None:
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+
         tg_id = query.from_user.id if query.from_user else None
         cfg = users.load(tg_id) if tg_id is not None else None
 
@@ -985,6 +997,36 @@ async def main() -> None:
                 )
 
         asyncio.create_task(job())
+
+    @dp.message(Command("aliases"))
+    async def cmd_aliases(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            await message.answer(templates.error("Не зміг визначити user id."))
+            return
+
+        mem = memory_store.load_memory(tg_id)
+        merchant_aliases = mem.get("merchant_aliases", {})
+        recipient_aliases = mem.get("recipient_aliases", {})
+
+        if not merchant_aliases and not recipient_aliases:
+            await message.answer(templates.aliases_empty_message())
+            return
+
+        await message.answer(templates.aliases_list_message(merchant_aliases, recipient_aliases))
+
+    @dp.message(Command("aliases_clear"))
+    async def cmd_aliases_clear(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            await message.answer(templates.error("Не зміг визначити user id."))
+            return
+
+        memory_store.save_memory(
+            tg_id,
+            {"merchant_aliases": {}, "recipient_aliases": {}},
+        )
+        await message.answer(templates.aliases_cleared_message())
 
     async def _send_period_report(message: Message, period: str) -> None:
         want_ai = " ai" in (" " + (message.text or "").lower() + " ")
