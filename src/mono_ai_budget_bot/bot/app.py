@@ -104,10 +104,12 @@ def render_accounts_screen(
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     lines: list[str] = []
-    lines.append("🧾 *Вибір карток для аналізу*")
-    lines.append("")
-    lines.append("Обери картки, які враховувати у звітах (інші ігноруються).")
-    lines.append("")
+    lines.append(
+        templates.accounts_picker_header(
+            selected=len(selected_ids),
+            total=len(accounts),
+        )
+    )
 
     kb = InlineKeyboardBuilder()
 
@@ -120,11 +122,11 @@ def render_accounts_screen(
         kb.button(text=text, callback_data=f"acc_toggle:{acc_id}")
 
     kb.adjust(1)
-    kb.button(text="🧹 Очистити вибір", callback_data="acc_clear")
-    kb.button(text="✅ Готово", callback_data="acc_done")
+    kb.button(text="🧹 Clear", callback_data="acc_clear")
+    kb.button(text="✅ Done", callback_data="acc_done")
     kb.adjust(1, 2)
 
-    return "\n".join(lines), kb
+    return "\n".join(lines).strip(), kb
 
 
 def build_main_menu_keyboard():
@@ -773,29 +775,33 @@ async def main() -> None:
         cfg = users.load(tg_id) if tg_id is not None else None
 
         count = len(cfg.selected_account_ids) if cfg else 0
+        if count <= 0:
+            await query.answer("Спочатку вибери хоча б 1 картку", show_alert=True)
+            return
 
         kb = InlineKeyboardBuilder()
         kb.row(
-            InlineKeyboardButton(text="📥 Завантажити 1 місяць", callback_data="boot_30"),
-            InlineKeyboardButton(text="📥 Завантажити 3 місяці", callback_data="boot_90"),
+            InlineKeyboardButton(text="📥 Bootstrap 1 місяць", callback_data="boot_30"),
         )
-        kb.row(InlineKeyboardButton(text="Пропустити", callback_data="boot_skip"))
+        kb.row(
+            InlineKeyboardButton(text="📥 Bootstrap 3 місяці", callback_data="boot_90"),
+        )
+        kb.row(
+            InlineKeyboardButton(text="➡️ Skip", callback_data="boot_skip"),
+        )
 
         if query.message:
             await query.message.edit_text(
                 "\n".join(
                     [
-                        templates.success("Збережено!"),
+                        templates.accounts_after_done(),
                         "",
                         f"Вибрано карток: {count}",
-                        "",
-                        "Хочеш завантажити історію транзакцій?",
-                        "Після завантаження звіти /today /week /month працюватимуть одразу.",
                     ]
                 ).strip(),
                 reply_markup=kb.as_markup(),
             )
-        await query.answer("Готово")
+        await query.answer("Done")
 
     @dp.callback_query(lambda c: c.data == "menu_connect")
     async def cb_menu_connect(query: CallbackQuery) -> None:
