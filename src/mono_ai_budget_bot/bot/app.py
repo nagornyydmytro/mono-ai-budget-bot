@@ -569,7 +569,7 @@ async def main() -> None:
             await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
-        await message.answer("🔍 Перевіряю токен через Monobank API...")
+        await message.answer("🔍 Перевіряю токен через Monobank API… (read-only)")
 
         try:
             mb = MonobankClient(token=mono_token)
@@ -585,6 +585,7 @@ async def main() -> None:
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
 
         await message.answer(templates.connect_success_confirm())
+        await message.answer(templates.info("Далі: /accounts → вибери картки → bootstrap 1м/3м"))
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
@@ -597,29 +598,40 @@ async def main() -> None:
 
         if cfg is None:
             parts.append(
-                templates.section("Monobank", ["🔐 Не підключено", "Підключи: `/connect <token>`"])
-            )
-        else:
-            masked = md_escape(_mask_secret(cfg.mono_token))
-            parts.append(
                 templates.section(
                     "Monobank",
                     [
-                        f"🔐 Підключено ({masked})",
-                        f"📌 Вибрані картки: {len(cfg.selected_account_ids)}",
+                        "🔐 Не підключено (зроби `/connect`)",
+                        "📌 Вибрані картки: —",
                     ],
                 )
             )
-
-        parts.append("")
-        parts.append(templates.section("Кеш звітів", []))
-
-        if cfg is None:
+            parts.append("")
+            parts.append(templates.section("Кеш звітів", []))
             parts.append("• today: —")
             parts.append("• week: —")
             parts.append("• month: —")
             await message.answer("\n".join(parts).strip())
             return
+
+        masked = (
+            md_escape(_mask_secret(cfg.mono_token)) if getattr(cfg, "mono_token", None) else "—"
+        )
+        selected_cnt = len(cfg.selected_account_ids or [])
+
+        parts.append(
+            templates.section(
+                "Monobank",
+                [
+                    f"🔐 Підключено ({masked})",
+                    f"📌 Вибрані картки: {selected_cnt}",
+                    "• якщо кешу нема — зроби `/refresh week` або натисни 🔄 Refresh week",
+                ],
+            )
+        )
+
+        parts.append("")
+        parts.append(templates.section("Кеш звітів", []))
 
         for p in ("today", "week", "month"):
             stored = store.load(cfg.telegram_user_id, p)

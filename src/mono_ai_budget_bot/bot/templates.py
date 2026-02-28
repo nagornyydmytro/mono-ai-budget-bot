@@ -225,6 +225,9 @@ def connect_instructions() -> str:
     parts: list[str] = []
     parts.append("🔐 *Підключення Monobank*")
     parts.append("")
+    parts.append("🔒 Доступ тільки *read-only* (перегляд виписки). Бот НЕ може робити платежі.")
+    parts.append("🧠 AI бачить лише агреговані факти (суми/категорії), без сирих транзакцій.")
+    parts.append("")
     parts.append("1) Відкрий сторінку Personal API:")
     parts.append("https://api.monobank.ua/index.html")
     parts.append("2) Створи Personal API token")
@@ -266,7 +269,17 @@ def monobank_invalid_token_message() -> str:
 
 
 def monobank_rate_limit_message() -> str:
-    return warning("Забагато запитів до Monobank (429). Спробуй ще раз через ~1 хвилину.")
+    return warning(
+        "\n".join(
+            [
+                "Monobank тимчасово обмежив запити (429 Too Many Requests).",
+                "Що робити:",
+                "• почекай 60–90 секунд і повтори дію",
+                "• якщо робиш bootstrap/refresh — роби рідше, не спам",
+                "• перевір /status (останній кеш може вже бути)",
+            ]
+        )
+    )
 
 
 def monobank_generic_error_message() -> str:

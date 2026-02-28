@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import random
 import time
@@ -8,6 +10,18 @@ import httpx
 from ..core.cache import JsonDiskCache
 from ..core.rate_limit import FileRateLimiter
 from .models import MonoClientInfo, MonoStatementItem
+
+
+def _sleep_seconds(attempt: int) -> float:
+    base = min(20.0, 1.2 * (2**attempt))
+    return base + random.random() * 0.8
+
+
+def _retry_after_seconds(headers: httpx.Headers) -> float | None:
+    ra = headers.get("Retry-After")
+    if ra and ra.isdigit():
+        return float(ra)
+    return None
 
 
 class MonobankClient:
@@ -40,24 +54,28 @@ class MonobankClient:
         self._client.close()
 
     def _request_json(self, path: str) -> object:
-        max_attempts = 6
-        base_sleep = 2.0
-
+        max_attempts = 5
         last_err: Exception | None = None
 
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(max_attempts):
             try:
                 resp = self._client.get(path)
 
                 if resp.status_code == 429:
-                    retry_after = resp.headers.get("Retry-After")
-                    if retry_after and retry_after.isdigit():
-                        sleep_s = float(retry_after)
-                    else:
-                        sleep_s = min(60.0, base_sleep * (2 ** (attempt - 1)))
-                        sleep_s += random.uniform(0.0, 1.5)
-
+                    sleep_s = _retry_after_seconds(resp.headers)
+                    if sleep_s is None:
+                        sleep_s = min(90.0, _sleep_seconds(attempt))
                     time.sleep(sleep_s)
+                    last_err = RuntimeError(
+                        f"Monobank API error: 429 Too Many Requests. Response: {resp.text}"
+                    )
+                    continue
+
+                if 500 <= resp.status_code <= 599:
+                    time.sleep(min(30.0, _sleep_seconds(attempt)))
+                    last_err = RuntimeError(
+                        f"Monobank API error: {resp.status_code} {resp.reason_phrase}. Response: {resp.text}"
+                    )
                     continue
 
                 try:
@@ -71,9 +89,7 @@ class MonobankClient:
 
             except (httpx.TimeoutException, httpx.NetworkError) as e:
                 last_err = e
-                sleep_s = min(30.0, base_sleep * (2 ** (attempt - 1)))
-                sleep_s += random.uniform(0.0, 1.0)
-                time.sleep(sleep_s)
+                time.sleep(min(30.0, _sleep_seconds(attempt)))
                 continue
 
             except Exception as e:
@@ -89,7 +105,9 @@ class MonobankClient:
             return MonoClientInfo.model_validate(cached)
 
         self._limiter.throttle(
-            f"mono:client-info:{self._token_hash}", self.CLIENT_INFO_MIN_INTERVAL, wait=True
+            f"mono:client-info:{self._token_hash}",
+            self.CLIENT_INFO_MIN_INTERVAL,
+            wait=True,
         )
 
         data = self._request_json("/personal/client-info")
