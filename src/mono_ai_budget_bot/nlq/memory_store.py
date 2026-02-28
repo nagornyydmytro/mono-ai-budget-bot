@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(".cache") / "memory"
+
 DEFAULT_MERCHANT_ALIASES = {
     "мак": "mcdonalds",
     "макдак": "mcdonalds",
@@ -20,12 +21,15 @@ def _default_memory() -> dict[str, Any]:
         "merchant_aliases": dict(DEFAULT_MERCHANT_ALIASES),
         "recipient_aliases": {},
         "pending_intent": None,
+        "pending_kind": None,
+        "pending_options": None,
     }
 
 
 def load_memory(telegram_user_id: int) -> dict[str, Any]:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     path = BASE_DIR / f"{int(telegram_user_id)}.json"
+
     if not path.exists():
         data = _default_memory()
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -42,11 +46,17 @@ def load_memory(telegram_user_id: int) -> dict[str, Any]:
         data = _default_memory()
 
     if "merchant_aliases" not in data or not isinstance(data.get("merchant_aliases"), dict):
-        data["merchant_aliases"] = {}
+        data["merchant_aliases"] = dict(DEFAULT_MERCHANT_ALIASES)
+
     if "recipient_aliases" not in data or not isinstance(data.get("recipient_aliases"), dict):
         data["recipient_aliases"] = {}
+
     if "pending_intent" not in data:
         data["pending_intent"] = None
+    if "pending_kind" not in data:
+        data["pending_kind"] = None
+    if "pending_options" not in data:
+        data["pending_options"] = None
 
     return data
 
@@ -89,9 +99,16 @@ def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None)
     return raw
 
 
-def set_pending_intent(telegram_user_id: int, payload: dict[str, Any]) -> None:
+def set_pending_intent(
+    telegram_user_id: int,
+    payload: dict[str, Any],
+    kind: str | None = None,
+    options: list[str] | None = None,
+) -> None:
     mem = load_memory(telegram_user_id)
     mem["pending_intent"] = payload
+    mem["pending_kind"] = kind
+    mem["pending_options"] = options
     save_memory(telegram_user_id, mem)
 
 
@@ -99,15 +116,35 @@ def pop_pending_intent(telegram_user_id: int) -> dict[str, Any] | None:
     mem = load_memory(telegram_user_id)
     p = mem.get("pending_intent")
     mem["pending_intent"] = None
+    mem["pending_kind"] = None
+    mem["pending_options"] = None
     save_memory(telegram_user_id, mem)
     return p if isinstance(p, dict) else None
 
 
+def get_pending_options(telegram_user_id: int) -> list[str] | None:
+    mem = load_memory(telegram_user_id)
+    opts = mem.get("pending_options")
+    if not isinstance(opts, list):
+        return None
+    out: list[str] = []
+    for x in opts:
+        if isinstance(x, str) and x.strip():
+            out.append(x.strip())
+    return out or None
+
+
 def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) -> None:
+    a = (alias or "").strip().lower()
+    v = (match_value or "").strip().lower()
+    if not a or not v:
+        return
+
     mem = load_memory(telegram_user_id)
     ra = mem.get("recipient_aliases") or {}
     if not isinstance(ra, dict):
         ra = {}
-    ra[alias.strip().lower()] = match_value.strip().lower()
+
+    ra[a] = v
     mem["recipient_aliases"] = ra
     save_memory(telegram_user_id, mem)

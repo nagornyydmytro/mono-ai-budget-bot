@@ -7,9 +7,7 @@ from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
-    pop_pending_intent,
     resolve_merchant_alias,
-    save_recipient_alias,
     set_pending_intent,
 )
 from mono_ai_budget_bot.storage.tx_store import TxStore
@@ -52,15 +50,6 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
 
-    pending = pop_pending_intent(telegram_user_id)
-    if pending:
-        alias = (pending.get("recipient_alias") or "").strip().lower()
-        if alias:
-            save_recipient_alias(
-                telegram_user_id, alias, intent_payload.get("merchant_contains") or ""
-            )
-            return execute_intent(telegram_user_id, pending)
-
     days_raw = intent_payload.get("days")
     try:
         days = int(days_raw) if days_raw is not None else 30
@@ -93,7 +82,17 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         mem = load_memory(telegram_user_id)
         ra = mem.get("recipient_aliases") or {}
         if not isinstance(ra, dict) or recipient_alias not in ra:
-            set_pending_intent(telegram_user_id, intent_payload)
+            kind_prefix = "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
+            options = _top_recipient_candidates(rows, kind_prefix=kind_prefix, limit=5)
+            set_pending_intent(telegram_user_id, intent_payload, kind="recipient", options=options)
+
+            if options:
+                lines = [f"Кого саме маєш на увазі під '{recipient_alias}'?"]
+                lines.append("Вибери номер або напиши точне ім'я як у виписці:")
+                for i, opt in enumerate(options, start=1):
+                    lines.append(f"{i}) {opt}")
+                return "\n".join(lines)
+
             return f"Кого саме маєш на увазі під '{recipient_alias}'? Напиши точне ім'я отримувача як у виписці."
 
     tx_store = TxStore()
@@ -174,3 +173,22 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return f"За останні {days} днів було {len(filtered)} вхідних переказів."
 
     return "Поки що цей тип запиту не реалізовано."
+
+
+def _top_recipient_candidates(rows, kind_prefix: str, limit: int = 5) -> list[str]:
+    from mono_ai_budget_bot.analytics.classify import classify_kind
+
+    by_desc: dict[str, int] = {}
+    for r in rows:
+        kind = classify_kind(r.amount, r.mcc, r.description)
+        if kind_prefix == "transfer_out" and kind != "transfer_out":
+            continue
+        if kind_prefix == "transfer_in" and kind != "transfer_in":
+            continue
+        desc = (r.description or "").strip()
+        if not desc:
+            continue
+        by_desc[desc] = by_desc.get(desc, 0) + abs(int(r.amount))
+
+    items = sorted(by_desc.items(), key=lambda kv: kv[1], reverse=True)
+    return [k for k, _ in items[:limit]]
