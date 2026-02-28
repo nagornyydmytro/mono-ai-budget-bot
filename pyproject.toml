@@ -39,7 +39,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
-ignore = ["E501"] # line-length контролимо форматером + line-length=100
+ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mono_ai_budget_bot"]

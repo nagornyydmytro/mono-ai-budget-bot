@@ -40,6 +40,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         )
 
     if intent == "compare_to_baseline":
+        merchant_filter = (
+            resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
+        )
         r = compare_yesterday_to_baseline(
             rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28
         )

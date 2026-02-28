@@ -111,6 +111,6 @@ def test_followup_completes_and_saves_mapping(tmp_path, monkeypatch):
     )
     assert "Кого саме" in s
 
-    s2 = exmod.execute_intent(1, {"intent": "spend_sum", "merchant_contains": "McDonalds"})
+    exmod.execute_intent(1, {"intent": "spend_sum", "merchant_contains": "McDonalds"})
     mem = msmod.load_memory(1)
     assert "дівчині" in mem.get("recipient_aliases", {})

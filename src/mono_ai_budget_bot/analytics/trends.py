@@ -63,15 +63,13 @@ def compute_trends(rows: list[Any], now_ts: int, window_days: int = 7) -> Trends
 
     for lab in labels:
         p = int(prev_by.get(lab, 0))
-        l = int(last_by.get(lab, 0))
-        d = l - p
+        last = int(last_by.get(lab, 0))
+        d = last - p
         if p > 0:
             pct = d / p
         else:
-            pct = 1.0 if l > 0 else 0.0
-        items.append(
-            TrendItem(label=lab, prev_cents=p, last_cents=l, delta_cents=d, delta_pct=float(pct))
-        )
+            pct = 1.0 if last > 0 else 0.0
+        items.append(TrendItem(label=lab, prev_cents=p, last_cents=last, delta_cents=d, delta_pct=float(pct)))
 
     items_sorted = sorted(items, key=lambda x: x.delta_cents, reverse=True)
     top_growing = [x for x in items_sorted if x.delta_cents > 0][:3]
