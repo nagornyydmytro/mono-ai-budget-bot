@@ -402,3 +402,23 @@ def accounts_after_done() -> str:
             "• 3 місяці — краще для трендів/аномалій",
         ]
     ).strip()
+
+
+def err_not_connected() -> str:
+    return warning("Monobank не підключено. Зроби `/connect <token>` або натисни 🔐 Connect.")
+
+
+def err_no_accounts_selected() -> str:
+    return warning("Не вибрано картки. Відкрий `/accounts` і натисни ✅ Done.")
+
+
+def err_no_ledger(period: str) -> str:
+    return warning(
+        "\n".join(
+            [
+                f"Немає даних для *{period}*.",
+                "Схоже, кеш ще не створено.",
+                f"Зроби `/refresh {period}` або натисни 🔄 Refresh {period}.",
+            ]
+        )
+    )

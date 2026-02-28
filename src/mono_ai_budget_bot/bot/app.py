@@ -98,6 +98,14 @@ def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: l
     users.save(telegram_user_id, mono_token=cfg.mono_token, selected_account_ids=selected)
 
 
+def _ensure_ready(cfg: UserConfig | None) -> str | None:
+    if cfg is None or not cfg.mono_token:
+        return templates.err_not_connected()
+    if not cfg.selected_account_ids:
+        return templates.err_no_accounts_selected()
+    return None
+
+
 def render_accounts_screen(
     accounts: list[dict], selected_ids: set[str]
 ) -> tuple[str, InlineKeyboardBuilder]:
@@ -670,10 +678,8 @@ async def main() -> None:
             return
 
         cfg = users.load(tg_id)
-        if cfg is None:
-            await message.answer(
-                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
-            )
+        if cfg is None or not cfg.mono_token:
+            await message.answer(templates.err_not_connected())
             return
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -951,14 +957,12 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None or not cfg.mono_token:
-            await message.answer(
-                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
-            )
+            await message.answer(templates.err_not_connected())
             return
 
         account_ids = list(cfg.selected_account_ids or [])
         if not account_ids:
-            await message.answer(templates.warning("Спочатку вибери картки для аналізу: /accounts"))
+            await message.answer(templates.err_no_accounts_selected())
             return
 
         parts = (message.text or "").split()
@@ -1073,16 +1077,15 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None or not cfg.mono_token:
-            await message.answer(
-                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
-            )
+            await message.answer(templates.err_not_connected())
+            return
+        if not cfg.selected_account_ids:
+            await message.answer(templates.err_no_accounts_selected())
             return
 
         stored = store.load(tg_id, period)
         if stored is None:
-            await message.answer(
-                templates.warning(f"Немає кешу для {period}. Зроби: `/refresh {period}`")
-            )
+            await message.answer(templates.err_no_ledger(period))
             return
 
         ai_block = None
@@ -1172,6 +1175,19 @@ async def main() -> None:
         if text_lower == "cancel":
             memory_store.pop_pending_intent(user_id)
             await message.answer(templates.recipient_followup_cancelled())
+            return
+
+        cfg = users.load(user_id)
+        if cfg is None or not cfg.mono_token:
+            await message.answer(templates.err_not_connected())
+            return
+        if not cfg.selected_account_ids:
+            await message.answer(templates.err_no_accounts_selected())
+            return
+
+        stored = store.load(user_id, "week")
+        if stored is None:
+            await message.answer(templates.err_no_ledger("week"))
             return
 
         try:
