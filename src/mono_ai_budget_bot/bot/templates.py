@@ -318,3 +318,27 @@ def aliases_list_message(merchant_aliases: dict, recipient_aliases: dict) -> str
 
 def aliases_cleared_message() -> str:
     return "🧹 Alias-и очищено."
+
+
+def recipient_followup_prompt(options: list[str]) -> str:
+    lines: list[str] = []
+    lines.append("🤔 Я не впевнений, кого саме ти маєш на увазі.")
+    lines.append("")
+    lines.append("Обереш номер або введи назву так, як у виписці.")
+    lines.append("")
+
+    for i, name in enumerate(options[:7], start=1):
+        lines.append(f"{i}. {name}")
+
+    lines.append("")
+    lines.append("✍️ Або напиши вручну.")
+    lines.append("❌ Напиши `cancel`, щоб скасувати.")
+    return "\n".join(lines).strip()
+
+
+def recipient_followup_cancelled() -> str:
+    return "❌ Уточнення скасовано."
+
+
+def recipient_followup_saved(alias: str, resolved: str) -> str:
+    return f"✅ Збережено: {alias} → {resolved}"

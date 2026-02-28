@@ -1132,8 +1132,44 @@ async def main() -> None:
     @dp.message(F.text & ~F.text.startswith("/"))
     async def handle_plain_text(message: Message) -> None:
         user_id = message.from_user.id
+        text_lower = (message.text or "").strip().lower()
 
+        if text_lower == "cancel":
+            memory_store.clear_pending(user_id)
+            await message.answer(templates.recipient_followup_cancelled())
+            return
         try:
+            pending = memory_store.get_pending(user_id)
+            if pending and pending.get("kind") == "recipient":
+                raw_input = message.text.strip()
+
+                options = pending.get("options", [])
+                alias = pending.get("alias")
+
+                if not isinstance(alias, str) or not alias.strip():
+                    memory_store.clear_pending(user_id)
+                    await message.answer(
+                        templates.error("Уточнення втратило контекст. Спробуй ще раз.")
+                    )
+                    return
+
+                if raw_input.isdigit():
+                    idx = int(raw_input) - 1
+                    visible = options[:7]
+                    if 0 <= idx < len(visible):
+                        resolved = options[idx]
+                        memory_store.save_recipient_alias(user_id, alias, resolved)
+                        memory_store.clear_pending(user_id)
+
+                        await message.answer(templates.recipient_followup_saved(alias, resolved))
+                        return
+
+                memory_store.save_recipient_alias(user_id, alias, raw_input)
+                memory_store.clear_pending(user_id)
+
+                await message.answer(templates.recipient_followup_saved(alias, raw_input))
+                return
+
             resp = handle_nlq(
                 NLQRequest(
                     telegram_user_id=user_id,
@@ -1141,6 +1177,11 @@ async def main() -> None:
                     now_ts=int(time.time()),
                 )
             )
+
+            if resp.pending and resp.pending.kind == "recipient":
+                options = resp.pending.options or []
+                await message.answer(templates.recipient_followup_prompt(options))
+                return
 
             if resp.result:
                 await message.answer(resp.result.text)
