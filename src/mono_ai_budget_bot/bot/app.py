@@ -128,15 +128,16 @@ def render_accounts_screen(
 def build_main_menu_keyboard():
     kb = InlineKeyboardBuilder()
     kb.row(
+        InlineKeyboardButton(text="🔐 Connect", callback_data="menu_connect"),
+        InlineKeyboardButton(text="🧾 Accounts", callback_data="menu_accounts"),
+    )
+    kb.row(
         InlineKeyboardButton(text="📊 Week", callback_data="menu_week"),
         InlineKeyboardButton(text="📅 Month", callback_data="menu_month"),
     )
     kb.row(
-        InlineKeyboardButton(text="🔎 Status", callback_data="menu_status"),
-        InlineKeyboardButton(text="🧾 Accounts", callback_data="menu_accounts"),
-    )
-    kb.row(
         InlineKeyboardButton(text="🔄 Refresh week", callback_data="menu_refresh_week"),
+        InlineKeyboardButton(text="🔎 Status", callback_data="menu_status"),
     )
     return kb
 
@@ -522,12 +523,15 @@ async def main() -> None:
             return
 
         users.save(tg_id, chat_id=message.chat.id)
+        cfg = users.load(tg_id)
 
         kb = build_main_menu_keyboard()
-        await message.answer(
-            templates.start_message(),
-            reply_markup=kb.as_markup(),
-        )
+
+        text = templates.start_message()
+        if cfg is None or not cfg.mono_token:
+            text = "\n".join([text, "", templates.info("Почни з `/connect <token>`")]).strip()
+
+        await message.answer(text, reply_markup=kb.as_markup())
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
@@ -730,6 +734,12 @@ async def main() -> None:
                 reply_markup=kb.as_markup(),
             )
         await query.answer("Готово")
+
+    @dp.callback_query(lambda c: c.data == "menu_connect")
+    async def cb_menu_connect(query: CallbackQuery) -> None:
+        if query.message:
+            await query.message.answer(templates.connect_instructions())
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_week")
     async def cb_menu_week(query: CallbackQuery) -> None:
