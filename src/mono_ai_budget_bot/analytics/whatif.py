@@ -9,12 +9,11 @@ from .models import TxRow
 
 
 @dataclass(frozen=True)
-class WhatIfSuggestion:
-    key: str
-    title: str
-    reduction_pct: int
-    period_spend_uah: float
-    monthly_spend_uah: float
+class SavingsProjection:
+    base_monthly_uah: float
+    reduce_pct: int | None
+    reduce_amount_uah: float | None
+    projected_monthly_uah: float
     monthly_savings_uah: float
 
 
@@ -27,6 +26,44 @@ def _norm(text: str) -> str:
     s = _strip_re.sub(" ", s)
     s = _ws_re.sub(" ", s).strip()
     return s
+
+
+def project_savings(
+    base_monthly_uah: float,
+    reduce_pct: int | None = None,
+    reduce_amount_uah: float | None = None,
+) -> SavingsProjection:
+    base = max(float(base_monthly_uah), 0.0)
+
+    if reduce_pct is not None and reduce_amount_uah is not None:
+        raise ValueError("Specify either reduce_pct or reduce_amount_uah, not both")
+
+    if reduce_pct is None and reduce_amount_uah is None:
+        raise ValueError("One of reduce_pct or reduce_amount_uah must be provided")
+
+    if reduce_pct is not None:
+        pct = max(min(int(reduce_pct), 100), 0)
+        savings = round(base * (pct / 100.0), 2)
+        projected = round(base - savings, 2)
+        return SavingsProjection(
+            base_monthly_uah=round(base, 2),
+            reduce_pct=pct,
+            reduce_amount_uah=None,
+            projected_monthly_uah=projected,
+            monthly_savings_uah=savings,
+        )
+
+    amount = max(float(reduce_amount_uah), 0.0)
+    savings = round(min(amount, base), 2)
+    projected = round(base - savings, 2)
+
+    return SavingsProjection(
+        base_monthly_uah=round(base, 2),
+        reduce_pct=None,
+        reduce_amount_uah=round(amount, 2),
+        projected_monthly_uah=projected,
+        monthly_savings_uah=savings,
+    )
 
 
 def _sum_spend_uah(rows: list[TxRow], pred) -> float:
@@ -62,39 +99,29 @@ def build_whatif_suggestions(rows: list[TxRow], period_days: int) -> list[dict[s
         lambda r: (category_from_mcc(r.mcc) or "Інше") == "Кафе/Ресторани",
     )
 
-    candidates: list[WhatIfSuggestion] = []
+    candidates: list[dict[str, Any]] = []
 
-    def add_candidate(key: str, title: str, pct: int, spend: float, min_monthly: float) -> None:
+    def maybe_add(key: str, title: str, pct: int, spend: float, min_monthly: float) -> None:
         monthly = _project_monthly(spend, period_days)
-        savings = round(monthly * (pct / 100.0), 2)
-        if monthly >= min_monthly and savings >= 100.0:
-            candidates.append(
-                WhatIfSuggestion(
-                    key=key,
-                    title=title,
-                    reduction_pct=pct,
-                    period_spend_uah=round(spend, 2),
-                    monthly_spend_uah=monthly,
-                    monthly_savings_uah=savings,
-                )
-            )
-
-    add_candidate("taxi", "Таксі", 20, taxi_spend, min_monthly=400.0)
-    add_candidate("delivery", "Доставка", 20, delivery_spend, min_monthly=350.0)
-    add_candidate("cafes", "Кафе/Ресторани", 10, cafes_spend, min_monthly=600.0)
-
-    candidates.sort(key=lambda x: x.monthly_savings_uah, reverse=True)
-
-    out: list[dict[str, Any]] = []
-    for s in candidates[:2]:
-        out.append(
+        if monthly < min_monthly:
+            return
+        proj = project_savings(monthly, reduce_pct=pct)
+        if proj.monthly_savings_uah < 100.0:
+            return
+        candidates.append(
             {
-                "key": s.key,
-                "title": s.title,
-                "reduction_pct": s.reduction_pct,
-                "period_spend_uah": s.period_spend_uah,
-                "monthly_spend_uah": s.monthly_spend_uah,
-                "monthly_savings_uah": s.monthly_savings_uah,
+                "key": key,
+                "title": title,
+                "reduction_pct": pct,
+                "monthly_spend_uah": proj.base_monthly_uah,
+                "monthly_savings_uah": proj.monthly_savings_uah,
+                "projected_monthly_uah": proj.projected_monthly_uah,
             }
         )
-    return out
+
+    maybe_add("taxi", "Таксі", 20, taxi_spend, 400.0)
+    maybe_add("delivery", "Доставка", 20, delivery_spend, 350.0)
+    maybe_add("cafes", "Кафе/Ресторани", 10, cafes_spend, 600.0)
+
+    candidates.sort(key=lambda x: x["monthly_savings_uah"], reverse=True)
+    return candidates[:2]
