@@ -53,3 +53,37 @@ def test_detects_spike_and_first_time():
 
     assert any(x.label.startswith("mcd") and x.reason == "spike_vs_median" for x in out)
     assert any(x.label.startswith("new_merchant") and x.reason == "first_time_large" for x in out)
+
+
+def test_detects_category_spike():
+    now = 200 * 86400
+
+    rows = []
+
+    for d in range(10, 0, -1):
+        rows.append(
+            Row(
+                time=now - (d + 1) * 86400 + 10,
+                amount=-12000,
+                mcc=5814,
+                description=f"merchant_{d}",
+            )
+        )
+
+    rows.append(
+        Row(
+            time=now - 1 * 86400 + 10,
+            amount=-60000,
+            mcc=5814,
+            description="one_off",
+        )
+    )
+
+    out = detect_anomalies(
+        rows,
+        now_ts=now,
+        lookback_days=28,
+        min_threshold_cents=20000,
+    )
+
+    assert any(x.label.startswith("категорія:") and "Кафе/Ресторани" in x.label for x in out)
