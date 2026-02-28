@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
 from mono_ai_budget_bot.nlq.memory_store import (
@@ -11,7 +12,6 @@ from mono_ai_budget_bot.nlq.memory_store import (
     save_memory,
     set_pending_intent,
 )
-from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -90,7 +90,10 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
         )
         r = compare_yesterday_to_baseline(
-            rows, now_ts=ts_to, merchant_contains=merchant_filter, lookback_days=28
+            rows,
+            now_ts=ts_to,
+            merchant_contains=merchant_filter,
+            category=str(intent_payload.get("category") or "").strip() or None,
         )
         sign = "+" if r.delta_cents >= 0 else ""
         return (
@@ -134,7 +137,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if intent.startswith("spend_"):
             if kind != "spend":
                 continue
-            if merchant_filter and norm(merchant_filter) not in norm(r.description or ""):
+            cat = str(intent_payload.get("category") or "").strip()
+            if cat:
+                c = category_from_mcc(r.mcc)
+                if c != cat:
+                    continue
+            if merchant_filter and merchant_filter not in (r.description or "").lower():
                 continue
 
         elif intent.startswith("income_"):

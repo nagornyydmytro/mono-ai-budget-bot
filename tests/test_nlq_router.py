@@ -39,3 +39,11 @@ def test_nlq_transfer_in_count_yesterday():
     assert intent["intent"] == "transfer_in_count"
     assert intent["days"] == 1
     assert intent["period_label"] == "вчора"
+
+
+def test_nlq_category_detect_bars_yesterday():
+    intent = parse_nlq_intent("Скільки вчора витратив на бари?")
+    assert intent["intent"] == "spend_sum"
+    assert intent["days"] == 1
+    assert intent["period_label"] == "вчора"
+    assert intent["category"] == "Кафе/Ресторани"

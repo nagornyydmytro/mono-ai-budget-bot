@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any
 
+from mono_ai_budget_bot.analytics.categories import category_from_mcc
+
 
 def pct_change(current: float, prev: float) -> float | None:
     if prev == 0:
@@ -55,6 +57,7 @@ def compare_yesterday_to_baseline(
     rows: list[Any],
     now_ts: int,
     merchant_contains: str | None = None,
+    category: str | None = None,
     lookback_days: int = 28,
 ) -> CompareResult:
     from mono_ai_budget_bot.analytics.classify import classify_kind
@@ -67,6 +70,7 @@ def compare_yesterday_to_baseline(
     hist_start = today0 - lookback_days * 86400
 
     filt = (merchant_contains or "").strip().lower()
+    cat = (category or "").strip()
 
     y_sum = 0
     daily: dict[int, int] = {}
@@ -83,6 +87,10 @@ def compare_yesterday_to_baseline(
         if filt and filt not in desc:
             continue
 
+        if cat:
+            c = category_from_mcc(getattr(r, "mcc", None))
+            if c != cat:
+                continue
         cents = -amt
 
         if y0 <= t < today0:

@@ -4,6 +4,7 @@ import re
 import time
 from typing import Any
 
+from mono_ai_budget_bot.nlq.category_keywords import detect_category
 from mono_ai_budget_bot.nlq.periods import parse_period_range
 from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
 
@@ -71,9 +72,11 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "merchant_contains": None,
             "recipient_alias": None,
             "period_label": None,
+            "category": None,
         }
 
     t = text.lower()
+    category = detect_category(t)
 
     pr = parse_period_range(t, now_ts)
     start_ts = pr.start_ts if pr is not None else None
@@ -244,6 +247,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "merchant_contains": merchant,
         "recipient_alias": recipient_alias,
         "period_label": period_label,
+        "category": category,
     }
 
 
