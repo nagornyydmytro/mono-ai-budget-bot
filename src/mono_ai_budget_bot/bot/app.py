@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..storage.profile_store import ProfileStore
 from ..storage.user_store import UserConfig, UserStore
+from . import templates
 
 store = ReportStore()
 tx_store = TxStore()
@@ -50,30 +52,22 @@ def md_escape(text: str) -> str:
 
 
 def _map_monobank_error(e: Exception) -> str | None:
-    """
-    Map Monobank client RuntimeError messages to user-friendly text.
-    MonobankClient currently raises RuntimeError("Monobank API error: <code> ...").
-    """
     s = str(e)
 
     if "Monobank API error: 401" in s or "Monobank API error: 403" in s:
-        return (
-            "❌ Токен Monobank недійсний або прострочений. Зроби /connect і додай актуальний токен."
-        )
+        return templates.monobank_invalid_token_message()
 
     if "Monobank API error: 429" in s:
-        return (
-            "⏳ Забагато запитів до Monobank. Я оновлю пізніше — спробуй ще раз через ~1 хвилину."
-        )
+        return templates.monobank_rate_limit_message()
 
     if "Monobank API error:" in s:
-        return "⚠️ Monobank тимчасово недоступний або повернув помилку. Спробуй пізніше."
+        return templates.monobank_generic_error_message()
 
     return None
 
 
 def _map_llm_error(_: Exception) -> str:
-    return "🤖 AI зараз недоступний. Надішлю звіт без AI-інсайтів."
+    return templates.llm_unavailable_message()
 
 
 def _fmt_money(v: float) -> str:
@@ -212,7 +206,8 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
             else:
                 why = reason or "аномалія"
             lines.append(
-                f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} (база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}"
+                f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} "
+                f"(база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}"
             )
         lines.append("")
 
@@ -229,7 +224,8 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
             pct_txt = "—" if p_real is None else f"{p_real:+.2f}%"
             lines.append("*Порівняння з попереднім періодом:*")
             lines.append(
-                f"• Реальні витрати: {md_escape(sign + _fmt_money(float(d_real)))} ({md_escape(pct_txt)})"
+                f"• Реальні витрати: {md_escape(sign + _fmt_money(float(d_real)))} "
+                f"({md_escape(pct_txt)})"
             )
             lines.append("")
 
@@ -248,7 +244,8 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
                     sign2 = "+" if dlt >= 0 else ""
                     pct_txt2 = "—" if pctv is None else f"{pctv:+.2f}%"
                     lines.append(
-                        f"• {md_escape(str(k))}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
+                        f"• {md_escape(str(k))}: {md_escape(sign2 + _fmt_money(dlt))} "
+                        f"({md_escape(pct_txt2)})"
                     )
                 lines.append("")
 
@@ -261,12 +258,6 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
 
 
 async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
-    """
-    Ledger-based refresh (no direct Monobank calls).
-    Assumes ledger was synced earlier by sync job / refresh command.
-
-    period: "today" | "week" | "month"
-    """
     if not cfg.selected_account_ids:
         return
 
@@ -462,8 +453,6 @@ async def main() -> None:
 
     dp = Dispatcher()
 
-    from collections import defaultdict
-
     user_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     users = UserStore()
@@ -517,126 +506,96 @@ async def main() -> None:
             return
 
         users.save(tg_id, chat_id=message.chat.id)
-
-        text = (
-            "👋 Mono AI Budget Bot\n\n"
-            "Я допоможу аналізувати твої витрати Monobank з AI-інсайтами.\n\n"
-            "🔌 Підключення:\n"
-            "/connect — додати Monobank token\n"
-            "Отримати токен: https://api.monobank.ua/index.html\n\n"
-            "📊 Звіти:\n"
-            "/today\n"
-            "/week\n"
-            "/month\n\n"
-            "⚙️ Дані зберігаються локально (папка .cache).\n"
-            "Деталі — /help"
-        )
-
-        await message.answer(text, parse_mode=None)
+        await message.answer(templates.start_message())
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
-        await message.answer(
-            "📘 Команди:\n\n"
-            "🔌 Підключення:\n"
-            "/connect — додати Monobank token\n"
-            "/status — перевірити доступ до API\n"
-            "/accounts — вибрати рахунки\n"
-            "/refresh — синхронізувати ledger\n\n"
-            "📊 Звіти:\n"
-            "/today — витрати за сьогодні\n"
-            "/week — останні 7 днів + порівняння\n"
-            "/month — останні 30 днів + порівняння\n\n"
-            "🔒 Privacy:\n"
-            "Токен і ledger зберігаються локально (.cache).\n"
-            "Щоб видалити всі дані — видали папку .cache.\n\n"
-            "Monobank API: https://api.monobank.ua/index.html",
-            parse_mode=None,
-        )
+        await message.answer(templates.help_message())
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
         parts = (message.text or "").split(maxsplit=1)
 
         if len(parts) < 2 or not parts[1].strip():
-            await message.answer(
-                "🔐 Підключення Monobank\n\n"
-                "1) Перейди на сторінку:\n"
-                "https://api.monobank.ua/index.html\n"
-                "2) Авторизуйся через Monobank\n"
-                "3) Створи Personal API token\n"
-                "4) Надішли його так:\n"
-                "/connect YOUR_TOKEN\n\n"
-                "Токен зберігається локально і не публікується.",
-                parse_mode=None,
-            )
+            await message.answer(templates.connect_instructions())
             return
 
         mono_token = parts[1].strip()
         tg_id = message.from_user.id if message.from_user else None
 
         if tg_id is None:
-            await message.answer("Не зміг визначити твій Telegram user id.")
+            await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
 
-        await message.answer(
-            "✅ Monobank token збережено.\n\n"
-            "Далі:\n"
-            "• /accounts — вибір карток\n"
-            "Після вибору карток бот запропонує завантажити історію за 1 або 3 місяці."
-        )
+        await message.answer(templates.connect_saved_message())
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
-        lines = ["*Статус:*"]
-
         tg_id = message.from_user.id if message.from_user else None
         cfg = users.load(tg_id) if tg_id is not None else None
 
+        parts: list[str] = []
+        parts.append("🔎 *Статус*")
+        parts.append("")
+
         if cfg is None:
-            lines.append("🔐 Monobank: не підключено")
-            lines.append("Підключи: /connect <monobank token>")
+            parts.append(
+                templates.section("Monobank", ["🔐 Не підключено", "Підключи: `/connect <token>`"])
+            )
         else:
             masked = md_escape(_mask_secret(cfg.mono_token))
-            lines.append(f"🔐 Monobank: підключено ({masked})")
-            lines.append(f"📌 Вибрані картки: {len(cfg.selected_account_ids)}")
+            parts.append(
+                templates.section(
+                    "Monobank",
+                    [
+                        f"🔐 Підключено ({masked})",
+                        f"📌 Вибрані картки: {len(cfg.selected_account_ids)}",
+                    ],
+                )
+            )
 
-        lines.append("")
-        lines.append("*Статус кешу:*")
+        parts.append("")
+        parts.append(templates.section("Кеш звітів", []))
+
+        if cfg is None:
+            parts.append("• today: —")
+            parts.append("• week: —")
+            parts.append("• month: —")
+            await message.answer("\n".join(parts).strip())
+            return
+
         for p in ("today", "week", "month"):
             stored = store.load(cfg.telegram_user_id, p)
             if stored is None:
-                lines.append(f"• {p}: немає (зроби /refresh {p})")
+                parts.append(f"• {p}: немає (зроби `/refresh {p}`)")
             else:
                 ts = datetime.fromtimestamp(stored.generated_at).isoformat(timespec="seconds")
-                lines.append(f"• {p}: {md_escape(ts)}")
+                parts.append(f"• {p}: {md_escape(ts)}")
 
-        await message.answer("\n".join(lines))
+        await message.answer("\n".join(parts).strip())
 
     @dp.message(Command("accounts"))
     async def cmd_accounts(message: Message) -> None:
         tg_id = message.from_user.id if message.from_user else None
         if tg_id is None:
-            await message.answer("Не зміг визначити твій Telegram user id.")
+            await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer("🔐 Спочатку підключи Monobank: /connect <monobank token>")
+            await message.answer(
+                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
+            )
             return
-
-        from ..monobank import MonobankClient
 
         mb = MonobankClient(token=cfg.mono_token)
         try:
             info = mb.client_info()
         except Exception as e:
             msg = _map_monobank_error(e)
-            await message.answer(
-                msg or f"❌ Помилка Monobank: {md_escape(str(e))}", parse_mode=None
-            )
+            await message.answer(msg or templates.error(f"Помилка Monobank: {md_escape(str(e))}"))
             return
         finally:
             mb.close()
@@ -658,7 +617,7 @@ async def main() -> None:
 
         cfg = users.load(tg_id)
         if cfg is None:
-            await query.answer("Спочатку підключи /connect", show_alert=True)
+            await query.answer("Спочатку /connect", show_alert=True)
             return
 
         acc_id = (query.data or "").split("acc_toggle:", 1)[1].strip()
@@ -670,8 +629,6 @@ async def main() -> None:
             selected.add(acc_id)
 
         _save_selected_accounts(users, tg_id, sorted(selected))
-
-        from ..monobank import MonobankClient
 
         mb = MonobankClient(token=cfg.mono_token)
         try:
@@ -707,8 +664,6 @@ async def main() -> None:
 
         _save_selected_accounts(users, tg_id, [])
 
-        from ..monobank import MonobankClient
-
         mb = MonobankClient(token=cfg.mono_token)
         try:
             info = mb.client_info()
@@ -741,12 +696,17 @@ async def main() -> None:
 
         if query.message:
             await query.message.edit_text(
-                "✅ Збережено!\n\n"
-                f"Вибрано карток: {count}\n\n"
-                "Хочеш завантажити історію транзакцій?\n"
-                "Після завантаження звіти /today /week /month працюватимуть одразу.\n",
+                "\n".join(
+                    [
+                        templates.success("Збережено!"),
+                        "",
+                        f"Вибрано карток: {count}",
+                        "",
+                        "Хочеш завантажити історію транзакцій?",
+                        "Після завантаження звіти /today /week /month працюватимуть одразу.",
+                    ]
+                ).strip(),
                 reply_markup=kb.as_markup(),
-                parse_mode=None,
             )
         await query.answer("Готово")
 
@@ -770,8 +730,7 @@ async def main() -> None:
         if query.data == "boot_skip":
             if query.message:
                 await query.message.edit_text(
-                    "Ок! Можеш зробити /refresh week або одразу /week (якщо кеш уже є).",
-                    parse_mode=None,
+                    "Ок! Можеш зробити `/refresh week` або одразу `/week` (якщо кеш уже є)."
                 )
             await query.answer("Пропущено")
             return
@@ -780,10 +739,14 @@ async def main() -> None:
 
         if query.message:
             await query.message.edit_text(
-                f"📥 Запустив завантаження історії за {days} днів у фоні… "
-                "Це може зайняти час через ліміти Monobank API.\n\n"
-                "Я напишу, коли буде готово ✅",
-                parse_mode=None,
+                "\n".join(
+                    [
+                        f"📥 Запустив завантаження історії за *{days} днів* у фоні…",
+                        "Це може зайняти час через ліміти Monobank API.",
+                        "",
+                        "Я напишу, коли буде готово ✅",
+                    ]
+                ).strip()
             )
         await query.answer("Старт")
 
@@ -793,7 +756,6 @@ async def main() -> None:
         async def job() -> None:
             try:
                 async with user_locks[tg_id]:
-                    from ..monobank import MonobankClient
                     from ..monobank.sync import sync_accounts_ledger
 
                     def _run_sync() -> object:
@@ -816,24 +778,28 @@ async def main() -> None:
                     if chat_id is not None:
                         await bot.send_message(
                             chat_id,
-                            "✅ Готово!\n\n"
-                            f"Карток: {res.accounts}\n"
-                            f"Запитів до API: {res.fetched_requests}\n"
-                            f"Додано транзакцій: {res.appended}\n\n"
-                            "Тепер можеш:\n"
-                            "• /today\n"
-                            "• /week\n"
-                            "• /month\n"
-                            "• /week ai\n",
-                            parse_mode=None,
+                            "\n".join(
+                                [
+                                    templates.success("Готово!"),
+                                    "",
+                                    f"Карток: {res.accounts}",
+                                    f"Запитів до API: {res.fetched_requests}",
+                                    f"Додано транзакцій: {res.appended}",
+                                    "",
+                                    "Тепер можеш:",
+                                    "• /today",
+                                    "• /week",
+                                    "• /month",
+                                    "• /week ai",
+                                ]
+                            ).strip(),
                         )
             except Exception as e:
                 if chat_id is not None:
                     msg = _map_monobank_error(e)
                     await bot.send_message(
                         chat_id,
-                        f"❌ Помилка bootstrap: {md_escape(msg or str(e))}",
-                        parse_mode=None,
+                        templates.error(f"Помилка bootstrap: {md_escape(msg or str(e))}"),
                     )
 
         asyncio.create_task(job())
@@ -842,24 +808,26 @@ async def main() -> None:
     async def cmd_refresh(message: Message) -> None:
         tg_id = message.from_user.id if message.from_user else None
         if tg_id is None:
-            await message.answer("Не зміг визначити твій Telegram user id.")
+            await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
         cfg = users.load(tg_id)
         if cfg is None or not cfg.mono_token:
-            await message.answer("Спочатку підключи Monobank: /connect YOUR_TOKEN")
+            await message.answer(
+                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
+            )
             return
 
         account_ids = list(cfg.selected_account_ids or [])
         if not account_ids:
-            await message.answer("Спочатку вибери картки для аналізу: /accounts")
+            await message.answer(templates.warning("Спочатку вибери картки для аналізу: /accounts"))
             return
 
         parts = (message.text or "").split()
         arg = parts[1].strip().lower() if len(parts) > 1 else "week"
 
         if arg not in ("today", "week", "month", "all"):
-            await message.answer("Використання: /refresh today|week|month|all")
+            await message.answer(templates.warning("Використання: `/refresh today|week|month|all`"))
             return
 
         if arg == "today":
@@ -872,8 +840,12 @@ async def main() -> None:
             days_back = 90
 
         await message.answer(
-            f"⏳ Запустив оновлення за ~{days_back} днів у фоні…\n" "Я напишу, коли буде готово ✅",
-            parse_mode=None,
+            "\n".join(
+                [
+                    f"⏳ Запустив оновлення за ~{days_back} днів у фоні…",
+                    "Я напишу, коли буде готово ✅",
+                ]
+            ).strip()
         )
 
         chat_id = message.chat.id
@@ -882,7 +854,6 @@ async def main() -> None:
         async def job() -> None:
             try:
                 async with user_locks[tg_id]:
-                    from ..monobank import MonobankClient
                     from ..monobank.sync import sync_accounts_ledger
 
                     def _run_sync() -> object:
@@ -904,17 +875,22 @@ async def main() -> None:
 
                     await bot.send_message(
                         chat_id,
-                        "✅ Оновлено!\n"
-                        f"Карток: {res.accounts}\n"
-                        f"Запитів до API: {res.fetched_requests}\n"
-                        f"Додано транзакцій: {res.appended}\n\n"
-                        "Можеш дивитись: /today /week /month",
-                        parse_mode=None,
+                        "\n".join(
+                            [
+                                templates.success("Оновлено!"),
+                                f"Карток: {res.accounts}",
+                                f"Запитів до API: {res.fetched_requests}",
+                                f"Додано транзакцій: {res.appended}",
+                                "",
+                                "Можеш дивитись: /today /week /month",
+                            ]
+                        ).strip(),
                     )
             except Exception as e:
                 msg = _map_monobank_error(e)
                 await bot.send_message(
-                    chat_id, f"❌ Помилка оновлення: {md_escape(msg or str(e))}", parse_mode=None
+                    chat_id,
+                    templates.error(f"Помилка оновлення: {md_escape(msg or str(e))}"),
                 )
 
         asyncio.create_task(job())
@@ -924,61 +900,61 @@ async def main() -> None:
 
         tg_id = message.from_user.id if message.from_user else None
         if tg_id is None:
-            await message.answer("Не зміг визначити твій Telegram user id.")
+            await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
         cfg = users.load(tg_id)
         if cfg is None or not cfg.mono_token:
-            await message.answer("Спочатку підключи Monobank: /connect <monobank token>")
+            await message.answer(
+                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
+            )
             return
 
         stored = store.load(tg_id, period)
         if stored is None:
-            await message.answer(f"Немає кешу для {period}. Зроби: /refresh {period}")
+            await message.answer(
+                templates.warning(f"Немає кешу для {period}. Зроби: `/refresh {period}`")
+            )
             return
 
         ai_block = None
         if want_ai:
             if not settings.openai_api_key:
-                await message.answer("OPENAI_API_KEY не задано в .env — AI недоступний.")
+                await message.answer(
+                    templates.warning("OPENAI_API_KEY не задано в .env — AI недоступний.")
+                )
             else:
                 period_label = {
                     "today": "Сьогодні",
                     "week": "Останні 7 днів",
                     "month": "Останні 30 днів",
                 }.get(period, period)
-                if settings.openai_api_key:
-                    await message.answer("🤖 Генерую AI інсайти…")
+
+                await message.answer("🤖 Генерую AI інсайти…")
+
+                try:
+                    from ..llm.openai_client import OpenAIClient
+
+                    client = OpenAIClient(
+                        api_key=settings.openai_api_key, model=settings.openai_model
+                    )
                     try:
-                        from ..llm.openai_client import OpenAIClient
+                        profile = profile_store.load(tg_id) or {}
+                        facts_with_profile = {"period_facts": stored.facts, "user_profile": profile}
+                        res = client.generate_report(facts_with_profile, period_label=period_label)
+                    finally:
+                        client.close()
 
-                        client = OpenAIClient(
-                            api_key=settings.openai_api_key, model=settings.openai_model
-                        )
-                        try:
-                            profile = profile_store.load(tg_id) or {}
-
-                            facts_with_profile = {
-                                "period_facts": stored.facts,
-                                "user_profile": profile,
-                            }
-
-                            res = client.generate_report(
-                                facts_with_profile, period_label=period_label
-                            )
-                        finally:
-                            client.close()
-
-                        ai_block = build_ai_block(
-                            res.report.summary,
-                            res.report.changes,
-                            res.report.recs,
-                            res.report.next_step,
-                        )
-                    except Exception as e:
-                        logger.warning("LLM unavailable, sending facts-only. err=%s", e)
-                        await message.answer(_map_llm_error(e), parse_mode=None)
-                        ai_block = None
+                    ai_block = build_ai_block(
+                        res.report.summary,
+                        res.report.changes,
+                        res.report.recs,
+                        res.report.next_step,
+                    )
+                except Exception as e:
+                    logger.warning("LLM unavailable, sending facts-only. err=%s", e)
+                    await message.answer(_map_llm_error(e))
+                    ai_block = None
 
         text = render_report(period, stored.facts, ai_block=ai_block)
         await message.answer(text)
@@ -1000,7 +976,9 @@ async def main() -> None:
         tg_id = message.from_user.id
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer("Спочатку підключи Monobank: /connect <mono_token>")
+            await message.answer(
+                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
+            )
             return
 
         parts = (message.text or "").split()
@@ -1008,11 +986,11 @@ async def main() -> None:
 
         if action == "on":
             users.save(tg_id, autojobs_enabled=True)
-            await message.answer("✅ Автозвіти увімкнено")
+            await message.answer(templates.success("Автозвіти увімкнено"))
             return
         if action == "off":
             users.save(tg_id, autojobs_enabled=False)
-            await message.answer("✅ Автозвіти вимкнено")
+            await message.answer(templates.success("Автозвіти вимкнено"))
             return
 
         cfg2 = users.load(tg_id)
@@ -1035,11 +1013,9 @@ async def main() -> None:
                 await message.answer(resp.result.text)
                 return
 
-            await message.answer(
-                "Не зрозумів запит. Спробуй, наприклад: 'Скільки я витратив на мак за 5 днів?'"
-            )
+            await message.answer(templates.unknown_nlq_message())
         except Exception:
-            await message.answer("Сталася помилка при обробці запиту.")
+            await message.answer(templates.nlq_failed_message())
 
     logger.info("Starting Telegram bot polling...")
     await dp.start_polling(bot)
