@@ -25,3 +25,10 @@ def test_nlq_days_clamped():
     intent = parse_nlq_intent("Скільки я витратив за 999 днів на щось")
     assert intent["intent"] == "spend_sum"
     assert intent["days"] == 31
+
+
+def test_nlq_yesterday_sets_days_1():
+    intent = parse_nlq_intent("Скільки вчора було поповнень?")
+    assert intent["intent"] == "income_count"
+    assert intent["days"] == 1
+    assert intent["period_label"] == "вчора"

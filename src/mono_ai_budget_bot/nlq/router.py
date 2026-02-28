@@ -28,6 +28,22 @@ _COMPARE_RE = re.compile(
     r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян|compare)\b", re.IGNORECASE
 )
 _BASELINE_RE = re.compile(r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline)\b", re.IGNORECASE)
+_COUNT_PHRASING_RE = re.compile(
+    r"\b(скільки\s+було|сколько\s+было|how\s+many)\b",
+    re.IGNORECASE,
+)
+_INCOME_COUNT_PHRASING_RE = re.compile(
+    r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\bпоповнен",
+    re.IGNORECASE,
+)
+_INCOME_COUNT_OVERRIDE_RE = re.compile(
+    r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\bпоповнен",
+    re.IGNORECASE,
+)
+_TRANSFER_COUNT_OVERRIDE_RE = re.compile(
+    r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\b(переказ|транзакц)",
+    re.IGNORECASE,
+)
 
 
 def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any]:
@@ -43,6 +59,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "end_ts": None,
             "merchant_contains": None,
             "recipient_alias": None,
+            "period_label": None,
         }
 
     t = text.lower()
@@ -50,6 +67,68 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     pr = parse_period_range(t, now_ts)
     start_ts = pr.start_ts if pr is not None else None
     end_ts = pr.end_ts if pr is not None else None
+
+    period_label: str | None = None
+    if re.search(r"\b(сьогодні|'сегодня|today)\b", t):
+        period_label = "сьогодні"
+    elif re.search(r"\b(вчора|вчера|yesterday)\b", t):
+        period_label = "вчора"
+    else:
+        m_lbl = re.search(
+            r"\b(за\s+останні\s+|за\s+последние\s+|last\s+)(\d{1,3})\s*(дн(і|ів)?|дней|days)\b",
+            t,
+        )
+        if m_lbl:
+            period_label = f"останні {int(m_lbl.group(2))} днів"
+        elif re.search(r"\b(за\s+тиждень|за\s+неделю|last\s+week)\b", t):
+            period_label = "останній тиждень"
+        elif re.search(r"\b(за\s+минулий\s+місяць|за\s+прошлый\s+месяц|last\s+month)\b", t):
+            period_label = "минулий місяць"
+        else:
+            months = [
+                "січень",
+                "сiчень",
+                "январь",
+                "january",
+                "лютий",
+                "февраль",
+                "february",
+                "березень",
+                "март",
+                "march",
+                "квітень",
+                "апрель",
+                "april",
+                "травень",
+                "май",
+                "may",
+                "червень",
+                "июнь",
+                "june",
+                "липень",
+                "июль",
+                "july",
+                "серпень",
+                "август",
+                "august",
+                "вересень",
+                "сентябрь",
+                "september",
+                "жовтень",
+                "октябрь",
+                "october",
+                "листопад",
+                "ноябрь",
+                "november",
+                "грудень",
+                "декабрь",
+                "december",
+            ]
+            for mn in months:
+                if re.search(rf"\bза\s+{re.escape(mn)}\b", t):
+                    m_year = re.search(rf"\bза\s+{re.escape(mn)}\s+(\d{{4}})\b", t)
+                    period_label = f"{mn} {m_year.group(1)}" if m_year else mn
+                    break
 
     days: int | None = None
     m = _DAYS_RE.search(t)
@@ -66,6 +145,10 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         elif "сьогодні" in t or "сьодні" in t or "today" in t:
             days = 1
 
+    if pr is not None and days is None:
+        span = max(1, int((pr.end_ts - pr.start_ts + 86399) // 86400))
+        days = max(1, min(span, 31))
+
     if days is not None:
         days = max(1, min(days, 31))
 
@@ -73,12 +156,34 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     want_compare = _COMPARE_RE.search(t) is not None and _BASELINE_RE.search(t) is not None
 
     intent: str | None = None
-    if _INCOME_RE.search(t) is not None:
-        intent = "income_count" if is_count else "income_sum"
-    elif _TRANSFER_OUT_RE.search(t) is not None:
-        intent = "transfer_out_count" if is_count else "transfer_out_sum"
-    elif _TRANSFER_IN_RE.search(t) is not None:
-        intent = "transfer_in_count" if is_count else "transfer_in_sum"
+    want_sum = bool(
+        re.search(
+            r"\b(скільки|сколько|how\s+much|на\s+суму|сума|сумма|amount|sum)\b",
+            t,
+            re.IGNORECASE,
+        )
+    )
+    if _INCOME_RE.search(t):
+        if _INCOME_COUNT_PHRASING_RE.search(t):
+            intent = "income_count"
+        elif want_sum:
+            intent = "income_sum"
+        else:
+            intent = "income_count"
+    if _TRANSFER_OUT_RE.search(t):
+        if _COUNT_PHRASING_RE.search(t) and re.search(r"\b(переказ(ів)?|транзакц(ій|ии))\b", t):
+            intent = "transfer_out_count"
+        elif want_sum:
+            intent = "transfer_out_sum"
+        else:
+            intent = "transfer_out_count"
+    if _TRANSFER_IN_RE.search(t):
+        if _COUNT_PHRASING_RE.search(t) and re.search(r"\b(переказ(ів)?|транзакц(ій|ии))\b", t):
+            intent = "transfer_in_count"
+        elif want_sum:
+            intent = "transfer_in_sum"
+        else:
+            intent = "transfer_in_count"
 
     if intent is None:
         count_markers = [
@@ -110,6 +215,16 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     if m3:
         recipient_alias = m3.group(1).lower()
 
+    if _INCOME_COUNT_OVERRIDE_RE.search(t):
+        if intent in ("income_sum", "income_count"):
+            intent = "income_count"
+
+    if _TRANSFER_COUNT_OVERRIDE_RE.search(t):
+        if intent in ("transfer_in_sum", "transfer_in_count"):
+            intent = "transfer_in_count"
+        elif intent in ("transfer_out_sum", "transfer_out_count"):
+            intent = "transfer_out_count"
+
     return {
         "intent": intent,
         "days": days,
@@ -117,6 +232,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "end_ts": end_ts,
         "merchant_contains": merchant,
         "recipient_alias": recipient_alias,
+        "period_label": period_label,
     }
 
 
