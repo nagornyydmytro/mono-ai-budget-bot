@@ -1,86 +1,220 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
-from mono_ai_budget_bot.analytics.classify import classify_kind
+from .categories import category_from_mcc
+
+try:
+    from .anomalies import _norm_merchant  # type: ignore
+except Exception:  # pragma: no cover
+    _norm_merchant = None  # type: ignore
 
 
 @dataclass(frozen=True)
 class TrendItem:
+    kind: str
     label: str
-    prev_cents: int
-    last_cents: int
-    delta_cents: int
-    delta_pct: float
+    delta_uah: float
+    pct: float | None
+    cur_uah: float
+    prev_uah: float
+    active_days_cur: int
+    active_days_prev: int
 
 
-@dataclass(frozen=True)
-class TrendsResult:
-    window_days: int
-    last_start_ts: int
-    prev_start_ts: int
-    top_growing: list[TrendItem]
-    top_declining: list[TrendItem]
+def _pct_change(cur: float, prev: float) -> float | None:
+    if prev <= 0:
+        return None
+    return round(((cur - prev) / prev) * 100.0, 2)
 
 
-def _bucket_merchant(description: str) -> str:
-    s = (description or "").strip().lower()
-    if not s:
-        return "unknown"
-    return s[:48]
+def _get_ts(r: Any) -> int:
+    if hasattr(r, "ts"):
+        return int(r.ts)
+    return int(r.time)
 
 
-def compute_trends(rows: list[Any], now_ts: int, window_days: int = 7) -> TrendsResult:
-    window_days = max(3, min(int(window_days), 31))
-    now_ts = int(now_ts)
+def _get_kind(r: Any) -> str:
+    if hasattr(r, "kind"):
+        return str(r.kind)
+    amt = int(getattr(r, "amount", 0))
+    if amt > 0:
+        return "income"
+    if amt < 0:
+        return "spend"
+    return "other"
 
-    last_start = now_ts - window_days * 86400
-    prev_start = last_start - window_days * 86400
-    prev_end = last_start
 
-    last_by: dict[str, int] = {}
-    prev_by: dict[str, int] = {}
+def _get_amount_minor(r: Any) -> int:
+    return abs(int(getattr(r, "amount", 0)))
+
+
+def _merchant_label(desc: str) -> str:
+    s = (desc or "").strip()
+    if _norm_merchant is not None:
+        out = _norm_merchant(s)
+        return out or "unknown"
+    s = " ".join(s.lower().split())
+    return s[:48] if s else "unknown"
+
+
+def _sum_by_label(
+    rows: list[Any],
+    start_ts: int,
+    end_ts: int,
+    label_fn: Callable[[Any], str],
+) -> tuple[dict[str, int], dict[str, set[int]]]:
+    totals: dict[str, int] = {}
+    days: dict[str, set[int]] = {}
 
     for r in rows:
-        t = int(getattr(r, "time", getattr(r, "ts", 0)))
-        amt = int(getattr(r, "amount", 0))
-        kind = classify_kind(amt, getattr(r, "mcc", None), getattr(r, "description", ""))
-
-        if kind != "spend":
+        t = _get_ts(r)
+        if not (start_ts <= t < end_ts):
             continue
 
-        label = _bucket_merchant(getattr(r, "description", ""))
+        if _get_kind(r) != "spend":
+            continue
 
-        cents = -amt
-        if prev_start <= t < prev_end:
-            prev_by[label] = prev_by.get(label, 0) + cents
-        elif last_start <= t < now_ts:
-            last_by[label] = last_by.get(label, 0) + cents
+        label = label_fn(r) or "unknown"
+        if label == "unknown":
+            continue
 
-    labels = set(prev_by.keys()) | set(last_by.keys())
-    items: list[TrendItem] = []
+        cents = _get_amount_minor(r)
+        totals[label] = totals.get(label, 0) + cents
+        days.setdefault(label, set()).add(t // 86400)
+
+    return totals, days
+
+
+def _build_items(
+    kind: str,
+    cur: dict[str, int],
+    prev: dict[str, int],
+    days_cur: dict[str, set[int]],
+    days_prev: dict[str, set[int]],
+    *,
+    min_prev_uah: float,
+    min_abs_delta_uah: float,
+    min_active_days: int,
+) -> list[TrendItem]:
+    labels = set(cur.keys()) | set(prev.keys())
+    out: list[TrendItem] = []
 
     for lab in labels:
-        p = int(prev_by.get(lab, 0))
-        last = int(last_by.get(lab, 0))
-        d = last - p
-        if p > 0:
-            pct = d / p
-        else:
-            pct = 1.0 if last > 0 else 0.0
-        items.append(
-            TrendItem(label=lab, prev_cents=p, last_cents=last, delta_cents=d, delta_pct=float(pct))
+        cur_uah = round(cur.get(lab, 0) / 100.0, 2)
+        prev_uah = round(prev.get(lab, 0) / 100.0, 2)
+        delta = round(cur_uah - prev_uah, 2)
+
+        if prev_uah < min_prev_uah and cur_uah < min_prev_uah:
+            continue
+        if abs(delta) < min_abs_delta_uah:
+            continue
+
+        ad_cur = len(days_cur.get(lab, set()))
+        ad_prev = len(days_prev.get(lab, set()))
+        if max(ad_cur, ad_prev) < min_active_days:
+            continue
+
+        out.append(
+            TrendItem(
+                kind=kind,
+                label=lab,
+                delta_uah=delta,
+                pct=_pct_change(cur_uah, prev_uah),
+                cur_uah=cur_uah,
+                prev_uah=prev_uah,
+                active_days_cur=ad_cur,
+                active_days_prev=ad_prev,
+            )
         )
 
-    items_sorted = sorted(items, key=lambda x: x.delta_cents, reverse=True)
-    top_growing = [x for x in items_sorted if x.delta_cents > 0][:3]
-    top_declining = list(reversed([x for x in items_sorted if x.delta_cents < 0]))[:3]
+    return out
 
-    return TrendsResult(
-        window_days=window_days,
-        last_start_ts=last_start,
-        prev_start_ts=prev_start,
-        top_growing=top_growing,
-        top_declining=top_declining,
+
+def compute_trends(
+    rows: list[Any],
+    now_ts: int,
+    *,
+    window_days: int = 7,
+    min_prev_uah: float = 200.0,
+    min_abs_delta_uah: float = 150.0,
+    min_active_days: int = 2,
+) -> dict[str, list[dict[str, Any]]]:
+    now_ts = int(now_ts)
+    w = max(3, min(int(window_days), 30))
+
+    cur_start = now_ts - w * 86400
+    prev_start = now_ts - 2 * w * 86400
+    prev_end = cur_start
+
+    cat_cur, cat_days_cur = _sum_by_label(
+        rows,
+        start_ts=cur_start,
+        end_ts=now_ts,
+        label_fn=lambda r: category_from_mcc(getattr(r, "mcc", None)) or "Інше",
     )
+    cat_prev, cat_days_prev = _sum_by_label(
+        rows,
+        start_ts=prev_start,
+        end_ts=prev_end,
+        label_fn=lambda r: category_from_mcc(getattr(r, "mcc", None)) or "Інше",
+    )
+
+    mer_cur, mer_days_cur = _sum_by_label(
+        rows,
+        start_ts=cur_start,
+        end_ts=now_ts,
+        label_fn=lambda r: _merchant_label(getattr(r, "description", "")),
+    )
+    mer_prev, mer_days_prev = _sum_by_label(
+        rows,
+        start_ts=prev_start,
+        end_ts=prev_end,
+        label_fn=lambda r: _merchant_label(getattr(r, "description", "")),
+    )
+
+    cat_items = _build_items(
+        "category",
+        cat_cur,
+        cat_prev,
+        cat_days_cur,
+        cat_days_prev,
+        min_prev_uah=min_prev_uah,
+        min_abs_delta_uah=min_abs_delta_uah,
+        min_active_days=min_active_days,
+    )
+    mer_items = _build_items(
+        "merchant",
+        mer_cur,
+        mer_prev,
+        mer_days_cur,
+        mer_days_prev,
+        min_prev_uah=min_prev_uah,
+        min_abs_delta_uah=min_abs_delta_uah,
+        min_active_days=min_active_days,
+    )
+
+    all_items = [*cat_items, *mer_items]
+
+    growing = sorted(
+        [x for x in all_items if x.delta_uah > 0], key=lambda x: x.delta_uah, reverse=True
+    )
+    declining = sorted([x for x in all_items if x.delta_uah < 0], key=lambda x: x.delta_uah)
+
+    def to_dict(x: TrendItem) -> dict[str, Any]:
+        return {
+            "kind": x.kind,
+            "label": x.label,
+            "delta_uah": x.delta_uah,
+            "pct": x.pct,
+            "cur_uah": x.cur_uah,
+            "prev_uah": x.prev_uah,
+            "active_days_cur": x.active_days_cur,
+            "active_days_prev": x.active_days_prev,
+        }
+
+    return {
+        "growing": [to_dict(x) for x in growing[:3]],
+        "declining": [to_dict(x) for x in declining[:3]],
+    }
