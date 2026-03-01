@@ -11,7 +11,7 @@ from mono_ai_budget_bot.storage.tx_store import TxRecord
 class QueryFilter:
     intent: str
     category: str | None
-    merchant_contains: str
+    merchant_contains: list[str]
     recipient_contains: str | None
 
 
@@ -19,7 +19,7 @@ class QueryEngine:
     def filter_rows(self, rows: list[TxRecord], f: QueryFilter) -> list[TxRecord]:
         out: list[TxRecord] = []
 
-        merchant = (f.merchant_contains or "").strip().lower()
+        merchant_terms = [x.strip().lower() for x in (f.merchant_contains or []) if x and x.strip()]
         recipient = (f.recipient_contains or "").strip().lower() or None
         category = (f.category or "").strip() or None
 
@@ -33,8 +33,10 @@ class QueryEngine:
                     c = category_from_mcc(r.mcc)
                     if c != category:
                         continue
-                if merchant and merchant not in (r.description or "").lower():
-                    continue
+                if merchant_terms:
+                    d = (r.description or "").lower()
+                    if not any(m in d for m in merchant_terms):
+                        continue
 
             elif f.intent.startswith("income_"):
                 if kind != "income":

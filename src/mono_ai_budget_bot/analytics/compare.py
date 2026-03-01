@@ -69,7 +69,16 @@ def compare_yesterday_to_baseline(
     y0 = today0 - 86400
     hist_start = today0 - lookback_days * 86400
 
-    filt = (merchant_contains or "").strip().lower()
+    terms: list[str] = []
+    if isinstance(merchant_contains, list):
+        terms = [
+            str(x).strip().lower()
+            for x in merchant_contains
+            if isinstance(x, str) and str(x).strip()
+        ]
+    else:
+        s = (merchant_contains or "").strip().lower()
+        terms = [s] if s else []
     cat = (category or "").strip()
 
     y_sum = 0
@@ -84,7 +93,7 @@ def compare_yesterday_to_baseline(
             continue
 
         desc = (r.description or "").lower()
-        if filt and filt not in desc:
+        if terms and not any(t in desc for t in terms):
             continue
 
         if cat:
@@ -133,7 +142,7 @@ def compare_window_to_baseline(
     rows: list[TxRecord],
     start_ts: int,
     end_ts: int,
-    merchant_contains: str | None = None,
+    merchant_contains: str | list[str] | None = None,
     category: str | None = None,
     lookback_days: int = 90,
     max_windows: int = 12,

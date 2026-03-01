@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +36,15 @@ DEFAULT_MERCHANT_ALIASES = {
     "watsons": "watsons",
 }
 
+DEFAULT_CATEGORY_ALIASES: dict[str, list[str]] = {}
+
 
 def _default_memory() -> dict[str, Any]:
     return {
         "merchant_aliases": dict(DEFAULT_MERCHANT_ALIASES),
+        "category_aliases": dict(DEFAULT_CATEGORY_ALIASES),
         "recipient_aliases": {},
+        "alias_stats": {"merchant": {}, "category": {}, "recipient": {}},
         "pending_intent": None,
         "pending_kind": None,
         "pending_options": None,
@@ -67,10 +72,12 @@ def load_memory(telegram_user_id: int) -> dict[str, Any]:
 
     if "merchant_aliases" not in data or not isinstance(data.get("merchant_aliases"), dict):
         data["merchant_aliases"] = dict(DEFAULT_MERCHANT_ALIASES)
-
+    if "category_aliases" not in data or not isinstance(data.get("category_aliases"), dict):
+        data["category_aliases"] = dict(DEFAULT_CATEGORY_ALIASES)
     if "recipient_aliases" not in data or not isinstance(data.get("recipient_aliases"), dict):
         data["recipient_aliases"] = {}
-
+    if "alias_stats" not in data or not isinstance(data.get("alias_stats"), dict):
+        data["alias_stats"] = {"merchant": {}, "category": {}, "recipient": {}}
     if "pending_intent" not in data:
         data["pending_intent"] = None
     if "pending_kind" not in data:
@@ -85,53 +92,6 @@ def save_memory(telegram_user_id: int, data: dict[str, Any]) -> None:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     path = BASE_DIR / f"{int(telegram_user_id)}.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None) -> str | None:
-    if not merchant_contains:
-        return None
-
-    raw = norm(merchant_contains)
-    if not raw:
-        return None
-
-    mem = load_memory(telegram_user_id)
-    aliases = mem.get("merchant_aliases") or {}
-    if not isinstance(aliases, dict):
-        return raw
-
-    direct = aliases.get(raw)
-    if isinstance(direct, str):
-        direct_norm = norm(direct)
-        if direct_norm:
-            return direct_norm
-
-    if len(raw) <= 3:
-        return raw
-
-    best_v: str | None = None
-    best_k_len = 0
-
-    for k, v in aliases.items():
-        if not isinstance(k, str) or not isinstance(v, str):
-            continue
-        kk = norm(k)
-        vv = norm(v)
-        if not kk or not vv:
-            continue
-
-        if raw == kk or raw in kk or kk in raw:
-            if len(kk) > best_k_len:
-                best_k_len = len(kk)
-                best_v = vv
-
-    if best_v:
-        aliases[raw] = best_v
-        mem["merchant_aliases"] = aliases
-        save_memory(telegram_user_id, mem)
-        return best_v
-
-    return raw
 
 
 def set_pending_intent(
@@ -182,4 +142,190 @@ def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) ->
 
     ra[a] = v
     mem["recipient_aliases"] = ra
+    save_memory(telegram_user_id, mem)
+
+
+def _touch_alias(mem: dict[str, Any], bucket: str, alias: str) -> None:
+    a = (alias or "").strip().lower()
+    if not a:
+        return
+
+    st = mem.get("alias_stats")
+    if not isinstance(st, dict):
+        st = {"merchant": {}, "category": {}, "recipient": {}}
+        mem["alias_stats"] = st
+
+    b = st.get(bucket)
+    if not isinstance(b, dict):
+        b = {}
+        st[bucket] = b
+
+    x = b.get(a)
+    if not isinstance(x, dict):
+        x = {"hits": 0, "last_used_ts": 0}
+        b[a] = x
+
+    x["hits"] = int(x.get("hits") or 0) + 1
+    x["last_used_ts"] = int(time.time())
+
+
+def _prune_aliases(mem: dict[str, Any]) -> None:
+    merchant_aliases = mem.get("merchant_aliases")
+    if not isinstance(merchant_aliases, dict):
+        return
+
+    category_aliases = mem.get("category_aliases")
+    if not isinstance(category_aliases, dict):
+        category_aliases = {}
+        mem["category_aliases"] = category_aliases
+
+    st = mem.get("alias_stats")
+    if not isinstance(st, dict):
+        st = {"merchant": {}, "category": {}, "recipient": {}}
+        mem["alias_stats"] = st
+
+    def prune_bucket(bucket: str, data: dict[str, Any], keep: set[str], max_items: int) -> None:
+        if len(data) <= max_items:
+            return
+
+        stats = st.get(bucket)
+        if not isinstance(stats, dict):
+            stats = {}
+
+        extra = [k for k in data.keys() if isinstance(k, str) and k not in keep]
+        scored: list[tuple[int, int, str]] = []
+        for k in extra:
+            s = stats.get(k)
+            hits = int(s.get("hits") or 0) if isinstance(s, dict) else 0
+            last = int(s.get("last_used_ts") or 0) if isinstance(s, dict) else 0
+            scored.append((hits, last, k))
+
+        scored.sort(key=lambda t: (t[0], t[1]))
+
+        while len(data) > max_items and scored:
+            _, _, k = scored.pop(0)
+            data.pop(k, None)
+            if isinstance(stats, dict):
+                stats.pop(k, None)
+
+    prune_bucket(
+        "merchant", merchant_aliases, keep=set(DEFAULT_MERCHANT_ALIASES.keys()), max_items=200
+    )
+    prune_bucket(
+        "category", category_aliases, keep=set(DEFAULT_CATEGORY_ALIASES.keys()), max_items=100
+    )
+
+
+def resolve_merchant_filters(
+    telegram_user_id: int, merchant_contains: str | None
+) -> list[str] | None:
+    if not merchant_contains:
+        return None
+
+    raw = norm(merchant_contains)
+    if not raw:
+        return None
+
+    mem = load_memory(telegram_user_id)
+
+    m_aliases = mem.get("merchant_aliases")
+    if not isinstance(m_aliases, dict):
+        return [raw]
+
+    c_aliases = mem.get("category_aliases")
+    if not isinstance(c_aliases, dict):
+        c_aliases = {}
+        mem["category_aliases"] = c_aliases
+
+    direct = m_aliases.get(raw)
+    if isinstance(direct, str):
+        v = norm(direct)
+        if v:
+            _touch_alias(mem, "merchant", raw)
+            _prune_aliases(mem)
+            save_memory(telegram_user_id, mem)
+            return [v]
+
+    direct2 = c_aliases.get(raw)
+    if isinstance(direct2, list):
+        out = [norm(x) for x in direct2 if isinstance(x, str) and norm(x)]
+        if out:
+            _touch_alias(mem, "category", raw)
+            _prune_aliases(mem)
+            save_memory(telegram_user_id, mem)
+            return out
+
+    if len(raw) <= 3:
+        return [raw]
+
+    best_v: str | list[str] | None = None
+    best_k_len = 0
+
+    def consider(k: str, v: Any) -> None:
+        nonlocal best_v, best_k_len
+        kk = norm(k)
+        if not kk:
+            return
+        if raw == kk or raw in kk or kk in raw:
+            if len(kk) > best_k_len:
+                best_k_len = len(kk)
+                best_v = v
+
+    for k, v in m_aliases.items():
+        if isinstance(k, str) and isinstance(v, str):
+            consider(k, v)
+
+    for k, v in c_aliases.items():
+        if isinstance(k, str) and isinstance(v, list):
+            consider(k, v)
+
+    if best_v is not None:
+        if isinstance(best_v, str):
+            vv = norm(best_v)
+            if vv:
+                m_aliases[raw] = vv
+                mem["merchant_aliases"] = m_aliases
+                _touch_alias(mem, "merchant", raw)
+                _prune_aliases(mem)
+                save_memory(telegram_user_id, mem)
+                return [vv]
+        if isinstance(best_v, list):
+            out = [norm(x) for x in best_v if isinstance(x, str) and norm(x)]
+            if out:
+                c_aliases[raw] = out
+                mem["category_aliases"] = c_aliases
+                _touch_alias(mem, "category", raw)
+                _prune_aliases(mem)
+                save_memory(telegram_user_id, mem)
+                return out
+
+    return [raw]
+
+
+def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None) -> str | None:
+    terms = resolve_merchant_filters(telegram_user_id, merchant_contains)
+    if not terms:
+        return None
+    return terms[0]
+
+
+def save_category_alias(telegram_user_id: int, alias: str, merchant_terms: list[str]) -> None:
+    a = norm(alias)
+    if not a:
+        return
+
+    terms = [norm(x) for x in merchant_terms if isinstance(x, str) and norm(x)]
+    terms = list(dict.fromkeys(terms))
+    if not terms:
+        return
+
+    mem = load_memory(telegram_user_id)
+    ca = mem.get("category_aliases")
+    if not isinstance(ca, dict):
+        ca = {}
+
+    ca[a] = terms
+    mem["category_aliases"] = ca
+    _touch_alias(mem, "category", a)
+    _prune_aliases(mem)
     save_memory(telegram_user_id, mem)

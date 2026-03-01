@@ -7,7 +7,7 @@ from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
-    resolve_merchant_alias,
+    resolve_merchant_filters,
     save_memory,
     set_pending_intent,
 )
@@ -95,7 +95,8 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "compare_to_baseline":
         merchant_filter = (
-            resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
+            resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains"))
+            or []
         )
 
         category = str(intent_payload.get("category") or "").strip() or None
@@ -161,7 +162,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             )
 
     merchant_filter = (
-        resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
+        resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains")) or []
     )
 
     recipient_match: str | None = None
@@ -212,7 +213,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             page = 1
         page = max(1, page)
 
-        if merchant_filter.strip() == "":
+        if not merchant_filter:
             t = render_top_merchants(filtered, page=page, page_size=5, title="Топ мерчанти")
             if t.lines:
                 parts.append(f"\n{t.title} (стор. {page}):\n" + "\n".join(t.lines))
