@@ -170,29 +170,33 @@ def _render_facts_block(facts: dict) -> str:
     tr_in = float(totals.get("transfer_in_total_uah", 0.0))
     tr_out = float(totals.get("transfer_out_total_uah", 0.0))
 
-    lines: list[str] = []
-    lines.append(f"💸 Реальні витрати (без переказів): *{md_escape(_fmt_money(real_spend))}*")
-    lines.append(f"🧾 Всі списання (cash out): {md_escape(_fmt_money(spend))}")
-    lines.append(f"💰 Надходження (cash in): {md_escape(_fmt_money(income))}")
-    lines.append(f"🔁 Перекази: +{md_escape(_fmt_money(tr_in))} / -{md_escape(_fmt_money(tr_out))}")
+    parts: list[str] = []
+
+    summary_lines = [
+        f"💸 Реальні витрати: *{md_escape(_fmt_money(real_spend))}*",
+        f"🧾 Всі списання: {md_escape(_fmt_money(spend))}",
+        f"💰 Надходження: {md_escape(_fmt_money(income))}",
+        f"🔁 Перекази: +{md_escape(_fmt_money(tr_in))} / -{md_escape(_fmt_money(tr_out))}",
+    ]
+    parts.append(templates.section("Факти", summary_lines))
 
     top_named = facts.get("top_categories_named_real_spend", []) or []
     if top_named:
-        lines.append("")
-        lines.append("*Топ категорій (реальні витрати):*")
+        items: list[str] = []
         for i, row in enumerate(top_named[:5], start=1):
             cat = md_escape(str(row.get("category", "—")))
             amt = float(row.get("amount_uah", 0.0))
-            lines.append(f"{i}. {cat}: {md_escape(_fmt_money(amt))}")
+            items.append(f"{i}. {cat} — {md_escape(_fmt_money(amt))}")
+        parts.append(templates.section("Топ категорій", items))
 
     top_merchants = facts.get("top_merchants_real_spend", []) or []
     if top_merchants:
-        lines.append("")
-        lines.append("*Топ мерчантів (реальні витрати):*")
+        items2: list[str] = []
         for i, row in enumerate(top_merchants[:5], start=1):
             m = md_escape(str(row.get("merchant", "—")))
             amt = float(row.get("amount_uah", 0.0))
-            lines.append(f"{i}. {m}: {md_escape(_fmt_money(amt))}")
+            items2.append(f"{i}. {m} — {md_escape(_fmt_money(amt))}")
+        parts.append(templates.section("Топ мерчантів", items2))
 
     if isinstance(comparison, dict):
         totals_cmp = comparison.get("totals", {})
@@ -203,35 +207,33 @@ def _render_facts_block(facts: dict) -> str:
         p_real = pct.get("real_spend_total_uah")
 
         if d_real is not None:
-            sign = "+" if float(d_real) >= 0 else ""
+            d_real_f = float(d_real)
+            sign = "+" if d_real_f >= 0 else ""
             pct_txt = "—" if p_real is None else f"{float(p_real):+.2f}%"
-            lines.append("")
-            lines.append("*Порівняння з попереднім періодом:*")
-            lines.append(
-                f"• Реальні витрати: {md_escape(sign + _fmt_money(float(d_real)))} ({md_escape(pct_txt)})"
-            )
+
+            cmp_lines: list[str] = [
+                f"Реальні витрати: {md_escape(sign + _fmt_money(d_real_f))} ({md_escape(pct_txt)})"
+            ]
 
             cat_cmp = comparison.get("categories", {})
             if isinstance(cat_cmp, dict) and cat_cmp:
-                items: list[tuple[str, float, float | None]] = []
+                items3: list[tuple[str, float, float | None]] = []
                 for k, v in cat_cmp.items():
                     if not isinstance(v, dict):
                         continue
-                    delta_uah = float(v.get("delta_uah", 0.0))
-                    items.append((str(k), delta_uah, v.get("pct_change")))
-                items.sort(key=lambda x: abs(x[1]), reverse=True)
+                    items3.append((str(k), float(v.get("delta_uah", 0.0)), v.get("pct_change")))
+                items3.sort(key=lambda x: abs(x[1]), reverse=True)
 
-                if items:
-                    lines.append("")
-                    lines.append("*Найбільші зміни по категоріях:*")
-                    for k, dlt, pctv in items[:5]:
-                        sign2 = "+" if dlt >= 0 else ""
-                        pct_txt2 = "—" if pctv is None else f"{float(pctv):+.2f}%"
-                        lines.append(
-                            f"• {md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
-                        )
+                for k, dlt, pctv in items3[:5]:
+                    sign2 = "+" if dlt >= 0 else ""
+                    pct_txt2 = "—" if pctv is None else f"{float(pctv):+.2f}%"
+                    cmp_lines.append(
+                        f"{md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
+                    )
 
-    return "\n".join(lines).strip()
+            parts.append(templates.section("Порівняння з попереднім періодом", cmp_lines))
+
+    return "\n\n".join(parts).strip()
 
 
 def _render_trends_block(trends: dict) -> str | None:
