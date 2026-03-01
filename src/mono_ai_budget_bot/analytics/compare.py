@@ -6,6 +6,7 @@ from typing import Any
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
+from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxRecord
 
 
@@ -71,14 +72,12 @@ def compare_yesterday_to_baseline(
 
     terms: list[str] = []
     if isinstance(merchant_contains, list):
-        terms = [
-            str(x).strip().lower()
-            for x in merchant_contains
-            if isinstance(x, str) and str(x).strip()
-        ]
+        terms = [_match_key(x) for x in merchant_contains if isinstance(x, str) and x.strip()]
     else:
-        s = (merchant_contains or "").strip().lower()
+        s = _match_key(merchant_contains or "")
         terms = [s] if s else []
+
+    terms = [t for t in terms if t]
     cat = (category or "").strip()
 
     y_sum = 0
@@ -138,6 +137,10 @@ class WindowBaselineCompareResult:
     delta_cents: int
 
 
+def _match_key(s: str) -> str:
+    return norm(s).replace(" ", "")
+
+
 def compare_window_to_baseline(
     rows: list[TxRecord],
     start_ts: int,
@@ -176,7 +179,7 @@ def compare_window_to_baseline(
         if kind != "spend":
             continue
 
-        desc = (r.description or "").lower()
+        desc = _match_key(r.description or "")
         if filt and filt not in desc:
             continue
 

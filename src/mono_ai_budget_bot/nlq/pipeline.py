@@ -1,10 +1,70 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
+from mono_ai_budget_bot.config import load_settings
+from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.executor import execute_intent
 from mono_ai_budget_bot.nlq.memory_store import load_memory, save_category_alias, save_memory
 from mono_ai_budget_bot.nlq.resolver import resolve
 from mono_ai_budget_bot.nlq.router import route
-from mono_ai_budget_bot.nlq.types import NLQRequest, NLQResponse, NLQResult
+from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest, NLQResponse, NLQResult
+
+
+@lru_cache(maxsize=1)
+def _get_llm_client() -> OpenAIClient | None:
+    s = load_settings()
+    if not s.openai_api_key:
+        return None
+    return OpenAIClient(api_key=s.openai_api_key, model=s.openai_model)
+
+
+def _is_out_of_scope_for_llm(text: str) -> bool:
+    s = (text or "").lower()
+    banned = [
+        "інвест",
+        "акц",
+        "облігац",
+        "крипт",
+        "bitcoin",
+        "btc",
+        "eth",
+        "ethereum",
+        "trading",
+        "trade",
+        "buy",
+        "sell",
+        "портфел",
+        "etf",
+        "форекс",
+        "forex",
+        "дивіденд",
+        "yield",
+        "staking",
+    ]
+    return any(k in s for k in banned)
+
+
+def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
+    if _is_out_of_scope_for_llm(req.text):
+        return None
+    client = _get_llm_client()
+    if client is None:
+        return None
+
+    try:
+        slots = client.plan_nlq(user_text=req.text, now_ts=req.now_ts)
+    except Exception:
+        return None
+
+    if not slots or not isinstance(slots, dict):
+        return None
+
+    name = str(slots.get("intent") or "").strip()
+    if not name or name == "unsupported":
+        return None
+
+    return NLQIntent(name=name, slots=slots)
 
 
 def _resolve_followup_value(user_text: str, options: list[str] | None) -> str:
@@ -160,7 +220,9 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
 
     intent = route(req)
     if not intent:
-        return NLQResponse(result=None, clarification=None)
+        intent = _llm_plan_intent(req)
+        if not intent:
+            return NLQResponse(result=None, clarification=None)
 
     intent = resolve(req, intent)
     text = execute_intent(req.telegram_user_id, intent.slots)

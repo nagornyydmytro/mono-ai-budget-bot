@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
+from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxRecord
 
 
@@ -19,7 +20,10 @@ class QueryEngine:
     def filter_rows(self, rows: list[TxRecord], f: QueryFilter) -> list[TxRecord]:
         out: list[TxRecord] = []
 
-        merchant_terms = [x.strip().lower() for x in (f.merchant_contains or []) if x and x.strip()]
+        merchant_terms = [
+            _match_key(x) for x in (f.merchant_contains or []) if isinstance(x, str) and x.strip()
+        ]
+        merchant_terms = [x for x in merchant_terms if x]
         recipient = (f.recipient_contains or "").strip().lower() or None
         category = (f.category or "").strip() or None
 
@@ -34,7 +38,7 @@ class QueryEngine:
                     if c != category:
                         continue
                 if merchant_terms:
-                    d = (r.description or "").lower()
+                    d = _match_key(r.description or "")
                     if not any(m in d for m in merchant_terms):
                         continue
 
@@ -67,3 +71,7 @@ class QueryEngine:
         if intent in {"income_sum", "transfer_in_sum"}:
             return sum(r.amount for r in rows)
         raise ValueError(f"Unsupported intent for sum: {intent}")
+
+
+def _match_key(s: str) -> str:
+    return norm(s).replace(" ", "")
