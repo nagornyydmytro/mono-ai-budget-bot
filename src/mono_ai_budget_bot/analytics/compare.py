@@ -120,3 +120,108 @@ def compare_yesterday_to_baseline(
         baseline_median_cents=int(base),
         delta_cents=int(y_sum - base),
     )
+
+
+@dataclass(frozen=True)
+class WindowBaselineCompareResult:
+    current_cents: int
+    baseline_median_cents: int
+    delta_cents: int
+
+
+def compare_window_to_baseline(
+    rows: list[TxRecord],
+    start_ts: int,
+    end_ts: int,
+    merchant_contains: str | None = None,
+    category: str | None = None,
+    lookback_days: int = 90,
+    max_windows: int = 12,
+) -> WindowBaselineCompareResult:
+    start_ts = int(start_ts)
+    end_ts = int(end_ts)
+    if end_ts <= start_ts:
+        return WindowBaselineCompareResult(current_cents=0, baseline_median_cents=0, delta_cents=0)
+
+    lookback_days = max(7, min(int(lookback_days), 180))
+    max_windows = max(3, min(int(max_windows), 24))
+
+    filt = (merchant_contains or "").strip().lower()
+    cat = (category or "").strip()
+
+    start_day0 = (start_ts // 86400) * 86400
+    end_day0 = (end_ts // 86400) * 86400
+    window_days = max(1, int((end_day0 - start_day0) // 86400) or 1)
+    window_sec = window_days * 86400
+
+    hist_start = start_day0 - lookback_days * 86400
+
+    daily: dict[int, int] = {}
+    for r in rows:
+        t = int(r.time)
+        if t < hist_start or t >= end_ts:
+            continue
+
+        amt = int(r.amount)
+        kind = classify_kind(amt, r.mcc, r.description)
+        if kind != "spend":
+            continue
+
+        desc = (r.description or "").lower()
+        if filt and filt not in desc:
+            continue
+
+        if cat:
+            c = category_from_mcc(r.mcc)
+            if c != cat:
+                continue
+
+        d = t // 86400
+        daily[d] = daily.get(d, 0) + (-amt)
+
+    def sum_window(day_start: int, day_end: int) -> int:
+        s = 0
+        for d in range(day_start // 86400, day_end // 86400):
+            s += int(daily.get(d, 0))
+        return int(s)
+
+    cur = sum_window(start_day0, end_day0 if end_day0 > start_day0 else start_day0 + 86400)
+
+    if window_days == 1:
+        target_d = start_day0 // 86400
+        target_wd = (int(target_d) + 4) % 7
+
+        vals = []
+        wd_vals = []
+        for d, cents in daily.items():
+            if int(d) >= int(target_d):
+                continue
+            vals.append(int(cents))
+            wd = (int(d) + 4) % 7
+            if wd == target_wd:
+                wd_vals.append(int(cents))
+
+        overall = int(median(vals)) if vals else 0
+        base = int(median(wd_vals)) if len(wd_vals) >= 3 else overall
+
+        return WindowBaselineCompareResult(
+            current_cents=int(cur),
+            baseline_median_cents=int(base),
+            delta_cents=int(cur - base),
+        )
+
+    prev_sums: list[int] = []
+    w_end = start_day0
+    for _ in range(max_windows):
+        w_start = w_end - window_sec
+        if w_start < hist_start:
+            break
+        prev_sums.append(sum_window(w_start, w_end))
+        w_end = w_start
+
+    base = int(median(prev_sums)) if prev_sums else 0
+    return WindowBaselineCompareResult(
+        current_cents=int(cur),
+        baseline_median_cents=int(base),
+        delta_cents=int(cur - base),
+    )

@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
-from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
+from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
     resolve_merchant_alias,
@@ -96,15 +96,44 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         merchant_filter = (
             resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
         )
-        r = compare_yesterday_to_baseline(
-            rows,
-            now_ts=ts_to,
-            merchant_contains=merchant_filter,
-            category=str(intent_payload.get("category") or "").strip() or None,
+
+        category = str(intent_payload.get("category") or "").strip() or None
+
+        window_days = max(1, int((ts_to - ts_from + 86399) // 86400))
+        lookback_days = max(28, min(180, window_days * 6))
+
+        rows_hist = tx_store.load_range(
+            telegram_user_id=telegram_user_id,
+            account_ids=account_ids,
+            ts_from=max(0, ts_from - lookback_days * 86400),
+            ts_to=ts_to,
         )
+
+        r = compare_window_to_baseline(
+            rows_hist,
+            start_ts=ts_from,
+            end_ts=ts_to,
+            merchant_contains=merchant_filter,
+            category=category,
+            lookback_days=lookback_days,
+        )
+
+        if spec is not None:
+            prefix = spec.window.label
+        else:
+            label = str(intent_payload.get("period_label") or "").strip().lower()
+            if label == "сьогодні":
+                prefix = "Сьогодні"
+            elif label == "вчора":
+                prefix = "Вчора"
+            elif label:
+                prefix = f"За {label}"
+            else:
+                prefix = f"За останні {window_days} днів"
+
         sign = "+" if r.delta_cents >= 0 else ""
         return (
-            f"Вчора: {r.yesterday_cents/100:.2f} грн. "
+            f"{prefix}: {r.current_cents/100:.2f} грн. "
             f"Зазвичай (медіана): {r.baseline_median_cents/100:.2f} грн. "
             f"Різниця: {sign}{r.delta_cents/100:.2f} грн."
         )

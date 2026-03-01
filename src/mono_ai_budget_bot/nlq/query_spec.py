@@ -22,6 +22,7 @@ class QuerySpec:
     category: str | None = None
     merchant_contains: str = ""
     recipient_contains: str | None = None
+    compare_to_baseline: bool = False
 
     @property
     def intent_name(self) -> str:
@@ -58,6 +59,8 @@ def spec_from_intent_payload(intent_payload: dict[str, Any], *, now_ts: int) -> 
         kind, metric = "transfer_in", "sum"
     elif intent == "transfer_in_count":
         kind, metric = "transfer_in", "count"
+    elif intent == "compare_to_baseline":
+        kind, metric = "spend", "sum"
     else:
         return None
 
@@ -97,4 +100,5 @@ def spec_from_intent_payload(intent_payload: dict[str, Any], *, now_ts: int) -> 
         category=category,
         merchant_contains=merchant_contains,
         recipient_contains=None,
+        compare_to_baseline=(intent == "compare_to_baseline"),
     )
