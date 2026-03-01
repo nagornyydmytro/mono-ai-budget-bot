@@ -94,3 +94,13 @@ def _render_ranked(
         lines.append(f"{i}. {name}: {_fmt_uah(cents)} ({n})")
 
     return TablePage(title=title, lines=lines, has_more=has_more)
+
+
+def suggest_merchant_candidates(rows: list[TxRecord], limit: int = 8) -> list[str]:
+    limit = max(3, min(int(limit), 15))
+    items = _top_merchants(rows)
+    out: list[str] = []
+    for name, _, _ in items[:limit]:
+        if name and name != "unknown":
+            out.append(name)
+    return out

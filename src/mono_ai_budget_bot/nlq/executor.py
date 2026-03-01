@@ -13,7 +13,12 @@ from mono_ai_budget_bot.nlq.memory_store import (
 )
 from mono_ai_budget_bot.nlq.query_engine import QueryEngine, QueryFilter
 from mono_ai_budget_bot.nlq.query_spec import spec_from_intent_payload
-from mono_ai_budget_bot.nlq.tabular import render_top_categories, render_top_merchants
+from mono_ai_budget_bot.nlq.tabular import (
+    render_top_categories,
+    render_top_merchants,
+    suggest_merchant_candidates,
+)
+from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -98,6 +103,17 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains"))
             or []
         )
+        alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
+        if alias_raw and _should_clarify_alias(mem, alias_raw):
+            if not _has_spend_match(rows, merchant_filter):
+                candidates = suggest_merchant_candidates(rows, limit=8)
+                if candidates:
+                    return _prompt_learn_category_alias(
+                        telegram_user_id,
+                        intent_payload,
+                        alias_raw=alias_raw,
+                        candidates=candidates,
+                    )
 
         category = str(intent_payload.get("category") or "").strip() or None
 
@@ -188,6 +204,17 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             recipient_contains=recipient_match,
         ),
     )
+    alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
+    if intent.startswith("spend_") and alias_raw and _should_clarify_alias(mem, alias_raw):
+        if merchant_filter and not filtered:
+            candidates = suggest_merchant_candidates(rows, limit=8)
+            if candidates:
+                return _prompt_learn_category_alias(
+                    telegram_user_id,
+                    intent_payload,
+                    alias_raw=alias_raw,
+                    candidates=candidates,
+                )
 
     if spec is not None:
         prefix = spec.window.label
@@ -261,6 +288,56 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return f"{prefix} було {len(filtered)} вхідних переказів."
 
     return "Поки що цей тип запиту не реалізовано."
+
+
+def _has_spend_match(rows, merchant_terms: list[str]) -> bool:
+    if not merchant_terms:
+        return False
+    terms = [t.strip().lower() for t in merchant_terms if isinstance(t, str) and t.strip()]
+    if not terms:
+        return False
+    for r in rows:
+        kind = classify_kind(r.amount, r.mcc, r.description)
+        if kind != "spend":
+            continue
+        d = (r.description or "").lower()
+        if any(t in d for t in terms):
+            return True
+    return False
+
+
+def _should_clarify_alias(mem: dict[str, Any], alias: str) -> bool:
+    a = norm(alias)
+    if not a or len(a) <= 3:
+        return False
+    ma = mem.get("merchant_aliases")
+    ca = mem.get("category_aliases")
+    if isinstance(ma, dict) and a in ma:
+        return False
+    if isinstance(ca, dict) and a in ca:
+        return False
+    return True
+
+
+def _prompt_learn_category_alias(
+    telegram_user_id: int,
+    intent_payload: dict[str, Any],
+    alias_raw: str,
+    candidates: list[str],
+) -> str:
+    a = norm(alias_raw) or alias_raw.strip().lower()
+    next_payload = dict(intent_payload)
+    next_payload["alias_to_learn"] = a
+    set_pending_intent(telegram_user_id, next_payload, kind="category_alias", options=candidates)
+
+    lines = [
+        f"Я поки що не знаю, що для тебе означає '{alias_raw}'.",
+        "Вибери мерчанти, які до цього відносяться:",
+    ]
+    for i, c in enumerate(candidates, start=1):
+        lines.append(f"{i}) {c}")
+    lines.append("Напиши номери через кому (наприклад: 1,3) або 0 щоб скасувати.")
+    return "\n".join(lines)
 
 
 def _top_recipient_candidates(rows, kind_prefix: str, limit: int = 5) -> list[str]:
