@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_yesterday_to_baseline
 from mono_ai_budget_bot.nlq.memory_store import (
@@ -12,6 +11,7 @@ from mono_ai_budget_bot.nlq.memory_store import (
     save_memory,
     set_pending_intent,
 )
+from mono_ai_budget_bot.nlq.query_engine import QueryEngine, QueryFilter
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -127,54 +127,25 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         resolve_merchant_alias(telegram_user_id, intent_payload.get("merchant_contains")) or ""
     )
 
-    filtered = []
-    mem = None
-    ra = None
+    recipient_match: str | None = None
+    if recipient_alias and intent.startswith("transfer_"):
+        mem = load_memory(telegram_user_id)
+        ra = mem.get("recipient_aliases") or {}
+        if isinstance(ra, dict):
+            v = ra.get(recipient_alias)
+            if isinstance(v, str) and v.strip():
+                recipient_match = v.strip().lower()
 
-    for r in rows:
-        kind = classify_kind(r.amount, r.mcc, r.description)
-
-        if intent.startswith("spend_"):
-            if kind != "spend":
-                continue
-            cat = str(intent_payload.get("category") or "").strip()
-            if cat:
-                c = category_from_mcc(r.mcc)
-                if c != cat:
-                    continue
-            if merchant_filter and merchant_filter not in (r.description or "").lower():
-                continue
-
-        elif intent.startswith("income_"):
-            if kind != "income":
-                continue
-
-        elif intent.startswith("transfer_out_"):
-            if kind != "transfer_out":
-                continue
-            if recipient_alias:
-                if mem is None:
-                    mem = load_memory(telegram_user_id)
-                    ra = mem.get("recipient_aliases") or {}
-                match_value = ra.get(recipient_alias) if isinstance(ra, dict) else None
-                if match_value and match_value not in (r.description or "").lower():
-                    continue
-
-        elif intent.startswith("transfer_in_"):
-            if kind != "transfer_in":
-                continue
-            if recipient_alias:
-                if mem is None:
-                    mem = load_memory(telegram_user_id)
-                    ra = mem.get("recipient_aliases") or {}
-                match_value = ra.get(recipient_alias) if isinstance(ra, dict) else None
-                if match_value and match_value not in (r.description or "").lower():
-                    continue
-
-        else:
-            continue
-
-        filtered.append(r)
+    engine = QueryEngine()
+    filtered = engine.filter_rows(
+        rows,
+        QueryFilter(
+            intent=intent,
+            category=str(intent_payload.get("category") or "").strip() or None,
+            merchant_contains=merchant_filter,
+            recipient_contains=recipient_match,
+        ),
+    )
 
     label = str(intent_payload.get("period_label") or "").strip().lower()
     if label == "сьогодні":
@@ -187,28 +158,28 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         prefix = f"За останні {days} днів"
 
     if intent == "spend_sum":
-        total_cents = sum(-r.amount for r in filtered)
+        total_cents = engine.sum_cents(filtered, intent)
         return f"{prefix} ти витратив {total_cents/100:.2f} грн."
 
     if intent == "spend_count":
         return f"{prefix} було {len(filtered)} витрат."
 
     if intent == "income_sum":
-        total_cents = sum(r.amount for r in filtered)
+        total_cents = engine.sum_cents(filtered, intent)
         return f"{prefix} було поповнень на {total_cents/100:.2f} грн."
 
     if intent == "income_count":
         return f"{prefix} було {len(filtered)} поповнень."
 
     if intent == "transfer_out_sum":
-        total_cents = sum(-r.amount for r in filtered)
+        total_cents = engine.sum_cents(filtered, intent)
         return f"{prefix} ти переказав {total_cents/100:.2f} грн."
 
     if intent == "transfer_out_count":
         return f"{prefix} було {len(filtered)} вихідних переказів."
 
     if intent == "transfer_in_sum":
-        total_cents = sum(r.amount for r in filtered)
+        total_cents = engine.sum_cents(filtered, intent)
         return f"{prefix} ти отримав {total_cents/100:.2f} грн."
 
     if intent == "transfer_in_count":
