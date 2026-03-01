@@ -12,6 +12,7 @@ from mono_ai_budget_bot.nlq.memory_store import (
     set_pending_intent,
 )
 from mono_ai_budget_bot.nlq.query_engine import QueryEngine, QueryFilter
+from mono_ai_budget_bot.nlq.query_spec import spec_from_intent_payload
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -60,19 +61,25 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return "Обери картки для аналізу через /accounts."
 
     ts_to = int(intent_payload.get("end_ts") or time.time())
-    ts_from_raw = intent_payload.get("start_ts")
 
-    days_raw = intent_payload.get("days")
-    try:
-        days = int(days_raw) if days_raw is not None else 30
-    except Exception:
-        days = 30
-    days = max(1, min(days, 31))
+    spec = spec_from_intent_payload(intent_payload, now_ts=ts_to)
 
-    if ts_from_raw is None:
-        ts_from = ts_to - days * 86400
+    if spec is None:
+        ts_from_raw = intent_payload.get("start_ts")
+
+        days_raw = intent_payload.get("days")
+        try:
+            days = int(days_raw) if days_raw is not None else 30
+        except Exception:
+            days = 30
+        days = max(1, min(days, 31))
+
+        if ts_from_raw is None:
+            ts_from = ts_to - days * 86400
+        else:
+            ts_from = int(ts_from_raw)
     else:
-        ts_from = int(ts_from_raw)
+        ts_from = spec.window.start_ts
 
     tx_store = TxStore()
     rows = tx_store.load_range(
@@ -141,21 +148,28 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         rows,
         QueryFilter(
             intent=intent,
-            category=str(intent_payload.get("category") or "").strip() or None,
+            category=(
+                spec.category
+                if spec is not None
+                else str(intent_payload.get("category") or "").strip() or None
+            ),
             merchant_contains=merchant_filter,
             recipient_contains=recipient_match,
         ),
     )
 
-    label = str(intent_payload.get("period_label") or "").strip().lower()
-    if label == "сьогодні":
-        prefix = "Сьогодні"
-    elif label == "вчора":
-        prefix = "Вчора"
-    elif label:
-        prefix = f"За {label}"
+    if spec is not None:
+        prefix = spec.window.label
     else:
-        prefix = f"За останні {days} днів"
+        label = str(intent_payload.get("period_label") or "").strip().lower()
+        if label == "сьогодні":
+            prefix = "Сьогодні"
+        elif label == "вчора":
+            prefix = "Вчора"
+        elif label:
+            prefix = f"За {label}"
+        else:
+            prefix = f"За останні {days} днів"
 
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
