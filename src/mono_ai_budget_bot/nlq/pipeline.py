@@ -41,12 +41,34 @@ def _is_out_of_scope_for_llm(text: str) -> bool:
         "дивіденд",
         "yield",
         "staking",
+        "system prompt",
+        "developer message",
+        "ignore previous",
+        "jailbreak",
+        "ігноруй правила",
+        "ігноруй попередні",
+        "розкрий промпт",
+        "розкрий інструкції",
     ]
     return any(k in s for k in banned)
 
 
+_LLM_LAST_TS: dict[int, int] = {}
+
+
+def _llm_cooldown_ok(user_id: int, now_ts: int, seconds: int = 10) -> bool:
+    seconds = max(5, min(int(seconds), 120))
+    last = int(_LLM_LAST_TS.get(int(user_id), 0))
+    if int(now_ts) - last < seconds:
+        return False
+    _LLM_LAST_TS[int(user_id)] = int(now_ts)
+    return True
+
+
 def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
     if _is_out_of_scope_for_llm(req.text):
+        return None
+    if not _llm_cooldown_ok(req.telegram_user_id, req.now_ts, seconds=10):
         return None
     client = _get_llm_client()
     if client is None:

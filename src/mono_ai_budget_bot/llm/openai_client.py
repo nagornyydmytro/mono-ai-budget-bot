@@ -90,6 +90,13 @@ def _parse_llm_json(text: str) -> dict[str, Any]:
         return json.loads(extracted)
 
 
+def _parse_llm_json_strict(raw: str, model: type[BaseModel]) -> BaseModel:
+    s = (raw or "").strip()
+    if not (s.startswith("{") and s.endswith("}")):
+        raise ValidationError.from_exception_data("NLQPlan", [])
+    return _parse_llm_json(s, model)
+
+
 class OpenAIClient:
     def __init__(self, api_key: str, model: str = "gpt-4o-mini", timeout_s: float = 30.0):
         if not api_key:
@@ -240,7 +247,7 @@ class OpenAIClient:
         raw = self._chat(system=system, user=user, temperature=0.0)
 
         try:
-            plan = _parse_llm_json(raw, NLQPlanV1)
+            plan = _parse_llm_json_strict(raw, NLQPlanV1)
         except ValidationError:
             return None
 
