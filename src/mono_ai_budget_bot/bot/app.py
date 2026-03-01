@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -337,29 +338,41 @@ def _render_categories_deep_block(facts: dict) -> str | None:
     return templates.section("Категорії детально", [*spend_lines, *movers_lines])
 
 
+_ANOMALY_REASON_TEXT: dict[str, str] = {
+    "first_time_large": "вперше велика сума за період",
+    "spike_vs_median": "сплеск відносно типової (медіани)",
+}
+
+
 def _render_anomalies_block(facts: dict) -> str | None:
-    anomalies = facts.get("anomalies") or []
-    if not (isinstance(anomalies, list) and anomalies):
+    raw = facts.get("anomalies")
+    items: list[dict] = []
+
+    if isinstance(raw, list):
+        items = [x for x in raw if isinstance(x, dict)]
+    elif isinstance(raw, Mapping):
+        v = raw.get("items")
+        if isinstance(v, list):
+            items = [x for x in v if isinstance(x, dict)]
+
+    if not items:
         return None
 
     lines: list[str] = []
-    lines.append("*Аномалії (остання доба):*")
-    for x in anomalies[:5]:
-        lab = md_escape(str(x.get("label", "—")))
-        last_uah = float(x.get("last_day_uah", 0.0))
-        base_uah = float(x.get("baseline_median_uah", 0.0))
-        reason = str(x.get("reason", ""))
-        if reason == "first_time_large":
-            why = "вперше великий чек"
-        elif reason == "spike_vs_median":
-            why = "сплеск vs медіана"
-        else:
-            why = reason or "аномалія"
+    for i, a in enumerate(items[:5], start=1):
+        label = md_escape(str(a.get("label", "—")))
+        last_uah = float(a.get("last_day_uah", 0.0) or 0.0)
+        base_uah = float(a.get("baseline_median_uah", 0.0) or 0.0)
+
+        reason = str(a.get("reason", "") or "").strip()
+        reason_txt = _ANOMALY_REASON_TEXT.get(reason, reason if reason else "аномалія")
+
         lines.append(
-            f"⚠️ {lab}: {md_escape(_fmt_money(last_uah))} (база {md_escape(_fmt_money(base_uah))}) — {md_escape(why)}"
+            f"{i}. {label} — *{md_escape(_fmt_money(last_uah))}* "
+            f"(звично ~ {md_escape(_fmt_money(base_uah))}) · {md_escape(reason_txt)}"
         )
 
-    return "\n".join(lines).strip()
+    return templates.section("Аномалії", lines)
 
 
 def _render_whatif_block(facts: dict) -> str | None:
