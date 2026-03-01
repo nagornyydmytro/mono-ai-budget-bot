@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from statistics import median
-from typing import Any, Callable
+from typing import Callable
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
-from mono_ai_budget_bot.analytics.classify import classify_kind
+from mono_ai_budget_bot.analytics.models import TxRow
 
 MIN_BASELINE_DAYS = 3
 MIN_SPIKE_UAH = 250.0
@@ -59,9 +59,9 @@ def _top_delta(item: AnomalyItem) -> int:
 
 
 def _detect_for_label(
-    rows: list[Any],
+    rows: list[TxRow],
     now_ts: int,
-    label_fn: Callable[[Any], str],
+    label_fn: Callable[[TxRow], str],
     lookback_days: int,
     spike_mult: float,
     min_threshold_cents: int,
@@ -79,18 +79,18 @@ def _detect_for_label(
     seen_before: set[str] = set()
 
     for r in rows:
-        t = int(getattr(r, "time", getattr(r, "ts", 0)))
-        amt = int(getattr(r, "amount", 0))
-        kind = classify_kind(amt, getattr(r, "mcc", None), getattr(r, "description", ""))
+        t = int(r.ts)
+        if not (hist_start <= t < now_ts):
+            continue
 
-        if kind != "spend":
+        if r.kind != "spend":
             continue
 
         label = str(label_fn(r) or "unknown")
         if label == "unknown":
             continue
 
-        cents = -amt
+        cents = abs(int(r.amount))
 
         if hist_start <= t < last_day_start:
             seen_before.add(label)
@@ -98,13 +98,12 @@ def _detect_for_label(
         if last_day_start <= t < now_ts:
             last_day_by[label] = last_day_by.get(label, 0) + cents
 
-        if hist_start <= t < now_ts:
-            day = t // 86400
-            m = daily_by.get(label)
-            if m is None:
-                m = {}
-                daily_by[label] = m
-            m[day] = m.get(day, 0) + cents
+        day = t // 86400
+        m = daily_by.get(label)
+        if m is None:
+            m = {}
+            daily_by[label] = m
+        m[day] = m.get(day, 0) + cents
 
     out: list[AnomalyItem] = []
 
@@ -160,7 +159,7 @@ def _detect_for_label(
 
 
 def detect_anomalies(
-    rows: list[Any],
+    rows: list[TxRow],
     now_ts: int,
     lookback_days: int = 28,
     spike_mult: float = 2.0,
@@ -171,7 +170,7 @@ def detect_anomalies(
     merchants = _detect_for_label(
         rows=rows,
         now_ts=now_ts,
-        label_fn=lambda r: _norm_merchant(getattr(r, "description", "")),
+        label_fn=lambda r: _norm_merchant(r.description),
         lookback_days=lookback_days,
         spike_mult=spike_mult,
         min_threshold_cents=min_threshold_cents,
@@ -182,7 +181,7 @@ def detect_anomalies(
     categories = _detect_for_label(
         rows=rows,
         now_ts=now_ts,
-        label_fn=lambda r: category_from_mcc(getattr(r, "mcc", None)) or "Інше",
+        label_fn=lambda r: category_from_mcc(r.mcc) or "Інше",
         lookback_days=lookback_days,
         spike_mult=spike_mult,
         min_threshold_cents=min_threshold_cents,

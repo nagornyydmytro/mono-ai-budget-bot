@@ -374,37 +374,15 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     ts_to = now_ts
 
     records = tx_store.load_range(cfg.telegram_user_id, account_ids, ts_from, ts_to)
-
+    rows = rows_from_ledger(records)
     report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
     current_facts = report["current"]
 
-    t = compute_trends(records, now_ts=now_ts, window_days=7)
-    current_facts["trends"] = {
-        "window_days": t.window_days,
-        "growing": [
-            {
-                "label": x.label,
-                "prev_uah": x.prev_cents / 100.0,
-                "last_uah": x.last_cents / 100.0,
-                "delta_uah": x.delta_cents / 100.0,
-                "pct": x.delta_pct * 100.0,
-            }
-            for x in t.top_growing
-        ],
-        "declining": [
-            {
-                "label": x.label,
-                "prev_uah": x.prev_cents / 100.0,
-                "last_uah": x.last_cents / 100.0,
-                "delta_uah": x.delta_cents / 100.0,
-                "pct": x.delta_pct * 100.0,
-            }
-            for x in t.top_declining
-        ],
-    }
+    trends = compute_trends(rows, now_ts=now_ts, window_days=7)
+    current_facts["trends"] = trends
 
-    a = detect_anomalies(records, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
+    a = detect_anomalies(rows, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
     current_facts["anomalies"] = [
         {
             "label": x.label,
@@ -475,36 +453,15 @@ async def _compute_and_cache_reports_for_user(
         ts_to = now_ts
 
         records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
+        rows = rows_from_ledger(records)
         report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
         current_facts = report["current"]
 
-        t = compute_trends(records, now_ts=now_ts, window_days=7)
-        current_facts["trends"] = {
-            "window_days": t.window_days,
-            "growing": [
-                {
-                    "label": x.label,
-                    "prev_uah": x.prev_cents / 100.0,
-                    "last_uah": x.last_cents / 100.0,
-                    "delta_uah": x.delta_cents / 100.0,
-                    "pct": x.delta_pct * 100.0,
-                }
-                for x in t.top_growing
-            ],
-            "declining": [
-                {
-                    "label": x.label,
-                    "prev_uah": x.prev_cents / 100.0,
-                    "last_uah": x.last_cents / 100.0,
-                    "delta_uah": x.delta_cents / 100.0,
-                    "pct": x.delta_pct * 100.0,
-                }
-                for x in t.top_declining
-            ],
-        }
+        trends = compute_trends(rows, now_ts=now_ts, window_days=7)
+        current_facts["trends"] = trends
 
-        a = detect_anomalies(records, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
+        a = detect_anomalies(rows, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
         current_facts["anomalies"] = [
             {
                 "label": x.label,

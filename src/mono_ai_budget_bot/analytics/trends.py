@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .categories import category_from_mcc
+from .models import TxRow
 
 try:
     from .anomalies import _norm_merchant  # type: ignore
@@ -29,27 +30,6 @@ def _pct_change(cur: float, prev: float) -> float | None:
     return round(((cur - prev) / prev) * 100.0, 2)
 
 
-def _get_ts(r: Any) -> int:
-    if hasattr(r, "ts"):
-        return int(r.ts)
-    return int(r.time)
-
-
-def _get_kind(r: Any) -> str:
-    if hasattr(r, "kind"):
-        return str(r.kind)
-    amt = int(getattr(r, "amount", 0))
-    if amt > 0:
-        return "income"
-    if amt < 0:
-        return "spend"
-    return "other"
-
-
-def _get_amount_minor(r: Any) -> int:
-    return abs(int(getattr(r, "amount", 0)))
-
-
 def _merchant_label(desc: str) -> str:
     s = (desc or "").strip()
     if _norm_merchant is not None:
@@ -60,27 +40,27 @@ def _merchant_label(desc: str) -> str:
 
 
 def _sum_by_label(
-    rows: list[Any],
+    rows: list[TxRow],
     start_ts: int,
     end_ts: int,
-    label_fn: Callable[[Any], str],
+    label_fn: Callable[[TxRow], str],
 ) -> tuple[dict[str, int], dict[str, set[int]]]:
     totals: dict[str, int] = {}
     days: dict[str, set[int]] = {}
 
     for r in rows:
-        t = _get_ts(r)
+        t = int(r.ts)
         if not (start_ts <= t < end_ts):
             continue
 
-        if _get_kind(r) != "spend":
+        if r.kind != "spend":
             continue
 
         label = label_fn(r) or "unknown"
         if label == "unknown":
             continue
 
-        cents = _get_amount_minor(r)
+        cents = abs(int(r.amount))
         totals[label] = totals.get(label, 0) + cents
         days.setdefault(label, set()).add(t // 86400)
 
@@ -133,14 +113,14 @@ def _build_items(
 
 
 def compute_trends(
-    rows: list[Any],
+    rows: list[TxRow],
     now_ts: int,
     *,
     window_days: int = 7,
     min_prev_uah: float = 200.0,
     min_abs_delta_uah: float = 150.0,
     min_active_days: int = 2,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     now_ts = int(now_ts)
     w = max(3, min(int(window_days), 30))
 
@@ -152,26 +132,26 @@ def compute_trends(
         rows,
         start_ts=cur_start,
         end_ts=now_ts,
-        label_fn=lambda r: category_from_mcc(getattr(r, "mcc", None)) or "Інше",
+        label_fn=lambda r: category_from_mcc(r.mcc) or "Інше",
     )
     cat_prev, cat_days_prev = _sum_by_label(
         rows,
         start_ts=prev_start,
         end_ts=prev_end,
-        label_fn=lambda r: category_from_mcc(getattr(r, "mcc", None)) or "Інше",
+        label_fn=lambda r: category_from_mcc(r.mcc) or "Інше",
     )
 
     mer_cur, mer_days_cur = _sum_by_label(
         rows,
         start_ts=cur_start,
         end_ts=now_ts,
-        label_fn=lambda r: _merchant_label(getattr(r, "description", "")),
+        label_fn=lambda r: _merchant_label(r.description),
     )
     mer_prev, mer_days_prev = _sum_by_label(
         rows,
         start_ts=prev_start,
         end_ts=prev_end,
-        label_fn=lambda r: _merchant_label(getattr(r, "description", "")),
+        label_fn=lambda r: _merchant_label(r.description),
     )
 
     cat_items = _build_items(
@@ -215,6 +195,7 @@ def compute_trends(
         }
 
     return {
+        "window_days": w,
         "growing": [to_dict(x) for x in growing[:3]],
         "declining": [to_dict(x) for x in declining[:3]],
     }

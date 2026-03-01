@@ -5,21 +5,22 @@ from mono_ai_budget_bot.analytics.anomalies import detect_anomalies
 
 @dataclass
 class Row:
-    time: int
+    ts: int
     amount: int
     mcc: int | None
     description: str
+    kind: str = "spend"
 
 
 def test_detects_spike_and_first_time():
     now = 100 * 86400
 
-    rows = []
+    rows: list[Row] = []
 
     for d in range(10, 0, -1):
         rows.append(
             Row(
-                time=now - (d + 1) * 86400 + 10,
+                ts=now - (d + 1) * 86400 + 10,
                 amount=-10000,
                 mcc=5814,
                 description="mcd",
@@ -28,7 +29,7 @@ def test_detects_spike_and_first_time():
 
     rows.append(
         Row(
-            time=now - 1 * 86400 + 10,
+            ts=now - 1 * 86400 + 10,
             amount=-30000,
             mcc=5814,
             description="mcd",
@@ -37,7 +38,7 @@ def test_detects_spike_and_first_time():
 
     rows.append(
         Row(
-            time=now - 1 * 86400 + 20,
+            ts=now - 1 * 86400 + 20,
             amount=-50000,
             mcc=5814,
             description="new_merchant",
@@ -58,12 +59,12 @@ def test_detects_spike_and_first_time():
 def test_detects_category_spike():
     now = 200 * 86400
 
-    rows = []
+    rows: list[Row] = []
 
     for d in range(10, 0, -1):
         rows.append(
             Row(
-                time=now - (d + 1) * 86400 + 10,
+                ts=now - (d + 1) * 86400 + 10,
                 amount=-12000,
                 mcc=5814,
                 description=f"merchant_{d}",
@@ -72,7 +73,7 @@ def test_detects_category_spike():
 
     rows.append(
         Row(
-            time=now - 1 * 86400 + 10,
+            ts=now - 1 * 86400 + 10,
             amount=-60000,
             mcc=5814,
             description="one_off",
