@@ -28,6 +28,15 @@ def _extract_recipient_alias(pending: dict) -> str:
     return ""
 
 
+def _is_paging_continue(user_text: str) -> bool:
+    s = (user_text or "").strip().lower()
+    if not s:
+        return False
+    if s.isdigit():
+        return int(s) == 1
+    return s in {"далі", "ще", "дальше", "next", "more", ">", ">>"}
+
+
 def handle_nlq(req: NLQRequest) -> NLQResponse:
     mem = load_memory(req.telegram_user_id)
     pending = mem.get("pending_intent")
@@ -42,6 +51,15 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
         options = None
 
     if isinstance(pending, dict):
+        pending_kind = mem.get("pending_kind")
+        if pending_kind == "paging" and _is_paging_continue(req.text):
+            mem["pending_intent"] = None
+            mem["pending_kind"] = None
+            mem["pending_options"] = None
+            save_memory(req.telegram_user_id, mem)
+
+            text = execute_intent(req.telegram_user_id, pending)
+            return NLQResponse(result=NLQResult(text=text), clarification=None)
         alias = _extract_recipient_alias(pending)
         match_value = _resolve_followup_value(req.text, options).strip().lower()
 

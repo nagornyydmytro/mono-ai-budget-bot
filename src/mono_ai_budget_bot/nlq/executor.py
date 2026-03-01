@@ -13,6 +13,7 @@ from mono_ai_budget_bot.nlq.memory_store import (
 )
 from mono_ai_budget_bot.nlq.query_engine import QueryEngine, QueryFilter
 from mono_ai_budget_bot.nlq.query_spec import spec_from_intent_payload
+from mono_ai_budget_bot.nlq.tabular import render_top_categories, render_top_merchants
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -202,7 +203,37 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} ти витратив {total_cents/100:.2f} грн."
+        parts: list[str] = [f"{prefix} ти витратив {total_cents/100:.2f} грн."]
+
+        page_raw = intent_payload.get("page")
+        try:
+            page = int(page_raw) if page_raw is not None else 1
+        except Exception:
+            page = 1
+        page = max(1, page)
+
+        if merchant_filter.strip() == "":
+            t = render_top_merchants(filtered, page=page, page_size=5, title="Топ мерчанти")
+            if t.lines:
+                parts.append(f"\n{t.title} (стор. {page}):\n" + "\n".join(t.lines))
+
+            if t.has_more:
+                next_payload = dict(intent_payload)
+                next_payload["page"] = page + 1
+                set_pending_intent(
+                    telegram_user_id,
+                    next_payload,
+                    kind="paging",
+                    options=["Показати ще"],
+                )
+                parts.append("\nНапиши 1 або 'далі', щоб показати ще.")
+
+            if spec is None or spec.category is None:
+                c = render_top_categories(filtered, page=1, page_size=5, title="Топ категорії")
+                if c.lines:
+                    parts.append(f"\n{c.title}:\n" + "\n".join(c.lines))
+
+        return "\n".join(parts)
 
     if intent == "spend_count":
         return f"{prefix} було {len(filtered)} витрат."
