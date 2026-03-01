@@ -39,17 +39,32 @@ def _is_paging_continue(user_text: str) -> bool:
 
 def _parse_multi_select(user_text: str, options: list[str]) -> list[str]:
     s = (user_text or "").strip().lower()
-    if not s or s in {"0", "ні", "нет", "cancel", "скасувати"}:
+    if not s:
         return []
 
-    tokens = []
-    for part in s.replace(";", ",").replace(" ", ",").split(","):
-        part = part.strip()
-        if not part:
-            continue
-        tokens.append(part)
+    if s in {"0", "ні", "нет", "cancel", "скасувати"}:
+        return []
 
-    idxs: set[int] = set()
+    normalized_options = [o.strip() for o in options if isinstance(o, str) and o.strip()]
+    if not normalized_options:
+        return []
+
+    if s in {"всі", "усі", "all"}:
+        return list(normalized_options)
+
+    if s.startswith("всі крім") or s.startswith("усі крім"):
+        tail = s.split("крім", 1)[1].strip()
+        excluded = _parse_multi_select(tail, options)
+        return [o for o in normalized_options if o not in excluded]
+
+    tokens = []
+    for part in s.replace(";", ",").split(","):
+        part = part.strip()
+        if part:
+            tokens.append(part)
+
+    picked: set[str] = set()
+
     for t in tokens:
         if "-" in t:
             a, b = t.split("-", 1)
@@ -58,19 +73,24 @@ def _parse_multi_select(user_text: str, options: list[str]) -> list[str]:
                 if x > y:
                     x, y = y, x
                 for i in range(x, y + 1):
-                    idxs.add(i)
+                    if 1 <= i <= len(normalized_options):
+                        picked.add(normalized_options[i - 1])
             continue
+
         if t.isdigit():
-            idxs.add(int(t))
+            i = int(t)
+            if 1 <= i <= len(normalized_options):
+                picked.add(normalized_options[i - 1])
+            continue
 
-    picked: list[str] = []
-    for i in sorted(idxs):
-        if 1 <= i <= len(options):
-            v = options[i - 1].strip()
-            if v:
-                picked.append(v)
+    for t in tokens:
+        if t.isdigit() or "-" in t:
+            continue
+        for o in normalized_options:
+            if t in o.lower():
+                picked.add(o)
 
-    return picked
+    return list(picked)
 
 
 def handle_nlq(req: NLQRequest) -> NLQResponse:

@@ -100,3 +100,20 @@ def test_category_alias_range_selection(tmp_path, monkeypatch):
     terms = ca["каршерінг"]
     assert isinstance(terms, list)
     assert len(terms) >= 3
+
+
+def test_category_alias_text_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: 2000)
+
+    _ = ex.execute_intent(
+        1,
+        {"intent": "spend_sum", "days": 30, "merchant_contains": "каршерінг"},
+    )
+
+    resp = handle_nlq(NLQRequest(telegram_user_id=1, text="getmancar, aston", now_ts=2000))
+    assert resp.result is not None
+    assert "5466.64" in resp.result.text
