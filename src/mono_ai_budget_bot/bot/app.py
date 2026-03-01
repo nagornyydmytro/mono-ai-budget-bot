@@ -234,37 +234,39 @@ def _render_facts_block(facts: dict) -> str:
     return "\n".join(lines).strip()
 
 
-def _render_trends_block(facts: dict) -> str | None:
-    trends = facts.get("trends") or {}
+def _render_trends_block(trends: dict) -> str | None:
     if not isinstance(trends, dict):
         return None
 
     growing = trends.get("growing") or []
     declining = trends.get("declining") or []
-    if not (isinstance(growing, list) or isinstance(declining, list)):
+
+    if not growing and not declining:
         return None
 
     lines: list[str] = []
     lines.append("*Тренди (7 днів vs попередні 7):*")
 
-    for x in growing[:3] if isinstance(growing, list) else []:
-        lab = md_escape(str(x.get("label", "—")))
-        dlt = float(x.get("delta_uah", 0.0))
+    def fmt_item(x: dict) -> str:
+        label = md_escape(str(x.get("label", "—")))
+        delta = float(x.get("delta_uah", 0.0))
         pct = x.get("pct")
-        sign = "+" if dlt >= 0 else ""
-        pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
-        lines.append(f"📈 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+        sign = "+" if delta > 0 else ""
+        pct_part = f" ({sign}{int(pct)}%)" if isinstance(pct, (int, float)) else ""
+        return f"• {label} {sign}{md_escape(_fmt_money(delta))}{pct_part}"
 
-    for x in declining[:3] if isinstance(declining, list) else []:
-        lab = md_escape(str(x.get("label", "—")))
-        dlt = float(x.get("delta_uah", 0.0))
-        pct = x.get("pct")
-        sign = "+" if dlt >= 0 else ""
-        pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
-        lines.append(f"📉 {lab}: {md_escape(sign + _fmt_money(dlt))} ({md_escape(pct_txt)})")
+    if growing:
+        lines.append("")
+        lines.append("📈 *Зростання:*")
+        for x in growing[:3]:
+            lines.append(fmt_item(x))
 
-    if len(lines) == 1:
-        return None
+    if declining:
+        lines.append("")
+        lines.append("📉 *Падіння:*")
+        for x in declining[:3]:
+            lines.append(fmt_item(x))
+
     return "\n".join(lines).strip()
 
 
@@ -331,7 +333,7 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
 
     header = f"📊 {md_escape(title)}"
     facts_block = _render_facts_block(facts)
-    trends_block = _render_trends_block(facts)
+    trends_block = _render_trends_block(facts.get("trends") or {})
     anomalies_block = _render_anomalies_block(facts)
     insight_block = _render_ai_block(ai_block)
     whatif_block = _render_whatif_block(facts)

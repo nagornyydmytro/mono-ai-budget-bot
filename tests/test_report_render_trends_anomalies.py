@@ -27,4 +27,8 @@ def test_render_report_includes_trends_and_anomalies():
 
     s = render_report("week", facts, ai_block=None)
     assert "Тренди" in s
+    assert "Зростання" in s
+    assert "Падіння" in s
+    assert "mcd" in s
+    assert "atb" in s
     assert "Аномалії" in s
