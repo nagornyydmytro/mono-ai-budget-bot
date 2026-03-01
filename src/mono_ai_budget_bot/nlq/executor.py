@@ -16,7 +16,7 @@ from mono_ai_budget_bot.nlq.query_spec import spec_from_intent_payload
 from mono_ai_budget_bot.nlq.tabular import (
     render_top_categories,
     render_top_merchants,
-    suggest_merchant_candidates,
+    suggest_merchant_candidates_detailed,
 )
 from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxStore
@@ -106,7 +106,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
         if alias_raw and _should_clarify_alias(mem, alias_raw):
             if not _has_spend_match(rows, merchant_filter):
-                candidates = suggest_merchant_candidates(rows, limit=8)
+                candidates = suggest_merchant_candidates_detailed(rows, limit=8)
                 if candidates:
                     return _prompt_learn_category_alias(
                         telegram_user_id,
@@ -207,7 +207,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
     if intent.startswith("spend_") and alias_raw and _should_clarify_alias(mem, alias_raw):
         if merchant_filter and not filtered:
-            candidates = suggest_merchant_candidates(rows, limit=8)
+            candidates = suggest_merchant_candidates_detailed(rows, limit=8)
             if candidates:
                 return _prompt_learn_category_alias(
                     telegram_user_id,
@@ -323,19 +323,20 @@ def _prompt_learn_category_alias(
     telegram_user_id: int,
     intent_payload: dict[str, Any],
     alias_raw: str,
-    candidates: list[str],
+    candidates: list[tuple[str, int]],
 ) -> str:
     a = norm(alias_raw) or alias_raw.strip().lower()
     next_payload = dict(intent_payload)
     next_payload["alias_to_learn"] = a
-    set_pending_intent(telegram_user_id, next_payload, kind="category_alias", options=candidates)
+    option_names = [n for (n, _) in candidates]
+    set_pending_intent(telegram_user_id, next_payload, kind="category_alias", options=option_names)
 
     lines = [
         f"Я поки що не знаю, що для тебе означає '{alias_raw}'.",
         "Вибери мерчанти, які до цього відносяться:",
     ]
-    for i, c in enumerate(candidates, start=1):
-        lines.append(f"{i}) {c}")
+    for i, (name, cents) in enumerate(candidates, start=1):
+        lines.append(f"{i}) {name}: {cents/100:.2f} ₴")
     lines.append("Напиши номери через кому (наприклад: 1,3) або 0 щоб скасувати.")
     return "\n".join(lines)
 

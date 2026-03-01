@@ -104,3 +104,15 @@ def suggest_merchant_candidates(rows: list[TxRecord], limit: int = 8) -> list[st
         if name and name != "unknown":
             out.append(name)
     return out
+
+
+def suggest_merchant_candidates_detailed(
+    rows: list[TxRecord], limit: int = 8
+) -> list[tuple[str, int]]:
+    limit = max(3, min(int(limit), 15))
+    items = _top_merchants(rows)
+    out: list[tuple[str, int]] = []
+    for name, cents, _ in items[:limit]:
+        if name and name != "unknown" and cents > 0:
+            out.append((name, int(cents)))
+    return out

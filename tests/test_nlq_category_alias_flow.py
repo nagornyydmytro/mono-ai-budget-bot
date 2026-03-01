@@ -49,6 +49,7 @@ def test_unknown_alias_triggers_clarify_and_learns(tmp_path, monkeypatch):
     msg = ex.execute_intent(
         1, {"intent": "spend_sum", "days": 30, "merchant_contains": "каршерінг"}
     )
+    assert "5048.64 ₴" in msg
     assert "не знаю" in msg.lower()
     mem = ms.load_memory(1)
     assert mem.get("pending_kind") == "category_alias"
@@ -59,3 +60,43 @@ def test_unknown_alias_triggers_clarify_and_learns(tmp_path, monkeypatch):
     resp = handle_nlq(NLQRequest(telegram_user_id=1, text="1,3", now_ts=2000))
     assert resp.result is not None
     assert "5466.64" in resp.result.text
+
+
+def test_category_alias_cancel_clears_pending(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: 2000)
+
+    _ = ex.execute_intent(1, {"intent": "spend_sum", "days": 30, "merchant_contains": "каршерінг"})
+    mem = ms.load_memory(1)
+    assert mem.get("pending_kind") == "category_alias"
+
+    resp = handle_nlq(NLQRequest(telegram_user_id=1, text="0", now_ts=2000))
+    assert resp.result is not None
+    assert "не зберігаю" in resp.result.text.lower()
+
+    mem2 = ms.load_memory(1)
+    assert mem2.get("pending_kind") is None
+    assert mem2.get("pending_intent") is None
+
+
+def test_category_alias_range_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: 2000)
+
+    _ = ex.execute_intent(1, {"intent": "spend_sum", "days": 30, "merchant_contains": "каршерінг"})
+    resp = handle_nlq(NLQRequest(telegram_user_id=1, text="1-3", now_ts=2000))
+    assert resp.result is not None
+
+    mem = ms.load_memory(1)
+    ca = mem.get("category_aliases")
+    assert isinstance(ca, dict)
+    assert "каршерінг" in ca
+    terms = ca["каршерінг"]
+    assert isinstance(terms, list)
+    assert len(terms) >= 3
