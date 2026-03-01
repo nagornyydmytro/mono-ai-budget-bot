@@ -5,6 +5,8 @@ from statistics import median
 from typing import Any
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
+from mono_ai_budget_bot.analytics.classify import classify_kind
+from mono_ai_budget_bot.storage.tx_store import TxRecord
 
 
 def pct_change(current: float, prev: float) -> float | None:
@@ -54,14 +56,12 @@ class CompareResult:
 
 
 def compare_yesterday_to_baseline(
-    rows: list[Any],
+    rows: list[TxRecord],
     now_ts: int,
     merchant_contains: str | None = None,
     category: str | None = None,
     lookback_days: int = 28,
 ) -> CompareResult:
-    from mono_ai_budget_bot.analytics.classify import classify_kind
-
     now_ts = int(now_ts)
     lookback_days = max(7, min(int(lookback_days), 90))
 
@@ -76,21 +76,22 @@ def compare_yesterday_to_baseline(
     daily: dict[int, int] = {}
 
     for r in rows:
-        t = int(getattr(r, "time", getattr(r, "ts", 0)))
-        amt = int(getattr(r, "amount", 0))
-        kind = classify_kind(amt, getattr(r, "mcc", None), getattr(r, "description", ""))
+        t = int(r.time)
+        amt = int(r.amount)
+        kind = classify_kind(amt, r.mcc, r.description)
 
         if kind != "spend":
             continue
 
-        desc = (getattr(r, "description", "") or "").lower()
+        desc = (r.description or "").lower()
         if filt and filt not in desc:
             continue
 
         if cat:
-            c = category_from_mcc(getattr(r, "mcc", None))
+            c = category_from_mcc(r.mcc)
             if c != cat:
                 continue
+
         cents = -amt
 
         if y0 <= t < today0:

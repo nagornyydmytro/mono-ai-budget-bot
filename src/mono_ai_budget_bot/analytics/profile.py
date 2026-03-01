@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import mean, median
-from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
+from mono_ai_budget_bot.storage.tx_store import TxRecord
 
 
 @dataclass(frozen=True)
@@ -18,14 +18,14 @@ class Baseline:
     weekday_avg_cents: dict[int, int]
 
 
-def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
+def compute_baseline(rows: list[TxRecord], window_days: int = 28) -> Baseline:
     window_days = max(7, min(int(window_days), 90))
 
-    spend_rows: list[Any] = []
+    spend_rows: list[TxRecord] = []
     spend_by_kind: dict[str, int] = {}
 
     for r in rows:
-        kind = classify_kind(r.amount, getattr(r, "mcc", None), getattr(r, "description", ""))
+        kind = classify_kind(r.amount, r.mcc, r.description)
         if kind != "spend":
             continue
         spend_rows.append(r)
@@ -36,7 +36,7 @@ def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
 
     by_day: dict[int, int] = {}
     for r in spend_rows:
-        t = int(getattr(r, "time", getattr(r, "ts", 0)))
+        t = int(r.time)
         day = t // 86400
         by_day[day] = by_day.get(day, 0) + (-int(r.amount))
 
@@ -68,7 +68,7 @@ def compute_baseline(rows: list[Any], window_days: int = 28) -> Baseline:
     )
 
 
-def build_user_profile(rows: list[Any], window_days: int = 28) -> dict[str, int]:
+def build_user_profile(rows: list[TxRecord], window_days: int = 28) -> dict[str, int]:
     b = compute_baseline(rows, window_days=window_days)
     return {
         "window_days": b.window_days,
