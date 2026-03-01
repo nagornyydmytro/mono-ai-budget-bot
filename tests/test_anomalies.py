@@ -87,3 +87,23 @@ def test_detects_category_spike():
     )
 
     assert any(x.label.startswith("категорія:") and "Кафе/Ресторани" in x.label for x in out)
+
+
+def test_anomalies_guard_baseline_days():
+    facts = {
+        "label": "x",
+        "baseline_days": 1,
+        "last_day_uah": 600.0,
+        "baseline_median_uah": 100.0,
+    }
+
+    from mono_ai_budget_bot.analytics.anomalies import MIN_BASELINE_DAYS
+
+    assert MIN_BASELINE_DAYS >= 3
+    assert facts["baseline_days"] < MIN_BASELINE_DAYS
+
+
+def test_anomalies_guard_min_spike():
+    from mono_ai_budget_bot.analytics.anomalies import MIN_SPIKE_UAH
+
+    assert MIN_SPIKE_UAH >= 200.0

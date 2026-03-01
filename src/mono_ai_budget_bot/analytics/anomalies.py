@@ -3,10 +3,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from statistics import median
-from typing import Any
+from typing import Any, Callable
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
+
+MIN_BASELINE_DAYS = 3
+MIN_SPIKE_UAH = 250.0
+MIN_MULTIPLIER = 2.5
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,7 @@ class AnomalyItem:
 _ws_re = re.compile(r"\s+")
 _tail_id_re = re.compile(r"(?:\s*[#№]\s*\w+|\s+\d{3,}|\s+[a-f0-9]{6,})\s*$", re.IGNORECASE)
 _strip_re = re.compile(r"[^\w\s'&+\-\.]")
+_tail_cut_re = re.compile(r"\b(?:kyiv|kiev|ua|ukraine|terminal|pos)\b", re.IGNORECASE)
 
 
 def _norm_merchant(description: str) -> str:
@@ -31,6 +36,14 @@ def _norm_merchant(description: str) -> str:
     s = _ws_re.sub(" ", s).strip()
     if not s:
         return "unknown"
+
+    m = _tail_cut_re.search(s)
+    if m:
+        s = s[: m.start()].strip()
+
+    if not s:
+        return "unknown"
+
     return s[:48]
 
 
@@ -41,10 +54,14 @@ def _mad(values: list[int], center: int) -> int:
     return int(median(devs)) if devs else 0
 
 
+def _top_delta(item: AnomalyItem) -> int:
+    return int(item.last_day_cents) - int(item.baseline_median_cents)
+
+
 def _detect_for_label(
     rows: list[Any],
     now_ts: int,
-    label_fn,
+    label_fn: Callable[[Any], str],
     lookback_days: int,
     spike_mult: float,
     min_threshold_cents: int,
@@ -99,6 +116,10 @@ def _detect_for_label(
         base_med = int(median(hist_vals)) if hist_vals else 0
         base_mad = _mad(hist_vals, base_med)
 
+        last_uah = float(last_cents) / 100.0
+        if last_uah < MIN_SPIKE_UAH:
+            continue
+
         if label not in seen_before and last_cents >= min_threshold_cents:
             out.append(
                 AnomalyItem(
@@ -110,10 +131,15 @@ def _detect_for_label(
             )
             continue
 
-        if hist_days < min_hist_days:
+        if hist_days < max(int(min_hist_days), MIN_BASELINE_DAYS):
             continue
 
         if base_med <= 0:
+            continue
+
+        den = base_med if base_med > 0 else 1
+        mult = float(last_cents) / float(den)
+        if mult < MIN_MULTIPLIER and (last_cents - base_med) < int(MIN_SPIKE_UAH * 120):
             continue
 
         dynamic_floor = base_med + max(abs_delta_min_cents, int(spike_mult * base_mad))
@@ -129,7 +155,7 @@ def _detect_for_label(
                 )
             )
 
-    out.sort(key=lambda x: x.last_day_cents - x.baseline_median_cents, reverse=True)
+    out.sort(key=_top_delta, reverse=True)
     return out
 
 
@@ -164,18 +190,18 @@ def detect_anomalies(
         min_hist_days=min_hist_days,
     )
 
-    merged: list[AnomalyItem] = []
-    for x in merchants:
-        merged.append(x)
-    for x in categories:
-        merged.append(
+    merged: list[AnomalyItem] = [*merchants]
+    merged.extend(
+        [
             AnomalyItem(
                 label=f"категорія: {x.label}",
                 last_day_cents=x.last_day_cents,
                 baseline_median_cents=x.baseline_median_cents,
                 reason=x.reason,
             )
-        )
+            for x in categories
+        ]
+    )
 
-    merged.sort(key=lambda x: x.last_day_cents - x.baseline_median_cents, reverse=True)
+    merged.sort(key=_top_delta, reverse=True)
     return merged[:5]
