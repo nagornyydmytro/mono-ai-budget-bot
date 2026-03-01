@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any
 
-from .categories import category_from_mcc
 from .models import TxRow
+from .normalization import category_label, normalize_text
 
 
 @dataclass(frozen=True)
@@ -15,17 +14,6 @@ class SavingsProjection:
     reduce_amount_uah: float | None
     projected_monthly_uah: float
     monthly_savings_uah: float
-
-
-_ws_re = re.compile(r"\s+")
-_strip_re = re.compile(r"[^\w\s'&+\-\.]")
-
-
-def _norm(text: str) -> str:
-    s = (text or "").strip().lower()
-    s = _strip_re.sub(" ", s)
-    s = _ws_re.sub(" ", s).strip()
-    return s
 
 
 def project_savings(
@@ -94,14 +82,13 @@ def _build_keyword_suggestions(rows: list[TxRow], period_days: int) -> list[dict
     taxi_kw = {"uber", "bolt", "uklon", "taxi", "такси", "таксі"}
     delivery_kw = {"glovo", "wolt", "raketa", "bolt food", "uber eats", "ubereats", "delivery"}
 
-    taxi_spend = _sum_spend_uah(rows, lambda r: any(k in _norm(r.description) for k in taxi_kw))
+    taxi_spend = _sum_spend_uah(
+        rows, lambda r: any(k in normalize_text(r.description) for k in taxi_kw)
+    )
     delivery_spend = _sum_spend_uah(
-        rows, lambda r: any(k in _norm(r.description) for k in delivery_kw)
+        rows, lambda r: any(k in normalize_text(r.description) for k in delivery_kw)
     )
-    cafes_spend = _sum_spend_uah(
-        rows,
-        lambda r: (category_from_mcc(r.mcc) or "Інше") == "Кафе/Ресторани",
-    )
+    cafes_spend = _sum_spend_uah(rows, lambda r: category_label(r.mcc) == "Кафе/Ресторани")
 
     out: list[dict[str, Any]] = []
 
@@ -170,7 +157,7 @@ def build_whatif_suggestions(rows: list[TxRow], period_days: int) -> list[dict[s
         cents = abs(int(r.amount))
         total_spend_minor += cents
 
-        cat = category_from_mcc(r.mcc) or "Інше"
+        cat = category_label(r.mcc)
         category_minor[cat] = category_minor.get(cat, 0) + cents
 
         day = int(r.ts) // 86400

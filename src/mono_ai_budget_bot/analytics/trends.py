@@ -3,13 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .categories import category_from_mcc
 from .models import TxRow
-
-try:
-    from .anomalies import _norm_merchant  # type: ignore
-except Exception:  # pragma: no cover
-    _norm_merchant = None  # type: ignore
+from .normalization import category_label, normalize_merchant
 
 
 @dataclass(frozen=True)
@@ -28,15 +23,6 @@ def _pct_change(cur: float, prev: float) -> float | None:
     if prev <= 0:
         return None
     return round(((cur - prev) / prev) * 100.0, 2)
-
-
-def _merchant_label(desc: str) -> str:
-    s = (desc or "").strip()
-    if _norm_merchant is not None:
-        out = _norm_merchant(s)
-        return out or "unknown"
-    s = " ".join(s.lower().split())
-    return s[:48] if s else "unknown"
 
 
 def _sum_by_label(
@@ -132,26 +118,26 @@ def compute_trends(
         rows,
         start_ts=cur_start,
         end_ts=now_ts,
-        label_fn=lambda r: category_from_mcc(r.mcc) or "Інше",
+        label_fn=lambda r: category_label(r.mcc),
     )
     cat_prev, cat_days_prev = _sum_by_label(
         rows,
         start_ts=prev_start,
         end_ts=prev_end,
-        label_fn=lambda r: category_from_mcc(r.mcc) or "Інше",
+        label_fn=lambda r: category_label(r.mcc),
     )
 
     mer_cur, mer_days_cur = _sum_by_label(
         rows,
         start_ts=cur_start,
         end_ts=now_ts,
-        label_fn=lambda r: _merchant_label(r.description),
+        label_fn=lambda r: normalize_merchant(r.description),
     )
     mer_prev, mer_days_prev = _sum_by_label(
         rows,
         start_ts=prev_start,
         end_ts=prev_end,
-        label_fn=lambda r: _merchant_label(r.description),
+        label_fn=lambda r: normalize_merchant(r.description),
     )
 
     cat_items = _build_items(

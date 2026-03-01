@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from statistics import median
 from typing import Callable
 
-from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.models import TxRow
+
+from .normalization import category_label, normalize_merchant
 
 MIN_BASELINE_DAYS = 3
 MIN_SPIKE_UAH = 250.0
@@ -21,30 +21,8 @@ class AnomalyItem:
     reason: str
 
 
-_ws_re = re.compile(r"\s+")
-_tail_id_re = re.compile(r"(?:\s*[#№]\s*\w+|\s+\d{3,}|\s+[a-f0-9]{6,})\s*$", re.IGNORECASE)
-_strip_re = re.compile(r"[^\w\s'&+\-\.]")
-_tail_cut_re = re.compile(r"\b(?:kyiv|kiev|ua|ukraine|terminal|pos)\b", re.IGNORECASE)
-
-
 def _norm_merchant(description: str) -> str:
-    s = (description or "").strip().lower()
-    if not s:
-        return "unknown"
-    s = _tail_id_re.sub("", s)
-    s = _strip_re.sub(" ", s)
-    s = _ws_re.sub(" ", s).strip()
-    if not s:
-        return "unknown"
-
-    m = _tail_cut_re.search(s)
-    if m:
-        s = s[: m.start()].strip()
-
-    if not s:
-        return "unknown"
-
-    return s[:48]
+    return normalize_merchant(description)
 
 
 def _mad(values: list[int], center: int) -> int:
@@ -170,7 +148,7 @@ def detect_anomalies(
     merchants = _detect_for_label(
         rows=rows,
         now_ts=now_ts,
-        label_fn=lambda r: _norm_merchant(r.description),
+        label_fn=lambda r: normalize_merchant(r.description),
         lookback_days=lookback_days,
         spike_mult=spike_mult,
         min_threshold_cents=min_threshold_cents,
@@ -181,7 +159,7 @@ def detect_anomalies(
     categories = _detect_for_label(
         rows=rows,
         now_ts=now_ts,
-        label_fn=lambda r: category_from_mcc(r.mcc) or "Інше",
+        label_fn=lambda r: category_label(r.mcc),
         lookback_days=lookback_days,
         spike_mult=spike_mult,
         min_threshold_cents=min_threshold_cents,
