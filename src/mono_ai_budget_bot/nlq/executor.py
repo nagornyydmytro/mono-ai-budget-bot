@@ -5,6 +5,8 @@ from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
+from mono_ai_budget_bot.config import load_settings
+from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
     resolve_merchant_filters,
@@ -107,6 +109,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if alias_raw and _should_clarify_alias(mem, alias_raw):
             if not _has_spend_match(rows, merchant_filter):
                 candidates = suggest_merchant_candidates_detailed(rows, limit=8)
+                candidates = _maybe_llm_rank_alias(alias_raw, candidates)
                 if candidates:
                     return _prompt_learn_category_alias(
                         telegram_user_id,
@@ -208,6 +211,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if intent.startswith("spend_") and alias_raw and _should_clarify_alias(mem, alias_raw):
         if merchant_filter and not filtered:
             candidates = suggest_merchant_candidates_detailed(rows, limit=8)
+            candidates = _maybe_llm_rank_alias(alias_raw, candidates)
             if candidates:
                 return _prompt_learn_category_alias(
                     telegram_user_id,
@@ -317,6 +321,24 @@ def _should_clarify_alias(mem: dict[str, Any], alias: str) -> bool:
     if isinstance(ca, dict) and a in ca:
         return False
     return True
+
+
+def _maybe_llm_rank_alias(alias: str, candidates: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    settings = load_settings()
+    if not settings.openai_api_key:
+        return candidates
+
+    try:
+        client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+        names = [n for (n, _) in candidates]
+        ranked = client.suggest_alias_candidates(alias=alias, candidates=names)
+        if not ranked:
+            return candidates
+
+        order = {name: i for i, name in enumerate(ranked)}
+        return sorted(candidates, key=lambda x: order.get(x[0], 999))
+    except Exception:
+        return candidates
 
 
 def _prompt_learn_category_alias(
