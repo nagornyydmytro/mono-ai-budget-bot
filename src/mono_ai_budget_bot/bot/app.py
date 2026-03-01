@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
+from mono_ai_budget_bot.bot.clarify import build_nlq_clarify_keyboard
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
@@ -30,6 +31,7 @@ from . import templates
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery, Message
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 
 store = ReportStore()
 tx_store = TxStore()
@@ -894,6 +896,56 @@ async def main() -> None:
             await cmd_refresh(fake_msg)
         await query.answer()
 
+    @dp.callback_query(lambda c: c.data and c.data.startswith("nlq_pick:"))
+    async def cb_nlq_pick(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає user id", show_alert=True)
+            return
+
+        idx_raw = (query.data or "").split("nlq_pick:", 1)[1].strip()
+        if not idx_raw.isdigit():
+            await query.answer("Некоректний вибір", show_alert=True)
+            return
+
+        try:
+            resp = handle_nlq(
+                NLQRequest(
+                    telegram_user_id=tg_id,
+                    text=str(int(idx_raw)),
+                    now_ts=int(time.time()),
+                )
+            )
+        except Exception:
+            await query.answer("Помилка", show_alert=True)
+            return
+
+        if query.message and resp.result:
+            await query.message.answer(resp.result.text)
+            await query.answer("Ок")
+            return
+
+        await query.answer("Ок")
+
+    @dp.callback_query(lambda c: c.data == "nlq_other")
+    async def cb_nlq_other(query: CallbackQuery) -> None:
+        if query.message:
+            await query.message.answer(
+                "Ок. Напиши в чат мерчанта/отримувача як у виписці (можна частину назви)."
+            )
+        await query.answer("Ок")
+
+    @dp.callback_query(lambda c: c.data == "nlq_cancel")
+    async def cb_nlq_cancel(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає user id", show_alert=True)
+            return
+        memory_store.pop_pending_intent(tg_id)
+        if query.message:
+            await query.message.answer("Ок, скасовано.")
+        await query.answer("Скасовано")
+
     @dp.callback_query(lambda c: c.data in ("boot_30", "boot_90", "boot_skip"))
     async def cb_bootstrap(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None
@@ -1240,6 +1292,17 @@ async def main() -> None:
             )
 
             if resp.result:
+                mem = memory_store.load_memory(user_id)
+                kind = mem.get("pending_kind")
+                opts = mem.get("pending_options")
+
+                if kind in {"recipient", "category_alias"} and isinstance(opts, list) and opts:
+                    kb = build_nlq_clarify_keyboard(
+                        opts, limit=8, include_other=True, include_cancel=True
+                    )
+                    await message.answer(resp.result.text, reply_markup=kb)
+                    return
+
                 await message.answer(resp.result.text)
                 return
 
