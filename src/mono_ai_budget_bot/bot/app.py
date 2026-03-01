@@ -9,11 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mono_ai_budget_bot.analytics.anomalies import detect_anomalies
 from mono_ai_budget_bot.analytics.compute import compute_facts
+from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
-from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
-from mono_ai_budget_bot.analytics.trends import compute_trends
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
@@ -457,35 +455,8 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     ts_to = now_ts
 
     records = tx_store.load_range(cfg.telegram_user_id, account_ids, ts_from, ts_to)
-    rows = rows_from_ledger(records)
-    report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
-    current_facts = report["current"]
-
-    trends = compute_trends(rows, now_ts=now_ts, window_days=7)
-    current_facts["trends"] = trends
-
-    a = detect_anomalies(rows, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
-    current_facts["anomalies"] = [
-        {
-            "label": x.label,
-            "last_day_uah": x.last_day_cents / 100.0,
-            "baseline_median_uah": x.baseline_median_cents / 100.0,
-            "reason": x.reason,
-        }
-        for x in a
-    ]
-
-    current_facts["comparison"] = {
-        "prev_period": {
-            "dt_from": report["period"]["previous"]["start_iso_utc"],
-            "dt_to": report["period"]["previous"]["end_iso_utc"],
-            "totals": report["previous"].get("totals", {}),
-            "categories_real_spend": report["previous"].get("categories_real_spend", {}),
-        },
-        "totals": report["compare"]["totals"],
-        "categories": report["compare"]["categories_real_spend"],
-    }
+    current_facts = enrich_period_facts(records, days_back=days_back, now_ts=now_ts)
 
     store.save(cfg.telegram_user_id, period, current_facts)
 
@@ -536,35 +507,8 @@ async def _compute_and_cache_reports_for_user(
         ts_to = now_ts
 
         records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
-        rows = rows_from_ledger(records)
-        report = build_period_report_from_ledger(records, days_back=days_back, now_ts=now_ts)
 
-        current_facts = report["current"]
-
-        trends = compute_trends(rows, now_ts=now_ts, window_days=7)
-        current_facts["trends"] = trends
-
-        a = detect_anomalies(rows, now_ts=now_ts, lookback_days=28, min_threshold_cents=20000)
-        current_facts["anomalies"] = [
-            {
-                "label": x.label,
-                "last_day_uah": x.last_day_cents / 100.0,
-                "baseline_median_uah": x.baseline_median_cents / 100.0,
-                "reason": x.reason,
-            }
-            for x in a
-        ]
-
-        current_facts["comparison"] = {
-            "prev_period": {
-                "dt_from": report["period"]["previous"]["start_iso_utc"],
-                "dt_to": report["period"]["previous"]["end_iso_utc"],
-                "totals": report["previous"].get("totals", {}),
-                "categories_real_spend": report["previous"].get("categories_real_spend", {}),
-            },
-            "totals": report["compare"]["totals"],
-            "categories": report["compare"]["categories_real_spend"],
-        }
+        current_facts = enrich_period_facts(records, days_back=days_back, now_ts=now_ts)
 
         store.save(tg_id, period, current_facts)
 
