@@ -272,6 +272,71 @@ def _render_trends_block(trends: dict) -> str | None:
     return "\n".join(lines).strip()
 
 
+def _render_categories_deep_block(facts: dict) -> str | None:
+    categories = facts.get("categories_real_spend") or {}
+    shares = facts.get("category_shares_real_spend") or {}
+
+    if not isinstance(categories, dict) or not categories:
+        return None
+
+    cmp_categories = _safe_get(facts, ["comparison", "categories"], {})
+    if not isinstance(cmp_categories, dict):
+        cmp_categories = {}
+
+    rows: list[tuple[str, float, float, float | None, float | None]] = []
+    for cat, amt in categories.items():
+        if cat is None:
+            continue
+        cat_s = str(cat)
+        cur = float(amt or 0.0)
+        share = float(shares.get(cat_s, 0.0) or 0.0)
+
+        delta: float | None = None
+        pct: float | None = None
+        if cat_s in cmp_categories and isinstance(cmp_categories.get(cat_s), dict):
+            v = cmp_categories[cat_s]
+            delta = float(v.get("delta_uah", 0.0))
+            pct_v = v.get("pct_change")
+            pct = None if pct_v is None else float(pct_v)
+
+        rows.append((cat_s, cur, share, delta, pct))
+
+    rows.sort(key=lambda x: x[1], reverse=True)
+    top_by_spend = rows[:7]
+
+    spend_lines: list[str] = []
+    spend_lines.append("*За часткою витрат:*")
+    for cat, cur, share, delta, pct in top_by_spend:
+        base = f"• {md_escape(cat)} — {md_escape(_fmt_money(cur))} ({md_escape(f'{share:.1f}%')})"
+        if delta is None:
+            spend_lines.append(base)
+            continue
+
+        sign = "+" if delta >= 0 else ""
+        pct_txt = "—" if pct is None else f"{pct:+.2f}%"
+        spend_lines.append(
+            f"{base} | Δ {md_escape(sign + _fmt_money(delta))} ({md_escape(pct_txt)})"
+        )
+
+    movers_lines: list[str] = []
+    movers = [x for x in rows if x[3] is not None and abs(float(x[3] or 0.0)) >= 1.0]
+    movers.sort(key=lambda x: abs(float(x[3] or 0.0)), reverse=True)
+    movers = movers[:5]
+
+    if movers:
+        movers_lines.append("")
+        movers_lines.append("*Топ зміни vs попередній період:*")
+        for cat, _, _, delta, pct in movers:
+            d = float(delta or 0.0)
+            sign = "+" if d >= 0 else ""
+            pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
+            movers_lines.append(
+                f"• {md_escape(cat)}: Δ {md_escape(sign + _fmt_money(d))} ({md_escape(pct_txt)})"
+            )
+
+    return templates.section("Категорії детально", [*spend_lines, *movers_lines])
+
+
 def _render_anomalies_block(facts: dict) -> str | None:
     anomalies = facts.get("anomalies") or []
     if not (isinstance(anomalies, list) and anomalies):
@@ -335,6 +400,9 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
 
     header = f"📊 {md_escape(title)}"
     facts_block = _render_facts_block(facts)
+    deep_categories_block = _render_categories_deep_block(facts)
+    if deep_categories_block:
+        facts_block = (facts_block + "\n\n" + deep_categories_block).strip()
     trends_block = _render_trends_block(facts.get("trends") or {})
     anomalies_block = _render_anomalies_block(facts)
     insight_block = _render_ai_block(ai_block)
