@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,11 @@ def _default_memory() -> dict[str, Any]:
         "pending_intent": None,
         "pending_kind": None,
         "pending_options": None,
+        "pending_id": None,
+        "pending_created_ts": None,
+        "pending_ttl_sec": None,
+        "pending_snapshot": None,
+        "pending_manual_mode": None,
     }
 
 
@@ -84,6 +90,15 @@ def load_memory(telegram_user_id: int) -> dict[str, Any]:
         data["pending_kind"] = None
     if "pending_options" not in data:
         data["pending_options"] = None
+    for k in [
+        "pending_id",
+        "pending_created_ts",
+        "pending_ttl_sec",
+        "pending_snapshot",
+        "pending_manual_mode",
+    ]:
+        if k not in data:
+            data[k] = None
 
     return data
 
@@ -104,6 +119,11 @@ def set_pending_intent(
     mem["pending_intent"] = payload
     mem["pending_kind"] = kind
     mem["pending_options"] = options
+    mem["pending_id"] = secrets.token_hex(8)
+    mem["pending_created_ts"] = int(time.time())
+    mem["pending_ttl_sec"] = 600
+    mem["pending_snapshot"] = {"options": options, "kind": kind}
+    mem["pending_manual_mode"] = None
     save_memory(telegram_user_id, mem)
 
 
@@ -329,3 +349,35 @@ def save_category_alias(telegram_user_id: int, alias: str, merchant_terms: list[
     _touch_alias(mem, "category", a)
     _prune_aliases(mem)
     save_memory(telegram_user_id, mem)
+
+
+def pop_pending_action(telegram_user_id: int) -> None:
+    mem = load_memory(telegram_user_id)
+
+    mem["pending_intent"] = None
+    mem["pending_kind"] = None
+    mem["pending_options"] = None
+    mem["pending_id"] = None
+    mem["pending_created_ts"] = None
+    mem["pending_ttl_sec"] = None
+    mem["pending_snapshot"] = None
+    mem["pending_manual_mode"] = None
+
+    save_memory(telegram_user_id, mem)
+
+
+def pending_is_alive(mem: dict[str, Any], *, now_ts: int) -> bool:
+    pid = mem.get("pending_id")
+    if not isinstance(pid, str) or not pid:
+        return False
+
+    created = mem.get("pending_created_ts")
+    ttl = mem.get("pending_ttl_sec")
+    try:
+        created_i = int(created)
+        ttl_i = int(ttl)
+    except Exception:
+        return False
+
+    ttl_i = max(10, min(ttl_i, 3600))
+    return int(now_ts) - created_i <= ttl_i

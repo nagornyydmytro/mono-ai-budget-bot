@@ -941,7 +941,7 @@ async def main() -> None:
         if tg_id is None:
             await query.answer("Немає user id", show_alert=True)
             return
-        memory_store.pop_pending_intent(tg_id)
+        memory_store.pop_pending_action(tg_id)
         if query.message:
             await query.message.answer("Ок, скасовано.")
         await query.answer("Скасовано")

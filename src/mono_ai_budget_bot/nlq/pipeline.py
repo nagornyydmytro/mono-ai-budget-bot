@@ -5,7 +5,13 @@ from functools import lru_cache
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.executor import execute_intent
-from mono_ai_budget_bot.nlq.memory_store import load_memory, save_category_alias, save_memory
+from mono_ai_budget_bot.nlq.memory_store import (
+    load_memory,
+    pending_is_alive,
+    pop_pending_action,
+    save_category_alias,
+    save_memory,
+)
 from mono_ai_budget_bot.nlq.resolver import resolve
 from mono_ai_budget_bot.nlq.router import route
 from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest, NLQResponse, NLQResult
@@ -177,6 +183,7 @@ def _parse_multi_select(user_text: str, options: list[str]) -> list[str]:
 
 def handle_nlq(req: NLQRequest) -> NLQResponse:
     mem = load_memory(req.telegram_user_id)
+
     pending = mem.get("pending_intent")
     pending_options = mem.get("pending_options")
 
@@ -188,14 +195,17 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
     else:
         options = None
 
+    if pending and not pending_is_alive(mem, now_ts=req.now_ts):
+        pop_pending_action(req.telegram_user_id)
+        pending = None
+        options = None
+        mem = load_memory(req.telegram_user_id)
+
     if isinstance(pending, dict):
         pending_kind = mem.get("pending_kind")
-        if pending_kind == "paging" and _is_paging_continue(req.text):
-            mem["pending_intent"] = None
-            mem["pending_kind"] = None
-            mem["pending_options"] = None
-            save_memory(req.telegram_user_id, mem)
 
+        if pending_kind == "paging" and _is_paging_continue(req.text):
+            pop_pending_action(req.telegram_user_id)
             text = execute_intent(req.telegram_user_id, pending)
             return NLQResponse(result=NLQResult(text=text), clarification=None)
 
@@ -205,21 +215,18 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
 
             if alias_to_learn and selected:
                 save_category_alias(req.telegram_user_id, alias_to_learn, selected)
-
-                mem = load_memory(req.telegram_user_id)
-                mem["pending_intent"] = None
-                mem["pending_kind"] = None
-                mem["pending_options"] = None
-                save_memory(req.telegram_user_id, mem)
-
+                pop_pending_action(req.telegram_user_id)
                 text = execute_intent(req.telegram_user_id, pending)
                 return NLQResponse(result=NLQResult(text=text), clarification=None)
 
-            if alias_to_learn and req.text.strip() in {"0", "cancel", "скасувати", "ні", "нет"}:
-                mem["pending_intent"] = None
-                mem["pending_kind"] = None
-                mem["pending_options"] = None
-                save_memory(req.telegram_user_id, mem)
+            if alias_to_learn and req.text.strip().lower() in {
+                "0",
+                "cancel",
+                "скасувати",
+                "ні",
+                "нет",
+            }:
+                pop_pending_action(req.telegram_user_id)
                 return NLQResponse(result=NLQResult(text="Ок, не зберігаю."), clarification=None)
 
         alias = _extract_recipient_alias(pending)
@@ -231,12 +238,9 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 ra = {}
             ra[alias] = match_value
             mem["recipient_aliases"] = ra
-
-            mem["pending_intent"] = None
-            mem["pending_kind"] = None
-            mem["pending_options"] = None
             save_memory(req.telegram_user_id, mem)
 
+            pop_pending_action(req.telegram_user_id)
             text = execute_intent(req.telegram_user_id, pending)
             return NLQResponse(result=NLQResult(text=text), clarification=None)
 
