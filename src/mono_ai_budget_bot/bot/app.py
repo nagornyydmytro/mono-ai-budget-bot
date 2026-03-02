@@ -1296,9 +1296,16 @@ async def main() -> None:
                 kind = mem.get("pending_kind")
                 opts = mem.get("pending_options")
 
-                if kind in {"recipient", "category_alias"} and isinstance(opts, list) and opts:
+                if (
+                    kind in {"recipient", "category_alias", "paging"}
+                    and isinstance(opts, list)
+                    and opts
+                ):
                     kb = build_nlq_clarify_keyboard(
-                        opts, limit=8, include_other=True, include_cancel=True
+                        opts,
+                        limit=8,
+                        include_other=(kind != "paging"),
+                        include_cancel=True,
                     )
                     await message.answer(resp.result.text, reply_markup=kb)
                     return
