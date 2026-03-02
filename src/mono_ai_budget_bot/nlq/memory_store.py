@@ -149,6 +149,34 @@ def get_pending_options(telegram_user_id: int) -> list[str] | None:
     return out or None
 
 
+def get_pending_id(telegram_user_id: int) -> str | None:
+    mem = load_memory(telegram_user_id)
+    pid = mem.get("pending_id")
+    return pid if isinstance(pid, str) and pid.strip() else None
+
+
+def validate_and_consume_pending(
+    telegram_user_id: int,
+    *,
+    pending_id: str,
+    now_ts: int,
+) -> bool:
+    pid = (pending_id or "").strip()
+    if not pid:
+        return False
+
+    mem = load_memory(telegram_user_id)
+    if not pending_is_alive(mem, now_ts=int(now_ts)):
+        return False
+    if mem.get("pending_id") != pid:
+        return False
+
+    mem["pending_id"] = secrets.token_hex(8)
+    mem["pending_created_ts"] = int(now_ts)
+    save_memory(telegram_user_id, mem)
+    return True
+
+
 def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) -> None:
     a = (alias or "").strip().lower()
     v = (match_value or "").strip().lower()

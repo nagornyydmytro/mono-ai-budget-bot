@@ -896,16 +896,28 @@ async def main() -> None:
             await cmd_refresh(fake_msg)
         await query.answer()
 
-    @dp.callback_query(lambda c: c.data and c.data.startswith("nlq_pick:"))
+    @dp.callback_query(lambda c: bool(c.data) and c.data.startswith("nlq_pick:"))
     async def cb_nlq_pick(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer("Немає user id", show_alert=True)
             return
 
-        idx_raw = (query.data or "").split("nlq_pick:", 1)[1].strip()
+        raw = (query.data or "").strip()
+        parts = raw.split(":")
+        if len(parts) != 3 or parts[0] != "nlq_pick":
+            await query.answer("Некоректний вибір", show_alert=True)
+            return
+
+        pid = parts[1].strip()
+        idx_raw = parts[2].strip()
         if not idx_raw.isdigit():
             await query.answer("Некоректний вибір", show_alert=True)
+            return
+
+        now_ts = int(time.time())
+        if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
+            await query.answer("Ця кнопка вже неактуальна. Запитай ще раз 🙂", show_alert=True)
             return
 
         try:
@@ -913,7 +925,7 @@ async def main() -> None:
                 NLQRequest(
                     telegram_user_id=tg_id,
                     text=str(int(idx_raw)),
-                    now_ts=int(time.time()),
+                    now_ts=now_ts,
                 )
             )
         except Exception:
@@ -927,20 +939,50 @@ async def main() -> None:
 
         await query.answer("Ок")
 
-    @dp.callback_query(lambda c: c.data == "nlq_other")
+    @dp.callback_query(lambda c: bool(c.data) and c.data.startswith("nlq_other:"))
     async def cb_nlq_other(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає user id", show_alert=True)
+            return
+
+        raw = (query.data or "").strip()
+        parts = raw.split(":", 1)
+        if len(parts) != 2 or parts[0] != "nlq_other":
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        pid = parts[1].strip()
+        now_ts = int(time.time())
+        if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
+            await query.answer("Ця кнопка вже неактуальна.", show_alert=True)
+            return
+
         if query.message:
             await query.message.answer(
                 "Ок. Напиши в чат мерчанта/отримувача як у виписці (можна частину назви)."
             )
         await query.answer("Ок")
 
-    @dp.callback_query(lambda c: c.data == "nlq_cancel")
+    @dp.callback_query(lambda c: bool(c.data) and c.data.startswith("nlq_cancel:"))
     async def cb_nlq_cancel(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer("Немає user id", show_alert=True)
             return
+
+        raw = (query.data or "").strip()
+        parts = raw.split(":", 1)
+        if len(parts) != 2 or parts[0] != "nlq_cancel":
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        pid = parts[1].strip()
+        now_ts = int(time.time())
+        if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
+            await query.answer("Ця кнопка вже неактуальна.", show_alert=True)
+            return
+
         memory_store.pop_pending_action(tg_id)
         if query.message:
             await query.message.answer("Ок, скасовано.")
@@ -1303,6 +1345,11 @@ async def main() -> None:
                 ):
                     kb = build_nlq_clarify_keyboard(
                         opts,
+                        pending_id=(
+                            mem.get("pending_id")
+                            if isinstance(mem.get("pending_id"), str)
+                            else None
+                        ),
                         limit=8,
                         include_other=(kind != "paging"),
                         include_cancel=True,
