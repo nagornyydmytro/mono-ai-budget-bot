@@ -15,6 +15,7 @@ from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
 from mono_ai_budget_bot.bot.clarify import build_nlq_clarify_keyboard
 from mono_ai_budget_bot.core.time_ranges import range_today
+from mono_ai_budget_bot.currency import MonobankPublicClient, normalize_records_to_uah
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.nlq.pipeline import handle_nlq
@@ -553,6 +554,16 @@ async def _compute_and_cache_reports_for_user(
     profile_from = now_ts - 90 * 24 * 60 * 60
     profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
     profile = build_user_profile(profile_records)
+    try:
+        pub = MonobankPublicClient()
+        rates = pub.currency()
+        profile_records = normalize_records_to_uah(profile_records, rates)
+        pub.close()
+    except Exception:
+        try:
+            pub.close()
+        except Exception:
+            pass
     profile_store.save(tg_id, profile)
     taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
     uncat_store = UncatStore(Path(".cache") / "uncat")
