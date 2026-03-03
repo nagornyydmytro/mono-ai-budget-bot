@@ -520,6 +520,7 @@ async def _compute_and_cache_reports_for_user(
     profile_store.save(tg_id, profile)
     taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
     uncat_store = UncatStore(Path(".cache") / "uncat")
+    rules_store = RulesStore(Path(".cache") / "rules")
 
     for period, days_back in (("week", 7), ("month", 30)):
         now_ts = int(time.time())
@@ -535,7 +536,9 @@ async def _compute_and_cache_reports_for_user(
     if tax is None:
         tax = build_taxonomy_preset("min")
 
-    uncat_items = build_uncat_queue(tax=tax, records=profile_records, limit=200)
+    rules = rules_store.load(tg_id)
+
+    uncat_items = build_uncat_queue(tax=tax, records=profile_records, rules=rules, limit=200)
     uncat_store.save(tg_id, uncat_items)
 
 

@@ -31,7 +31,7 @@ def test_uncat_queue_includes_only_purchase_without_rule_and_without_mcc_leaf():
         ),
     ]
 
-    q = build_uncat_queue(tax=tax, records=records, limit=200)
+    q = build_uncat_queue(tax=tax, records=records, rules=[], limit=200)
     assert [x.tx_id for x in q] == ["p1"]
 
 
@@ -51,7 +51,7 @@ def test_uncat_queue_excludes_purchase_when_mcc_leaf_exists():
         )
     ]
 
-    q = build_uncat_queue(tax=tax, records=records, limit=200)
+    q = build_uncat_queue(tax=tax, records=records, rules=[], limit=200)
     assert q == []
 
 
@@ -74,8 +74,32 @@ def test_uncat_store_roundtrip(tmp_path: Path):
                 currencyCode=980,
             )
         ],
+        rules=[],
         limit=200,
     )
     st.save(1, q)
     q2 = st.load(1)
     assert [x.tx_id for x in q2] == ["p1"]
+
+
+def test_uncat_queue_excludes_purchase_when_matching_rule_exists():
+    tax = new_taxonomy()
+    leaf_id = add_category(tax, root_kind="expense", name="Кафе/Ресторани")
+
+    records = [
+        TxRecord(
+            id="p1",
+            time=10,
+            account_id="a",
+            amount=-50000,
+            description="Aston express",
+            mcc=5812,
+            currencyCode=980,
+        )
+    ]
+
+    from mono_ai_budget_bot.taxonomy.rules import Rule
+
+    rules = [Rule(id="r1", leaf_id=leaf_id, merchant_contains="aston")]
+    q = build_uncat_queue(tax=tax, records=records, rules=rules, limit=200)
+    assert q == []

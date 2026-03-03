@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mono_ai_budget_bot.storage.tx_store import TxRecord
-from mono_ai_budget_bot.taxonomy.rules import categorize_tx
+from mono_ai_budget_bot.taxonomy.rules import Rule, categorize_tx
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,7 @@ def build_uncat_queue(
     *,
     tax: dict[str, Any],
     records: list[TxRecord],
+    rules: list[Rule] | None = None,
     limit: int = 200,
 ) -> list[UncatItem]:
     items: list[UncatItem] = []
@@ -55,7 +56,13 @@ def build_uncat_queue(
             continue
         seen.add(tx.id)
 
-        out = categorize_tx(tax=tax, tx=tx, rules=[], override_leaf_id=None, alias_categories=None)
+        out = categorize_tx(
+            tax=tax,
+            tx=tx,
+            rules=(rules or []),
+            override_leaf_id=None,
+            alias_categories=None,
+        )
 
         if out.bucket != "needs_clarify":
             continue
