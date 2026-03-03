@@ -965,8 +965,8 @@ async def main() -> None:
             expected = "recipient"
             hint = "Приклад: 'Олександр Іванов', 'MonoMarket', 'GETMANCAR'. Введи як у виписці."
         elif kind == "category_alias":
-            expected = "category"
-            hint = "Введи назву категорії/підкатегорії так, як вона вже існує в твоєму дереві."
+            expected = "merchant_or_recipient"
+            hint = "Введи назву мерчанта як у виписці (можна частину). Приклад: 'Getmancar', 'Aston express'."
         else:
             expected = "merchant_or_recipient"
             hint = "Введи назву мерчанта/отримувача як у виписці (можна частину)."
