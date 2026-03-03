@@ -11,6 +11,7 @@ from mono_ai_budget_bot.taxonomy.models import (
     new_taxonomy,
     validate_taxonomy,
 )
+from mono_ai_budget_bot.taxonomy.rules import Categorization, Rule, categorize_tx, find_leaf_by_name
 
 __all__ = [
     "TaxKind",
@@ -24,4 +25,8 @@ __all__ = [
     "ensure_leaf_target",
     "leaf_ids",
     "add_subcategory_with_migration",
+    "Categorization",
+    "Rule",
+    "categorize_tx",
+    "find_leaf_by_name",
 ]
