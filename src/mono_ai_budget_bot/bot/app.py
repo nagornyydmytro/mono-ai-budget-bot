@@ -520,7 +520,7 @@ async def main() -> None:
     from aiogram.client.default import DefaultBotProperties
     from aiogram.filters import Command
 
-    settings = load_settings()
+    settings = load_settings(require_bot_token=True)
     setup_logging(settings.log_level)
     profile_store = ProfileStore(Path(".cache") / "profiles")
 

@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
+    telegram_bot_token: Optional[str] = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
     master_key: Optional[str] = Field(default=None, alias="MASTER_KEY")
 
     mono_token: Optional[str] = Field(default=None, alias="MONO_TOKEN")
@@ -27,17 +27,45 @@ class Settings(BaseSettings):
 
     cache_dir: Path = Field(default=Path(".cache"), alias="CACHE_DIR")
 
-    def validate_required(self) -> None:
-        if not self.telegram_bot_token:
+    @field_validator(
+        "telegram_bot_token",
+        "master_key",
+        "mono_token",
+        "openai_api_key",
+        mode="before",
+    )
+    @classmethod
+    def _empty_str_to_none(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
+
+    def validate_required(
+        self,
+        *,
+        require_bot_token: bool = False,
+        require_master_key: bool = False,
+    ) -> None:
+        if require_bot_token and not self.telegram_bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
-        if not self.master_key:
+        if require_master_key and not self.master_key:
             raise ValueError("MASTER_KEY is required")
 
 
 @lru_cache
-def load_settings() -> Settings:
+def load_settings(
+    *,
+    require_bot_token: bool = False,
+    require_master_key: bool = False,
+) -> Settings:
     settings = Settings()
-    settings.validate_required()
+    settings.validate_required(
+        require_bot_token=require_bot_token,
+        require_master_key=require_master_key,
+    )
     settings.cache_dir.mkdir(parents=True, exist_ok=True)
     return settings
