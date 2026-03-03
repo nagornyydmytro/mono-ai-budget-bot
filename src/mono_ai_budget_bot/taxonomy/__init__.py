@@ -11,6 +11,7 @@ from mono_ai_budget_bot.taxonomy.models import (
     new_taxonomy,
     validate_taxonomy,
 )
+from mono_ai_budget_bot.taxonomy.presets import TaxPreset, build_taxonomy_preset
 from mono_ai_budget_bot.taxonomy.rules import Categorization, Rule, categorize_tx, find_leaf_by_name
 
 __all__ = [
@@ -29,4 +30,6 @@ __all__ = [
     "Rule",
     "categorize_tx",
     "find_leaf_by_name",
+    "TaxPreset",
+    "build_taxonomy_preset",
 ]

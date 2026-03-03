@@ -25,7 +25,9 @@ from ..analytics.profile import build_user_profile
 from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..storage.profile_store import ProfileStore
+from ..storage.taxonomy_store import TaxonomyStore
 from ..storage.user_store import UserConfig, UserStore
+from ..taxonomy.presets import build_taxonomy_preset
 from . import templates
 
 if TYPE_CHECKING:
@@ -523,6 +525,7 @@ async def main() -> None:
     settings = load_settings(require_bot_token=True)
     setup_logging(settings.log_level)
     profile_store = ProfileStore(Path(".cache") / "profiles")
+    taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
 
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
@@ -1072,6 +1075,32 @@ async def main() -> None:
                 await query.message.edit_text(
                     "Ок! Можеш зробити `/refresh week` або одразу `/week` (якщо кеш уже є)."
                 )
+            from aiogram.types import InlineKeyboardButton
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="⚡ Мінімальний", callback_data="tax_preset_min"))
+            kb.row(
+                InlineKeyboardButton(
+                    text="🧠 Максимальний (детально)", callback_data="tax_preset_max"
+                )
+            )
+            kb.row(
+                InlineKeyboardButton(text="🛠️ Custom (пізніше)", callback_data="tax_preset_custom")
+            )
+
+            await query.message.answer(
+                "\n".join(
+                    [
+                        "🗂️ Обери пресет категорій витрат/доходів:",
+                        "",
+                        "⚡ Мінімальний — базові категорії + MCC-мапа.",
+                        "🧠 Максимальний — більш деталізована структура (2 рівні) + MCC-мапа.",
+                        "🛠️ Custom — порожня структура, налаштуєш потім кнопками.",
+                    ]
+                ),
+                reply_markup=kb.as_markup(),
+            )
             await query.answer("Пропущено")
             return
 
@@ -1144,6 +1173,30 @@ async def main() -> None:
                     )
 
         asyncio.create_task(job())
+
+    @dp.callback_query(
+        lambda c: c.data in ("tax_preset_min", "tax_preset_max", "tax_preset_custom")
+    )
+    async def cb_tax_preset(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        preset_map = {
+            "tax_preset_min": "min",
+            "tax_preset_max": "max",
+            "tax_preset_custom": "custom",
+        }
+        preset = preset_map[str(query.data)]
+        tax = build_taxonomy_preset(preset)
+        taxonomy_store.save(tg_id, tax)
+
+        if query.message:
+            await query.message.answer(
+                "✅ Пресет категорій збережено. Далі — можеш робити /week або /month."
+            )
+        await query.answer("Збережено")
 
     @dp.message(Command("refresh"))
     async def cmd_refresh(message: Message) -> None:
