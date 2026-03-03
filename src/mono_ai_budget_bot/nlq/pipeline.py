@@ -2,19 +2,26 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from mono_ai_budget_bot.analytics.categories import category_from_mcc
+from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.executor import execute_intent
 from mono_ai_budget_bot.nlq.memory_store import (
+    get_pending_manual_mode,
     load_memory,
     pending_is_alive,
     pop_pending_action,
+    pop_pending_manual_mode,
     save_category_alias,
     save_memory,
 )
 from mono_ai_budget_bot.nlq.resolver import resolve
 from mono_ai_budget_bot.nlq.router import route
+from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest, NLQResponse, NLQResult
+from mono_ai_budget_bot.storage.tx_store import TxRecord, TxStore
+from mono_ai_budget_bot.storage.user_store import UserStore
 
 
 @lru_cache(maxsize=1)
@@ -181,8 +188,198 @@ def _parse_multi_select(user_text: str, options: list[str]) -> list[str]:
     return list(picked)
 
 
+def _load_validation_rows(user_id: int, now_ts: int, days: int = 180) -> list[TxRecord]:
+    days = max(7, min(int(days), 365))
+    cfg = UserStore().load(int(user_id))
+    if cfg is None or not cfg.mono_token:
+        return []
+    account_ids = cfg.selected_account_ids or []
+    if not account_ids:
+        return []
+
+    ts_to = int(now_ts)
+    ts_from = max(0, ts_to - days * 86400)
+    return TxStore().load_range(
+        telegram_user_id=int(user_id),
+        account_ids=list(account_ids),
+        ts_from=ts_from,
+        ts_to=ts_to,
+    )
+
+
+def _top_merchants(rows: list[TxRecord], query: str, limit: int = 8) -> list[str]:
+    q = norm(query)
+    if not q:
+        return []
+    qk = q.replace(" ", "")
+    scores: dict[str, int] = {}
+
+    for r in rows:
+        kind = classify_kind(r.amount, r.mcc, r.description)
+        if kind != "spend":
+            continue
+        desc = (r.description or "").strip()
+        if not desc:
+            continue
+        dk = norm(desc).replace(" ", "")
+        if qk not in dk:
+            continue
+        scores[desc] = scores.get(desc, 0) + abs(int(r.amount))
+
+    items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [k for k, _ in items[: max(1, min(int(limit), 15))]]
+
+
+def _top_recipients(
+    rows: list[TxRecord], query: str, *, kind_prefix: str | None, limit: int = 8
+) -> list[str]:
+    q = norm(query)
+    if not q:
+        return []
+    qk = q.replace(" ", "")
+    scores: dict[str, int] = {}
+
+    for r in rows:
+        kind = classify_kind(r.amount, r.mcc, r.description)
+        if kind_prefix == "transfer_out" and kind != "transfer_out":
+            continue
+        if kind_prefix == "transfer_in" and kind != "transfer_in":
+            continue
+        if kind_prefix is None and kind not in {"transfer_out", "transfer_in"}:
+            continue
+
+        desc = (r.description or "").strip()
+        if not desc:
+            continue
+        dk = norm(desc).replace(" ", "")
+        if qk not in dk:
+            continue
+        scores[desc] = scores.get(desc, 0) + abs(int(r.amount))
+
+    items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [k for k, _ in items[: max(1, min(int(limit), 15))]]
+
+
+def _seen_categories(rows: list[TxRecord]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        if r.mcc is None:
+            continue
+        c = category_from_mcc(r.mcc)
+        if not c:
+            continue
+        key = c.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+def _manual_entry_try_resolve(
+    *,
+    expected: str,
+    user_text: str,
+    pending_intent: dict | None,
+    pending_options: list[str] | None,
+    rows: list[TxRecord],
+) -> tuple[str | None, list[str] | None, str | None]:
+    s = (user_text or "").strip()
+    if not s:
+        return None, None, "Порожнє значення."
+
+    if pending_options and s.isdigit():
+        idx = int(s)
+        if 1 <= idx <= len(pending_options):
+            return pending_options[idx - 1].strip(), None, None
+
+    expected = (expected or "").strip()
+
+    if expected == "category":
+        cats = _seen_categories(rows)
+        low = s.lower()
+        for c in cats:
+            if c.lower() == low:
+                return c, None, None
+        sugg = [c for c in cats if norm(low) and norm(low) in norm(c)]
+        sugg = sugg[:8]
+        return None, (sugg or None), "Не знайшов таку категорію в твоїх транзакціях."
+
+    kind_prefix: str | None = None
+    if isinstance(pending_intent, dict):
+        intent_name = str(pending_intent.get("intent") or "")
+        if intent_name.startswith("transfer_out"):
+            kind_prefix = "transfer_out"
+        elif intent_name.startswith("transfer_in"):
+            kind_prefix = "transfer_in"
+
+    if expected == "recipient":
+        for cand in _top_recipients(rows, s, kind_prefix=kind_prefix, limit=15):
+            if cand.lower() == s.lower():
+                return cand, None, None
+        sugg = _top_recipients(rows, s, kind_prefix=kind_prefix, limit=8)
+        return None, (sugg or None), "Не знайшов такого отримувача в виписці."
+
+    for cand in _top_merchants(rows, s, limit=15):
+        if cand.lower() == s.lower():
+            return cand, None, None
+
+    sugg = _top_merchants(rows, s, limit=8)
+    if not sugg and kind_prefix is not None:
+        sugg = _top_recipients(rows, s, kind_prefix=kind_prefix, limit=8)
+
+    return None, (sugg or None), "Не знайшов таку назву в твоїх транзакціях."
+
+
 def handle_nlq(req: NLQRequest) -> NLQResponse:
     mem = load_memory(req.telegram_user_id)
+    manual_mode = get_pending_manual_mode(req.telegram_user_id, now_ts=req.now_ts)
+    if manual_mode is not None:
+        expected = str(manual_mode.get("expected") or "").strip() or "merchant_or_recipient"
+        pending = mem.get("pending_intent")
+        pending_options = mem.get("pending_options")
+        options: list[str] | None
+        if isinstance(pending_options, list):
+            options = [x.strip() for x in pending_options if isinstance(x, str) and x.strip()]
+            if not options:
+                options = None
+        else:
+            options = None
+
+        rows = _load_validation_rows(req.telegram_user_id, req.now_ts)
+        selected, suggested, err = _manual_entry_try_resolve(
+            expected=expected,
+            user_text=req.text,
+            pending_intent=pending if isinstance(pending, dict) else None,
+            pending_options=options,
+            rows=rows,
+        )
+
+        if selected:
+            pop_pending_manual_mode(req.telegram_user_id)
+            req = NLQRequest(
+                telegram_user_id=req.telegram_user_id,
+                text=selected,
+                now_ts=req.now_ts,
+            )
+            mem = load_memory(req.telegram_user_id)
+        else:
+            if suggested:
+                mem["pending_options"] = list(suggested)
+                save_memory(req.telegram_user_id, mem)
+                lines = [
+                    (err or "Не знайшов відповідність."),
+                    "Вибери номер або введи точну назву як у виписці:",
+                ]
+                for i, opt in enumerate(suggested, start=1):
+                    lines.append(f"{i}) {opt}")
+                return NLQResponse(result=NLQResult(text="\\n".join(lines)), clarification=None)
+
+            return NLQResponse(
+                result=NLQResult(text=(err or "Не знайшов відповідність.")),
+                clarification=None,
+            )
 
     pending = mem.get("pending_intent")
     pending_options = mem.get("pending_options")
