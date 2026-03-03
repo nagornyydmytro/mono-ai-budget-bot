@@ -7,6 +7,7 @@ from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
 from mono_ai_budget_bot.analytics.refunds import detect_refund_pairs, refund_ignore_ids
 from mono_ai_budget_bot.config import load_settings
+from mono_ai_budget_bot.currency import MonobankPublicClient, alpha_to_numeric, convert_amount
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
@@ -59,6 +60,50 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "unsupported":
         return "Я можу відповідати лише на питання про твої витрати."
+
+    if intent == "currency_convert":
+        amount = intent_payload.get("amount")
+        try:
+            amt = float(amount)
+        except Exception:
+            return "Не бачу суму для конвертації. Наприклад: 1500 грн в USD."
+        if amt <= 0:
+            return "Сума має бути більшою за нуль."
+
+        from_alpha = str(intent_payload.get("from") or "").strip().upper()
+        to_alpha = str(intent_payload.get("to") or "").strip().upper()
+        if not from_alpha or not to_alpha:
+            return "Не бачу валюту. Наприклад: 1500 грн в USD."
+
+        from_num = alpha_to_numeric(from_alpha)
+        to_num = alpha_to_numeric(to_alpha)
+        if from_num is None or to_num is None:
+            return (
+                f"Не знаю таку валюту: {from_alpha if from_num is None else to_alpha}. "
+                "Спробуй ISO-код (наприклад USD, EUR, UAH)."
+            )
+
+        pub = None
+        try:
+            pub = MonobankPublicClient()
+            rates = pub.currency()
+        except Exception as e:
+            return f"Не вдалося отримати курси валют: {e}"
+        finally:
+            try:
+                if pub is not None:
+                    pub.close()
+            except Exception:
+                pass
+
+        out = convert_amount(amt, from_num=from_num, to_num=to_num, rates=rates)
+        if out is None:
+            return f"Немає даних по парі {from_alpha}→{to_alpha} у /bank/currency."
+
+        def _fmt(x: float) -> str:
+            return f"{x:.2f}"
+
+        return f"{_fmt(amt)} {from_alpha} ≈ {_fmt(out)} {to_alpha}"
 
     user_store = UserStore()
     cfg = user_store.load(telegram_user_id)

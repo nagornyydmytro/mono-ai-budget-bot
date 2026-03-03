@@ -4,6 +4,7 @@ import re
 import time
 from typing import Any
 
+from mono_ai_budget_bot.currency import parse_currency_conversion_query
 from mono_ai_budget_bot.nlq.category_keywords import detect_category
 from mono_ai_budget_bot.nlq.periods import parse_period_range
 from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
@@ -89,6 +90,15 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         }
 
     t = text.lower()
+    conv = parse_currency_conversion_query(text)
+    if conv is not None:
+        return {
+            "intent": "currency_convert",
+            "amount": conv.amount,
+            "from": conv.from_alpha,
+            "to": conv.to_alpha,
+        }
+
     category = detect_category(t)
 
     pr = parse_period_range(t, now_ts)

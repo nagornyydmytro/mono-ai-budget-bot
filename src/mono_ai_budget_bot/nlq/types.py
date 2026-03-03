@@ -14,6 +14,7 @@ IntentName = Literal[
     "transfer_in_count",
     "compare_to_baseline",
     "what_if",
+    "currency_convert",
 ]
 
 
