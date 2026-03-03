@@ -14,6 +14,7 @@ from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
 from mono_ai_budget_bot.bot.clarify import build_nlq_clarify_keyboard
+from mono_ai_budget_bot.bot.ui import build_main_menu_keyboard
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.currency import MonobankPublicClient, normalize_records_to_uah
 from mono_ai_budget_bot.monobank import MonobankClient
@@ -152,35 +153,6 @@ def render_accounts_screen(
     return "\n".join(lines).strip(), kb
 
 
-def build_main_menu_keyboard():
-    from aiogram.types import InlineKeyboardButton
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    kb = InlineKeyboardBuilder()
-    kb.row(
-        InlineKeyboardButton(text="🔐 Connect", callback_data="menu_connect"),
-        InlineKeyboardButton(text="🧾 Accounts", callback_data="menu_accounts"),
-    )
-    kb.row(
-        InlineKeyboardButton(text="📊 Week", callback_data="menu_week"),
-        InlineKeyboardButton(text="📅 Month", callback_data="menu_month"),
-    )
-    kb.row(
-        InlineKeyboardButton(text="🔄 Refresh week", callback_data="menu_refresh_week"),
-        InlineKeyboardButton(text="🔎 Status", callback_data="menu_status"),
-    )
-    kb.row(
-        InlineKeyboardButton(text="📘 Help", callback_data="menu_help"),
-    )
-    kb.row(
-        InlineKeyboardButton(text="🧩 Uncat", callback_data="menu_uncat"),
-    )
-    kb.row(
-        InlineKeyboardButton(text="💱 Курси", callback_data="menu_currency"),
-    )
-    return kb
-
-
 def _currency_screen_keyboard():
     from aiogram.types import InlineKeyboardButton
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -232,20 +204,11 @@ def _render_currency_screen_text(rates) -> str:
     eur = pick(978)
     pln = pick(985)
 
-    lines = []
-    lines.append("*💱 Курси валют (Monobank)*")
-    lines.append(f"Оновлено: {md_escape(updated)}")
-    lines.append("")
-    lines.append("*USD/UAH*")
-    lines.append(f"• {md_escape(fmt_rate(usd)) if usd else 'немає даних'}")
-    lines.append("")
-    lines.append("*EUR/UAH*")
-    lines.append(f"• {md_escape(fmt_rate(eur)) if eur else 'немає даних'}")
-    lines.append("")
-    lines.append("*PLN/UAH*")
-    lines.append(f"• {md_escape(fmt_rate(pln)) if pln else 'немає даних'}")
+    usd_s = md_escape(fmt_rate(usd)) if usd else None
+    eur_s = md_escape(fmt_rate(eur)) if eur else None
+    pln_s = md_escape(fmt_rate(pln)) if pln else None
 
-    return "\n".join(lines)
+    return templates.currency_screen_text(md_escape(updated), usd_s, eur_s, pln_s)
 
 
 def _render_facts_block(facts: dict) -> str:
@@ -744,21 +707,14 @@ async def main() -> None:
 
         text = templates.start_message()
         if cfg is not None and cfg.mono_token:
-            text = "\n".join(
-                [
-                    text,
-                    "",
-                    templates.success("Monobank підключено."),
-                    templates.onboarding_connected_next_steps(),
-                ]
-            ).strip()
+            text = templates.start_message_connected()
 
-        await message.answer(text, reply_markup=kb.as_markup())
+        await message.answer(text, reply_markup=kb)
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
         kb = build_main_menu_keyboard()
-        await message.answer(templates.help_message(), reply_markup=kb.as_markup())
+        await message.answer(templates.help_message(), reply_markup=kb)
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
@@ -796,16 +752,7 @@ async def main() -> None:
 
         kb = build_main_menu_keyboard()
         await message.answer(templates.connect_success_confirm())
-        await message.answer(
-            "\n".join(
-                [
-                    templates.onboarding_connected_next_steps(),
-                    "",
-                    "Можеш натиснути 🧾 Accounts прямо в меню нижче.",
-                ]
-            ).strip(),
-            reply_markup=kb.as_markup(),
-        )
+        await message.answer(templates.connect_success_next_steps(), reply_markup=kb)
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
@@ -891,7 +838,7 @@ async def main() -> None:
         ]
         selected_ids = set(cfg.selected_account_ids or [])
         text, kb = render_accounts_screen(accounts, selected_ids)
-        await message.answer(text, reply_markup=kb.as_markup())
+        await message.answer(text, reply_markup=kb)
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("acc_toggle:"))
     async def cb_toggle_account(query: CallbackQuery) -> None:
@@ -932,7 +879,7 @@ async def main() -> None:
         text, kb = render_accounts_screen(accounts, set(selected))
 
         if query.message:
-            await query.message.edit_text(text, reply_markup=kb.as_markup())
+            await query.message.edit_text(text, reply_markup=kb)
         await query.answer("Ок")
 
     @dp.callback_query(lambda c: c.data == "acc_clear")
@@ -962,7 +909,7 @@ async def main() -> None:
         text, kb = render_accounts_screen(accounts, set())
 
         if query.message:
-            await query.message.edit_text(text, reply_markup=kb.as_markup())
+            await query.message.edit_text(text, reply_markup=kb)
         await query.answer("Очищено")
 
     @dp.callback_query(lambda c: c.data == "acc_done")
@@ -987,14 +934,8 @@ async def main() -> None:
 
         if query.message:
             await query.message.edit_text(
-                "\n".join(
-                    [
-                        templates.accounts_after_done(),
-                        "",
-                        f"Вибрано карток: {count}",
-                    ]
-                ).strip(),
-                reply_markup=kb.as_markup(),
+                templates.accounts_after_done_with_count(count),
+                reply_markup=kb,
             )
         await query.answer("Done")
 
@@ -1008,9 +949,7 @@ async def main() -> None:
             kb.row(InlineKeyboardButton(text="✅ Ввести токен", callback_data="onb_token"))
             kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="onb_back_main"))
 
-            await query.message.answer(
-                templates.connect_instructions(), reply_markup=kb.as_markup()
-            )
+            await query.message.answer(templates.connect_instructions(), reply_markup=kb)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "onb_token")
@@ -1077,16 +1016,8 @@ async def main() -> None:
 
         amount_uah = abs(int(item.amount)) / 100.0
         await message.answer(
-            "\n".join(
-                [
-                    "🧩 Некатегоризована покупка:",
-                    f"• {item.description}",
-                    f"• {amount_uah:.2f} грн",
-                    "",
-                    "Обери категорію:",
-                ]
-            ),
-            reply_markup=kb.as_markup(),
+            templates.uncat_purchase_prompt(item.description, f"{amount_uah:.2f} грн"),
+            reply_markup=kb,
         )
 
     @dp.callback_query(lambda c: c.data == "menu_uncat")
@@ -1147,20 +1078,7 @@ async def main() -> None:
         uncat_pending_store.create(tg_id, tx_id=cur.tx_id, stage="create_name", ttl_sec=900)
 
         if query.message:
-            await query.message.answer(
-                "\n".join(
-                    [
-                        "✍️ Введи назву нової категорії (до 60 символів).",
-                        "",
-                        "Приклади:",
-                        "• Доставка їжі",
-                        "• Кафе/Ресторани",
-                        "• Таксі",
-                        "",
-                        "Щоб скасувати — напиши `cancel`.",
-                    ]
-                )
-            )
+            await query.message.answer(templates.uncat_create_category_name_prompt())
 
         await query.answer("Ок")
 
@@ -1227,7 +1145,7 @@ async def main() -> None:
     async def cb_onb_back_main(query: CallbackQuery) -> None:
         if query.message:
             kb = build_main_menu_keyboard()
-            await query.message.answer(templates.start_message(), reply_markup=kb.as_markup())
+            await query.message.answer(templates.start_message(), reply_markup=kb)
         await query.answer()
 
     async def _send_currency_screen(message: Message, *, force_refresh: bool) -> None:
@@ -1246,7 +1164,7 @@ async def main() -> None:
                 pass
 
         kb = _currency_screen_keyboard()
-        await message.answer(text, reply_markup=kb.as_markup())
+        await message.answer(text, reply_markup=kb)
 
     @dp.callback_query(lambda c: c.data == "menu_currency")
     async def cb_menu_currency(query: CallbackQuery) -> None:
@@ -1264,14 +1182,14 @@ async def main() -> None:
     async def cb_currency_back(query: CallbackQuery) -> None:
         if query.message:
             kb = build_main_menu_keyboard()
-            await query.message.answer("Меню:", reply_markup=kb.as_markup())
+            await query.message.answer("Меню:", reply_markup=kb)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_help")
     async def cb_menu_help(query: CallbackQuery) -> None:
         if query.message:
             kb = build_main_menu_keyboard()
-            await query.message.answer(templates.help_message(), reply_markup=kb.as_markup())
+            await query.message.answer(templates.help_message(), reply_markup=kb)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_week")
@@ -1390,15 +1308,7 @@ async def main() -> None:
         )
 
         if query.message:
-            await query.message.answer(
-                "\n".join(
-                    [
-                        "✍️ Ок, введи вручну:",
-                        hint,
-                        "Щоб скасувати — напиши: cancel",
-                    ]
-                )
-            )
+            await query.message.answer(templates.nlq_manual_entry_prompt(hint))
         await query.answer("Ок")
 
     @dp.callback_query(lambda c: bool(c.data) and c.data.startswith("nlq_cancel:"))
@@ -1464,16 +1374,8 @@ async def main() -> None:
             )
 
             await query.message.answer(
-                "\n".join(
-                    [
-                        "🗂️ Обери пресет категорій витрат/доходів:",
-                        "",
-                        "⚡ Мінімальний — базові категорії + MCC-мапа.",
-                        "🧠 Максимальний — більш деталізована структура (2 рівні) + MCC-мапа.",
-                        "🛠️ Custom — порожня структура, налаштуєш потім кнопками.",
-                    ]
-                ),
-                reply_markup=kb.as_markup(),
+                templates.taxonomy_preset_prompt(),
+                reply_markup=kb,
             )
             await query.answer("Пропущено")
             return
@@ -1482,16 +1384,7 @@ async def main() -> None:
         days = int(days_map[str(query.data)])
 
         if query.message:
-            await query.message.edit_text(
-                "\n".join(
-                    [
-                        f"📥 Запустив завантаження історії за *{days} днів* у фоні…",
-                        "Це може зайняти час через ліміти Monobank API.",
-                        "",
-                        "Я напишу, коли буде готово ✅",
-                    ]
-                ).strip()
-            )
+            await query.message.edit_text(templates.bootstrap_started_message(days))
         await query.answer("Старт")
 
         chat_id = query.message.chat.id if query.message else None
@@ -1522,21 +1415,11 @@ async def main() -> None:
                     if chat_id is not None:
                         await bot.send_message(
                             chat_id,
-                            "\n".join(
-                                [
-                                    templates.success("Готово!"),
-                                    "",
-                                    f"Карток: {res.accounts}",
-                                    f"Запитів до API: {res.fetched_requests}",
-                                    f"Додано транзакцій: {res.appended}",
-                                    "",
-                                    "Тепер можеш:",
-                                    "• /today",
-                                    "• /week",
-                                    "• /month",
-                                    "• /week ai",
-                                ]
-                            ).strip(),
+                            templates.bootstrap_done_message(
+                                accounts=res.accounts,
+                                fetched_requests=res.fetched_requests,
+                                appended=res.appended,
+                            ),
                         )
             except Exception as e:
                 if chat_id is not None:
@@ -1575,16 +1458,8 @@ async def main() -> None:
         kb.row(InlineKeyboardButton(text="🛠️ Custom (пізніше)", callback_data="rep_preset_custom"))
 
         await query.message.answer(
-            "\n".join(
-                [
-                    "📊 Обери пресет звітів:",
-                    "",
-                    "⚡ Мінімальний — коротко (основні суми та порівняння).",
-                    "🧠 Максимальний — додає тренди/аномалії/what-if.",
-                    "🛠️ Custom — налаштуєш блоки пізніше.",
-                ]
-            ),
-            reply_markup=kb.as_markup(),
+            templates.reports_preset_prompt(),
+            reply_markup=kb,
         )
         await query.answer("Збережено")
 
@@ -1615,16 +1490,8 @@ async def main() -> None:
         kb.row(InlineKeyboardButton(text="🛠️ Custom", callback_data="act_custom"))
 
         await query.message.answer(
-            "\n".join(
-                [
-                    "🧩 Обери режим активності:",
-                    "",
-                    "🔊 Loud — більше авто-фіч (звітність/нагадування/підказки) — потім ще налаштуємо.",
-                    "🔕 Quiet — мінімум проактивних повідомлень.",
-                    "🛠️ Custom — будеш вмикати/вимикати фічі окремо.",
-                ]
-            ),
-            reply_markup=kb.as_markup(),
+            templates.activity_mode_prompt(),
+            reply_markup=kb,
         )
 
         if query.message:
@@ -1642,7 +1509,7 @@ async def main() -> None:
         mode = mode_map[str(query.data)]
 
         prof = profile_store.load(tg_id) or {}
-        prof = apply_onboarding_settings(prof, activity_mode=mode)  # type: ignore[arg-type]
+        prof = apply_onboarding_settings(prof, activity_mode=mode)
         profile_store.save(tg_id, prof)
 
         if query.message:
@@ -1658,17 +1525,8 @@ async def main() -> None:
             )
 
             await query.message.answer(
-                "\n".join(
-                    [
-                        "❓ Як часто питати про некатегоризовані покупки?",
-                        "",
-                        "⚡ Одразу — після кожної синхронізації/оновлення.",
-                        "🗓️ Раз на день — списком.",
-                        "📅 Раз на тиждень — списком.",
-                        "🧾 Перед звітом — тільки коли формуємо weekly/monthly.",
-                    ]
-                ),
-                reply_markup=kb.as_markup(),
+                templates.uncat_frequency_prompt(),
+                reply_markup=kb,
             )
 
         await query.answer("Збережено")
@@ -1705,16 +1563,8 @@ async def main() -> None:
             kb.row(InlineKeyboardButton(text="🔥 Motivator", callback_data="persona_motivator"))
 
             await query.message.answer(
-                "\n".join(
-                    [
-                        "🧑‍🎤 Обери стиль спілкування (persona):",
-                        "",
-                        "🤝 Supportive — м’якше, підтримка і спокійні інсайти.",
-                        "🧠 Rational — коротко, структурно, без емоцій.",
-                        "🔥 Motivator — енергійно, фокус на діях і дисципліні.",
-                    ]
-                ),
-                reply_markup=kb.as_markup(),
+                templates.persona_prompt(),
+                reply_markup=kb,
             )
 
         await query.answer("Збережено")
@@ -1778,14 +1628,7 @@ async def main() -> None:
         else:
             days_back = 90
 
-        await message.answer(
-            "\n".join(
-                [
-                    f"⏳ Запустив оновлення за ~{days_back} днів у фоні…",
-                    "Я напишу, коли буде готово ✅",
-                ]
-            ).strip()
-        )
+        await message.answer(templates.refresh_started_message(days_back))
 
         chat_id = message.chat.id
         token = cfg.mono_token
@@ -1814,16 +1657,11 @@ async def main() -> None:
 
                     await bot.send_message(
                         chat_id,
-                        "\n".join(
-                            [
-                                templates.success("Оновлено!"),
-                                f"Карток: {res.accounts}",
-                                f"Запитів до API: {res.fetched_requests}",
-                                f"Додано транзакцій: {res.appended}",
-                                "",
-                                "Можеш дивитись: /today /week /month",
-                            ]
-                        ).strip(),
+                        templates.refresh_done_message(
+                            accounts=res.accounts,
+                            fetched_requests=res.fetched_requests,
+                            appended=res.appended,
+                        ),
                     )
             except Exception as e:
                 msg = _map_monobank_error(e)

@@ -414,6 +414,196 @@ def accounts_after_done() -> str:
     ).strip()
 
 
+def start_message_connected() -> str:
+    return "\n".join(
+        [
+            start_message(),
+            "",
+            success("Monobank підключено."),
+            onboarding_connected_next_steps(),
+        ]
+    ).strip()
+
+
+def connect_success_next_steps() -> str:
+    return "\n".join(
+        [
+            onboarding_connected_next_steps(),
+            "",
+            "Можеш натиснути 🧾 Accounts прямо в меню нижче.",
+        ]
+    ).strip()
+
+
+def accounts_after_done_with_count(count: int) -> str:
+    return "\n".join(
+        [
+            accounts_after_done(),
+            "",
+            f"Вибрано карток: {count}",
+        ]
+    ).strip()
+
+
+def uncat_purchase_prompt(description: str, amount_line: str) -> str:
+    return "\n".join(
+        [
+            "🧩 Некатегоризована покупка:",
+            f"• {description}",
+            f"• {amount_line}",
+            "",
+            "Обери категорію:",
+        ]
+    ).strip()
+
+
+def uncat_create_category_name_prompt() -> str:
+    return "\n".join(
+        [
+            "✍️ Введи назву нової категорії (до 60 символів).",
+            "",
+            "Приклади:",
+            "• Доставка їжі",
+            "• Кафе/Ресторани",
+            "• Таксі",
+            "",
+            "Щоб скасувати — напиши `cancel`.",
+        ]
+    ).strip()
+
+
+def nlq_manual_entry_prompt(hint: str) -> str:
+    return "\n".join(
+        [
+            "✍️ Ок, введи вручну:",
+            hint,
+            "Щоб скасувати — напиши: cancel",
+        ]
+    ).strip()
+
+
+def taxonomy_preset_prompt() -> str:
+    return "\n".join(
+        [
+            "🗂️ Обери пресет категорій витрат/доходів:",
+            "",
+            "⚡ Мінімальний — базові категорії + MCC-мапа.",
+            "🧠 Максимальний — більш деталізована структура (2 рівні) + MCC-мапа.",
+            "🛠️ Custom — порожня структура, налаштуєш потім кнопками.",
+        ]
+    ).strip()
+
+
+def bootstrap_started_message(days: int) -> str:
+    return "\n".join(
+        [
+            f"📥 Запустив завантаження історії за *{days} днів* у фоні…",
+            "Це може зайняти час через ліміти Monobank API.",
+            "",
+            "Я напишу, коли буде готово ✅",
+        ]
+    ).strip()
+
+
+def bootstrap_done_message(accounts: int, fetched_requests: int, appended: int) -> str:
+    return "\n".join(
+        [
+            success("Готово!"),
+            "",
+            f"Карток: {accounts}",
+            f"Запитів до API: {fetched_requests}",
+            f"Додано транзакцій: {appended}",
+            "",
+            "Тепер можеш:",
+            "• /today",
+            "• /week",
+            "• /month",
+            "• /week ai",
+        ]
+    ).strip()
+
+
+def reports_preset_prompt() -> str:
+    return "\n".join(
+        [
+            "📊 Обери пресет звітів:",
+            "",
+            "⚡ Мінімальний — коротко (основні суми та порівняння).",
+            "🧠 Максимальний — додає тренди/аномалії/what-if.",
+            "🛠️ Custom — налаштуєш блоки пізніше.",
+        ]
+    ).strip()
+
+
+def activity_mode_prompt() -> str:
+    return "\n".join(
+        [
+            "🧩 Обери режим активності:",
+            "",
+            "🔊 Loud — більше авто-фіч (звітність/нагадування/підказки) — потім ще налаштуємо.",
+            "🔕 Quiet — мінімум проактивних повідомлень.",
+            "🛠️ Custom — будеш вмикати/вимикати фічі окремо.",
+        ]
+    ).strip()
+
+
+def uncat_frequency_prompt() -> str:
+    return "\n".join(
+        [
+            "❓ Як часто питати про некатегоризовані покупки?",
+            "",
+            "⚡ Одразу — після кожної синхронізації/оновлення.",
+            "🗓️ Раз на день — списком.",
+            "📅 Раз на тиждень — списком.",
+            "🧾 Перед звітом — тільки коли формуємо weekly/monthly.",
+        ]
+    ).strip()
+
+
+def persona_prompt() -> str:
+    return "\n".join(
+        [
+            "🧑‍🎤 Обери стиль спілкування (persona):",
+            "",
+            "🤝 Supportive — м’якше, підтримка і спокійні інсайти.",
+            "🧠 Rational — коротко, структурно, без емоцій.",
+            "🔥 Motivator — енергійно, фокус на діях і дисципліні.",
+        ]
+    ).strip()
+
+
+def refresh_started_message(days_back: int) -> str:
+    return "\n".join(
+        [
+            f"⏳ Запустив оновлення за ~{days_back} днів у фоні…",
+            "Я напишу, коли буде готово ✅",
+        ]
+    ).strip()
+
+
+def refresh_done_message(accounts: int, fetched_requests: int, appended: int) -> str:
+    return "\n".join(
+        [
+            success("Оновлено!"),
+            f"Карток: {accounts}",
+            f"Запитів до API: {fetched_requests}",
+            f"Додано транзакцій: {appended}",
+            "",
+            "Можеш дивитись: /today /week /month",
+        ]
+    ).strip()
+
+
+def currency_screen_text(updated: str, usd: str | None, eur: str | None, pln: str | None) -> str:
+    def line(label: str, value: str | None) -> list[str]:
+        return [f"*{label}*", f"• {value if value else 'немає даних'}"]
+
+    parts: list[str] = ["*💱 Курси валют (Monobank)*", f"Оновлено: {updated}", ""]
+    for block in (line("USD/UAH", usd), [""], line("EUR/UAH", eur), [""], line("PLN/UAH", pln)):
+        parts.extend(block)
+    return "\n".join(parts).strip()
+
+
 def err_not_connected() -> str:
     return warning("Monobank не підключено. Зроби `/connect <token>` або натисни 🔐 Connect.")
 
