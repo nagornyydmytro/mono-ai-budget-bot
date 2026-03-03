@@ -6,7 +6,7 @@ from ..storage.tx_store import TxRecord
 from .anomalies import detect_anomalies
 from .from_ledger import rows_from_ledger
 from .period_report import build_period_report_from_ledger
-from .refunds import detect_refund_pairs, refund_ignore_ids
+from .refunds import build_refund_insights, detect_refund_pairs, refund_ignore_ids
 from .trends import compute_trends
 
 
@@ -26,8 +26,11 @@ def enrich_period_facts(
     cur_start = int(cur["start_ts"])
     cur_end = int(cur["end_ts"])
 
+    pairs = detect_refund_pairs(records)
+    current_facts["refunds"] = build_refund_insights(pairs, start_ts=cur_start, end_ts=cur_end)
+
     current_records = [r for r in records if cur_start <= int(r.time) < cur_end]
-    ignore_ids = refund_ignore_ids(detect_refund_pairs(records))
+    ignore_ids = refund_ignore_ids(pairs)
     if ignore_ids:
         current_records = [r for r in current_records if r.id not in ignore_ids]
     rows = rows_from_ledger(current_records)

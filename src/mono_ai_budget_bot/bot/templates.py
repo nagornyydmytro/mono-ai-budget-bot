@@ -39,6 +39,7 @@ def report_layout(
     facts_block: str,
     trends_block: str | None = None,
     anomalies_block: str | None = None,
+    refunds_block: str | None = None,
     whatif_block: str | None = None,
     insight_block: str | None = None,
 ) -> str:
@@ -54,6 +55,10 @@ def report_layout(
     if anomalies_block:
         parts.append(divider())
         parts.append(anomalies_block)
+
+    if refunds_block:
+        parts.append(divider())
+        parts.append(refunds_block)
 
     if whatif_block:
         parts.append(divider())

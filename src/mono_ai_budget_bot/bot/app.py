@@ -391,6 +391,41 @@ def _render_anomalies_block(facts: dict) -> str | None:
     return templates.section("Аномалії", lines)
 
 
+def _render_refunds_block(facts: dict) -> str | None:
+    r = facts.get("refunds") or {}
+    if not isinstance(r, dict):
+        return None
+
+    count = int(r.get("count") or 0)
+    if count <= 0:
+        return None
+
+    total = float(r.get("total_uah") or 0.0)
+    items = r.get("items") or []
+    if not isinstance(items, list):
+        items = []
+
+    if count <= 1:
+        lines = [f"• Виявлено повернення: *{md_escape(_fmt_money(total))}*"]
+        return templates.section("Повернення", lines)
+
+    lines: list[str] = []
+    lines.append(f"• Виявлено повернень: *{count}* на суму *{md_escape(_fmt_money(total))}*")
+
+    top = items[:3]
+    if top:
+        lines.append("")
+        lines.append("Топ:")
+        for it in top:
+            if not isinstance(it, dict):
+                continue
+            merchant = md_escape(str(it.get("merchant") or "—"))
+            amt = float(it.get("amount_uah") or 0.0)
+            lines.append(f"• {merchant} — {md_escape(_fmt_money(amt))}")
+
+    return templates.section("Повернення", lines)
+
+
 def _render_whatif_block(facts: dict) -> str | None:
     whatifs = facts.get("whatif_suggestions") or []
     if not isinstance(whatifs, list) or not whatifs:
@@ -444,6 +479,7 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
         anomalies_block=anomalies_block,
         whatif_block=whatif_block,
         insight_block=insight_block,
+        refunds_block=_render_refunds_block(facts),
     )
 
 

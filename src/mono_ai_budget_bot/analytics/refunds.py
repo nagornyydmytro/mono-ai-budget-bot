@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.storage.tx_store import TxRecord
@@ -165,3 +166,57 @@ def refund_ignore_ids(pairs: list[RefundPair]) -> set[str]:
         if x.refund_id:
             out.add(x.refund_id)
     return out
+
+
+@dataclass(frozen=True)
+class RefundInsightItem:
+    merchant: str
+    amount_uah: float
+    purchase_ts: int
+    refund_ts: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "merchant": self.merchant,
+            "amount_uah": float(self.amount_uah),
+            "purchase_ts": int(self.purchase_ts),
+            "refund_ts": int(self.refund_ts),
+        }
+
+
+def build_refund_insights(
+    pairs: list[RefundPair],
+    *,
+    start_ts: int,
+    end_ts: int,
+    max_items: int = 5,
+) -> dict[str, Any]:
+    in_window = [p for p in pairs if int(start_ts) <= int(p.refund_ts) < int(end_ts)]
+    if not in_window:
+        return {"count": 0, "total_uah": 0.0, "items": []}
+
+    items: list[RefundInsightItem] = []
+    total_cents = 0
+
+    for p in in_window:
+        amt_cents = abs(int(p.purchase_amount))
+        if amt_cents <= 0:
+            continue
+        total_cents += amt_cents
+        items.append(
+            RefundInsightItem(
+                merchant=str(p.merchant_key or "—"),
+                amount_uah=amt_cents / 100.0,
+                purchase_ts=int(p.purchase_ts),
+                refund_ts=int(p.refund_ts),
+            )
+        )
+
+    items.sort(key=lambda x: (x.amount_uah, x.refund_ts), reverse=True)
+
+    top = items[: max(1, int(max_items))]
+    return {
+        "count": len(items),
+        "total_uah": total_cents / 100.0,
+        "items": [x.to_dict() for x in top],
+    }
