@@ -183,6 +183,18 @@ def add_subcategory(tax: dict[str, Any], *, parent_id: str, name: str) -> str:
     return sid
 
 
+def add_subcategory_with_migration(
+    tax: dict[str, Any], *, parent_id: str, name: str
+) -> tuple[str, bool]:
+    pid = (parent_id or "").strip()
+    if not pid:
+        raise ValueError("missing parent_id")
+
+    was_leaf = is_leaf(tax, pid)
+    sid = add_subcategory(tax, parent_id=pid, name=name)
+    return sid, bool(was_leaf)
+
+
 def validate_taxonomy(tax: dict[str, Any]) -> None:
     if not isinstance(tax, dict):
         raise ValueError("taxonomy must be dict")

@@ -3,6 +3,7 @@ from mono_ai_budget_bot.taxonomy.models import (
     TaxNode,
     add_category,
     add_subcategory,
+    add_subcategory_with_migration,
     depth_of,
     ensure_leaf_target,
     is_leaf,
@@ -22,4 +23,5 @@ __all__ = [
     "validate_taxonomy",
     "ensure_leaf_target",
     "leaf_ids",
+    "add_subcategory_with_migration",
 ]
