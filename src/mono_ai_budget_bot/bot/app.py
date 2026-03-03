@@ -25,6 +25,7 @@ from ..analytics.profile import build_user_profile
 from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..reports.config import build_reports_preset
+from ..settings.onboarding import apply_onboarding_settings
 from ..storage.profile_store import ProfileStore
 from ..storage.reports_store import ReportsStore
 from ..storage.taxonomy_store import TaxonomyStore
@@ -1232,11 +1233,103 @@ async def main() -> None:
             "rep_preset_custom": "custom",
         }
         preset = preset_map[str(query.data)]
-        cfg = build_reports_preset(preset)  # type: ignore[arg-type]
+        cfg = build_reports_preset(preset)
         reports_store.save(tg_id, cfg)
+
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="🔊 Loud", callback_data="act_loud"))
+        kb.row(InlineKeyboardButton(text="🔕 Quiet", callback_data="act_quiet"))
+        kb.row(InlineKeyboardButton(text="🛠️ Custom", callback_data="act_custom"))
+
+        await query.message.answer(
+            "\n".join(
+                [
+                    "🧩 Обери режим активності:",
+                    "",
+                    "🔊 Loud — більше авто-фіч (звітність/нагадування/підказки) — потім ще налаштуємо.",
+                    "🔕 Quiet — мінімум проактивних повідомлень.",
+                    "🛠️ Custom — будеш вмикати/вимикати фічі окремо.",
+                ]
+            ),
+            reply_markup=kb.as_markup(),
+        )
 
         if query.message:
             await query.message.answer("✅ Пресет звітів збережено.")
+        await query.answer("Збережено")
+
+    @dp.callback_query(lambda c: c.data in ("act_loud", "act_quiet", "act_custom"))
+    async def cb_activity_mode(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        mode_map = {"act_loud": "loud", "act_quiet": "quiet", "act_custom": "custom"}
+        mode = mode_map[str(query.data)]
+
+        prof = profile_store.load(tg_id) or {}
+        prof = apply_onboarding_settings(prof, activity_mode=mode)  # type: ignore[arg-type]
+        profile_store.save(tg_id, prof)
+
+        if query.message:
+            from aiogram.types import InlineKeyboardButton
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="⚡ Одразу (кожне)", callback_data="uncat_immediate"))
+            kb.row(InlineKeyboardButton(text="🗓️ Раз на день", callback_data="uncat_daily"))
+            kb.row(InlineKeyboardButton(text="📅 Раз на тиждень", callback_data="uncat_weekly"))
+            kb.row(
+                InlineKeyboardButton(text="🧾 Перед звітом", callback_data="uncat_before_report")
+            )
+
+            await query.message.answer(
+                "\n".join(
+                    [
+                        "❓ Як часто питати про некатегоризовані покупки?",
+                        "",
+                        "⚡ Одразу — після кожної синхронізації/оновлення.",
+                        "🗓️ Раз на день — списком.",
+                        "📅 Раз на тиждень — списком.",
+                        "🧾 Перед звітом — тільки коли формуємо weekly/monthly.",
+                    ]
+                ),
+                reply_markup=kb.as_markup(),
+            )
+
+        await query.answer("Збережено")
+
+    @dp.callback_query(
+        lambda c: c.data
+        in ("uncat_immediate", "uncat_daily", "uncat_weekly", "uncat_before_report")
+    )
+    async def cb_uncat_frequency(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        freq_map = {
+            "uncat_immediate": "immediate",
+            "uncat_daily": "daily",
+            "uncat_weekly": "weekly",
+            "uncat_before_report": "before_report",
+        }
+        freq = freq_map[str(query.data)]
+
+        prof = profile_store.load(tg_id) or {}
+        prof = apply_onboarding_settings(prof, uncategorized_prompt_frequency=freq)  # type: ignore[arg-type]
+        profile_store.save(tg_id, prof)
+
+        if query.message:
+            await query.message.answer(
+                "✅ Налаштування збережено. Далі — обери persona (наступний крок)."
+            )
+
         await query.answer("Збережено")
 
     @dp.message(Command("refresh"))
