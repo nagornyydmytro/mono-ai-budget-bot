@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
-    master_key: str = Field(..., alias="MASTER_KEY")
+    master_key: Optional[str] = Field(default=None, alias="MASTER_KEY")
 
     mono_token: Optional[str] = Field(default=None, alias="MONO_TOKEN")
 

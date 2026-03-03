@@ -45,6 +45,7 @@ def _default_memory() -> dict[str, Any]:
         "merchant_aliases": dict(DEFAULT_MERCHANT_ALIASES),
         "category_aliases": dict(DEFAULT_CATEGORY_ALIASES),
         "recipient_aliases": {},
+        "learned_mappings": {"merchant": {}, "recipient": {}, "category": {}},
         "alias_stats": {"merchant": {}, "category": {}, "recipient": {}},
         "pending_intent": None,
         "pending_kind": None,
@@ -107,6 +108,86 @@ def save_memory(telegram_user_id: int, data: dict[str, Any]) -> None:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     path = BASE_DIR / f"{int(telegram_user_id)}.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _get_learned_bucket(mem: dict[str, Any], bucket: str) -> dict[str, list[str]]:
+    lm = mem.get("learned_mappings")
+    if not isinstance(lm, dict):
+        lm = {"merchant": {}, "recipient": {}, "category": {}}
+        mem["learned_mappings"] = lm
+
+    b = lm.get(bucket)
+    if not isinstance(b, dict):
+        b = {}
+        lm[bucket] = b
+
+    out: dict[str, list[str]] = {}
+    for k, v in b.items():
+        if not isinstance(k, str):
+            continue
+        if isinstance(v, list):
+            vv = [norm(x) for x in v if isinstance(x, str) and norm(x)]
+            if vv:
+                out[norm(k)] = list(dict.fromkeys(vv))
+        elif isinstance(v, str):
+            vv = norm(v)
+            if vv:
+                out[norm(k)] = [vv]
+
+    lm[bucket] = out
+    mem["learned_mappings"] = lm
+    return out
+
+
+def get_learned_mapping(telegram_user_id: int, *, bucket: str, alias: str) -> list[str] | None:
+    a = norm(alias)
+    if not a:
+        return None
+    mem = load_memory(telegram_user_id)
+    b = _get_learned_bucket(mem, bucket)
+    vals = b.get(a)
+    if not vals:
+        return None
+    _touch_alias(mem, bucket, a)
+    _prune_aliases(mem)
+    save_memory(telegram_user_id, mem)
+    return list(vals)
+
+
+def add_learned_mapping(telegram_user_id: int, *, bucket: str, alias: str, value: str) -> None:
+    a = norm(alias)
+    v = norm(value)
+    if not a or not v:
+        return
+    mem = load_memory(telegram_user_id)
+    b = _get_learned_bucket(mem, bucket)
+    cur = b.get(a) or []
+    if v not in cur:
+        cur.append(v)
+    b[a] = cur
+    mem["learned_mappings"] = mem.get("learned_mappings")
+    _touch_alias(mem, bucket, a)
+    _prune_aliases(mem)
+    save_memory(telegram_user_id, mem)
+
+
+def set_learned_mapping(
+    telegram_user_id: int, *, bucket: str, alias: str, values: list[str]
+) -> None:
+    a = norm(alias)
+    if not a:
+        return
+    vv = [norm(x) for x in values if isinstance(x, str) and norm(x)]
+    vv = list(dict.fromkeys(vv))
+    if not vv:
+        return
+    mem = load_memory(telegram_user_id)
+    b = _get_learned_bucket(mem, bucket)
+    b[a] = vv
+    mem["learned_mappings"] = mem.get("learned_mappings")
+    _touch_alias(mem, bucket, a)
+    _prune_aliases(mem)
+    save_memory(telegram_user_id, mem)
 
 
 def set_pending_intent(
@@ -237,6 +318,8 @@ def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) ->
     mem["recipient_aliases"] = ra
     save_memory(telegram_user_id, mem)
 
+    add_learned_mapping(telegram_user_id, bucket="recipient", alias=a, value=v)
+
 
 def _touch_alias(mem: dict[str, Any], bucket: str, alias: str) -> None:
     a = (alias or "").strip().lower()
@@ -320,6 +403,13 @@ def resolve_merchant_filters(
         return None
 
     mem = load_memory(telegram_user_id)
+    lm_m = get_learned_mapping(telegram_user_id, bucket="merchant", alias=raw)
+    if lm_m:
+        return lm_m
+
+    lm_c = get_learned_mapping(telegram_user_id, bucket="category", alias=raw)
+    if lm_c:
+        return lm_c
 
     m_aliases = mem.get("merchant_aliases")
     if not isinstance(m_aliases, dict):
@@ -422,6 +512,7 @@ def save_category_alias(telegram_user_id: int, alias: str, merchant_terms: list[
     _touch_alias(mem, "category", a)
     _prune_aliases(mem)
     save_memory(telegram_user_id, mem)
+    set_learned_mapping(telegram_user_id, bucket="category", alias=a, values=terms)
 
 
 def pop_pending_action(telegram_user_id: int) -> None:
