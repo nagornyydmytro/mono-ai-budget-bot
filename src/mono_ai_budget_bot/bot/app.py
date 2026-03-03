@@ -14,7 +14,12 @@ from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
 from mono_ai_budget_bot.bot.clarify import build_nlq_clarify_keyboard
-from mono_ai_budget_bot.bot.ui import build_main_menu_keyboard
+from mono_ai_budget_bot.bot.ui import (
+    build_bootstrap_picker_keyboard,
+    build_currency_screen_keyboard,
+    build_main_menu_keyboard,
+    build_vertical_options_keyboard,
+)
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.currency import MonobankPublicClient, normalize_records_to_uah
 from mono_ai_budget_bot.monobank import MonobankClient
@@ -154,15 +159,7 @@ def render_accounts_screen(
 
 
 def _currency_screen_keyboard():
-    from aiogram.types import InlineKeyboardButton
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    kb = InlineKeyboardBuilder()
-    kb.row(
-        InlineKeyboardButton(text="🔄 Оновити", callback_data="currency_refresh"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="currency_back"),
-    )
-    return kb
+    return build_currency_screen_keyboard()
 
 
 def _render_currency_screen_text(rates) -> str:
@@ -914,9 +911,6 @@ async def main() -> None:
 
     @dp.callback_query(lambda c: c.data == "acc_done")
     async def cb_done_accounts(query: CallbackQuery) -> None:
-        from aiogram.types import InlineKeyboardButton
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-
         tg_id = query.from_user.id if query.from_user else None
         cfg = users.load(tg_id) if tg_id is not None else None
 
@@ -925,12 +919,7 @@ async def main() -> None:
             await query.answer("Спочатку вибери хоча б 1 картку", show_alert=True)
             return
 
-        kb = InlineKeyboardBuilder()
-        kb.row(InlineKeyboardButton(text="📥 Bootstrap 1 місяць", callback_data="boot_30"))
-        kb.row(InlineKeyboardButton(text="📥 Bootstrap 3 місяці", callback_data="boot_90"))
-        kb.row(InlineKeyboardButton(text="📥 Bootstrap 6 місяців", callback_data="boot_180"))
-        kb.row(InlineKeyboardButton(text="📥 Bootstrap 12 місяців", callback_data="boot_365"))
-        kb.row(InlineKeyboardButton(text="➡️ Skip", callback_data="boot_skip"))
+        kb = build_bootstrap_picker_keyboard()
 
         if query.message:
             await query.message.edit_text(
@@ -942,13 +931,9 @@ async def main() -> None:
     @dp.callback_query(lambda c: c.data == "menu_connect")
     async def cb_menu_connect(query: CallbackQuery) -> None:
         if query.message:
-            from aiogram.types import InlineKeyboardButton
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-            kb = InlineKeyboardBuilder()
-            kb.row(InlineKeyboardButton(text="✅ Ввести токен", callback_data="onb_token"))
-            kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="onb_back_main"))
-
+            kb = build_vertical_options_keyboard(
+                [("✅ Ввести токен", "onb_token"), ("⬅️ Назад", "onb_back_main")]
+            )
             await query.message.answer(templates.connect_instructions(), reply_markup=kb)
         await query.answer()
 
@@ -975,6 +960,9 @@ async def main() -> None:
 
     async def _send_next_uncat(message: Message, tg_id: int) -> None:
         tax = taxonomy_store.load(tg_id)
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+
         if tax is None:
             tax = build_taxonomy_preset("min")
 
@@ -990,9 +978,6 @@ async def main() -> None:
 
         leaves = list_leaf_options(tax, root_kind="expense")
         leaves = leaves[:8]
-
-        from aiogram.types import InlineKeyboardButton
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         kb = InlineKeyboardBuilder()
         for opt in leaves:
@@ -1359,18 +1344,13 @@ async def main() -> None:
                 await query.message.edit_text(
                     "Ок! Можеш зробити `/refresh week` або одразу `/week` (якщо кеш уже є)."
                 )
-            from aiogram.types import InlineKeyboardButton
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-            kb = InlineKeyboardBuilder()
-            kb.row(InlineKeyboardButton(text="⚡ Мінімальний", callback_data="tax_preset_min"))
-            kb.row(
-                InlineKeyboardButton(
-                    text="🧠 Максимальний (детально)", callback_data="tax_preset_max"
-                )
-            )
-            kb.row(
-                InlineKeyboardButton(text="🛠️ Custom (пізніше)", callback_data="tax_preset_custom")
+            kb = build_vertical_options_keyboard(
+                [
+                    ("⚡ Мінімальний", "tax_preset_min"),
+                    ("🧠 Максимальний (детально)", "tax_preset_max"),
+                    ("🛠️ Custom (пізніше)", "tax_preset_custom"),
+                ]
             )
 
             await query.message.answer(
@@ -1449,13 +1429,13 @@ async def main() -> None:
         tax = build_taxonomy_preset(preset)
         taxonomy_store.save(tg_id, tax)
 
-        from aiogram.types import InlineKeyboardButton
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-        kb = InlineKeyboardBuilder()
-        kb.row(InlineKeyboardButton(text="⚡ Мінімальний", callback_data="rep_preset_min"))
-        kb.row(InlineKeyboardButton(text="🧠 Максимальний", callback_data="rep_preset_max"))
-        kb.row(InlineKeyboardButton(text="🛠️ Custom (пізніше)", callback_data="rep_preset_custom"))
+        kb = build_vertical_options_keyboard(
+            [
+                ("⚡ Мінімальний", "rep_preset_min"),
+                ("🧠 Максимальний", "rep_preset_max"),
+                ("🛠️ Custom (пізніше)", "rep_preset_custom"),
+            ]
+        )
 
         await query.message.answer(
             templates.reports_preset_prompt(),
@@ -1481,13 +1461,13 @@ async def main() -> None:
         cfg = build_reports_preset(preset)
         reports_store.save(tg_id, cfg)
 
-        from aiogram.types import InlineKeyboardButton
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-        kb = InlineKeyboardBuilder()
-        kb.row(InlineKeyboardButton(text="🔊 Loud", callback_data="act_loud"))
-        kb.row(InlineKeyboardButton(text="🔕 Quiet", callback_data="act_quiet"))
-        kb.row(InlineKeyboardButton(text="🛠️ Custom", callback_data="act_custom"))
+        kb = build_vertical_options_keyboard(
+            [
+                ("🔊 Loud", "act_loud"),
+                ("🔕 Quiet", "act_quiet"),
+                ("🛠️ Custom", "act_custom"),
+            ]
+        )
 
         await query.message.answer(
             templates.activity_mode_prompt(),
@@ -1513,15 +1493,13 @@ async def main() -> None:
         profile_store.save(tg_id, prof)
 
         if query.message:
-            from aiogram.types import InlineKeyboardButton
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-            kb = InlineKeyboardBuilder()
-            kb.row(InlineKeyboardButton(text="⚡ Одразу (кожне)", callback_data="uncat_immediate"))
-            kb.row(InlineKeyboardButton(text="🗓️ Раз на день", callback_data="uncat_daily"))
-            kb.row(InlineKeyboardButton(text="📅 Раз на тиждень", callback_data="uncat_weekly"))
-            kb.row(
-                InlineKeyboardButton(text="🧾 Перед звітом", callback_data="uncat_before_report")
+            kb = build_vertical_options_keyboard(
+                [
+                    ("⚡ Одразу (кожне)", "uncat_immediate"),
+                    ("🗓️ Раз на день", "uncat_daily"),
+                    ("📅 Раз на тиждень", "uncat_weekly"),
+                    ("🧾 Перед звітом", "uncat_before_report"),
+                ]
             )
 
             await query.message.answer(
@@ -1554,13 +1532,13 @@ async def main() -> None:
         profile_store.save(tg_id, prof)
 
         if query.message:
-            from aiogram.types import InlineKeyboardButton
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-            kb = InlineKeyboardBuilder()
-            kb.row(InlineKeyboardButton(text="🤝 Supportive", callback_data="persona_supportive"))
-            kb.row(InlineKeyboardButton(text="🧠 Rational", callback_data="persona_rational"))
-            kb.row(InlineKeyboardButton(text="🔥 Motivator", callback_data="persona_motivator"))
+            kb = build_vertical_options_keyboard(
+                [
+                    ("🤝 Supportive", "persona_supportive"),
+                    ("🧠 Rational", "persona_rational"),
+                    ("🔥 Motivator", "persona_motivator"),
+                ]
+            )
 
             await query.message.answer(
                 templates.persona_prompt(),
