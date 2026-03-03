@@ -87,8 +87,12 @@ class MonobankPublicClient:
 
         raise RuntimeError(f"Monobank request failed after retries: {path}. Last error: {last_err}")
 
-    def currency(self) -> list[MonoCurrencyRate]:
+    def currency(self, *, force_refresh: bool = False) -> list[MonoCurrencyRate]:
         cache_key = "mono_public:bank-currency:v1"
+
+        if force_refresh:
+            self._cache.delete(cache_key)
+
         cached = self._cache.get(cache_key)
         if cached is not None:
             if isinstance(cached, list):

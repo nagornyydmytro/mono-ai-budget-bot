@@ -175,7 +175,77 @@ def build_main_menu_keyboard():
     kb.row(
         InlineKeyboardButton(text="🧩 Uncat", callback_data="menu_uncat"),
     )
+    kb.row(
+        InlineKeyboardButton(text="💱 Курси", callback_data="menu_currency"),
+    )
     return kb
+
+
+def _currency_screen_keyboard():
+    from aiogram.types import InlineKeyboardButton
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="🔄 Оновити", callback_data="currency_refresh"),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="currency_back"),
+    )
+    return kb
+
+
+def _render_currency_screen_text(rates) -> str:
+    from datetime import datetime
+
+    def pick(code_a: int, code_b: int = 980):
+        for r in rates:
+            if int(getattr(r, "currencyCodeA", -1)) == int(code_a) and int(
+                getattr(r, "currencyCodeB", -1)
+            ) == int(code_b):
+                return r
+        return None
+
+    def fmt_rate(r) -> str:
+        rb = getattr(r, "rateBuy", None)
+        rs = getattr(r, "rateSell", None)
+        rc = getattr(r, "rateCross", None)
+        parts = []
+        if rc is not None:
+            parts.append(f"cross {float(rc):.4f}")
+        if rb is not None:
+            parts.append(f"buy {float(rb):.4f}")
+        if rs is not None:
+            parts.append(f"sell {float(rs):.4f}")
+        return ", ".join(parts) if parts else "немає даних"
+
+    updated_ts = 0
+    for r in rates:
+        try:
+            updated_ts = max(updated_ts, int(getattr(r, "date", 0) or 0))
+        except Exception:
+            pass
+
+    updated = "—"
+    if updated_ts > 0:
+        updated = datetime.fromtimestamp(updated_ts).isoformat(timespec="seconds")
+
+    usd = pick(840)
+    eur = pick(978)
+    pln = pick(985)
+
+    lines = []
+    lines.append("*💱 Курси валют (Monobank)*")
+    lines.append(f"Оновлено: {md_escape(updated)}")
+    lines.append("")
+    lines.append("*USD/UAH*")
+    lines.append(f"• {md_escape(fmt_rate(usd)) if usd else 'немає даних'}")
+    lines.append("")
+    lines.append("*EUR/UAH*")
+    lines.append(f"• {md_escape(fmt_rate(eur)) if eur else 'немає даних'}")
+    lines.append("")
+    lines.append("*PLN/UAH*")
+    lines.append(f"• {md_escape(fmt_rate(pln)) if pln else 'немає даних'}")
+
+    return "\n".join(lines)
 
 
 def _render_facts_block(facts: dict) -> str:
@@ -1158,6 +1228,43 @@ async def main() -> None:
         if query.message:
             kb = build_main_menu_keyboard()
             await query.message.answer(templates.start_message(), reply_markup=kb.as_markup())
+        await query.answer()
+
+    async def _send_currency_screen(message: Message, *, force_refresh: bool) -> None:
+        pub = None
+        try:
+            pub = MonobankPublicClient()
+            rates = pub.currency(force_refresh=force_refresh)
+            text = _render_currency_screen_text(rates)
+        except Exception as e:
+            text = templates.error(f"Не вдалося отримати курси валют: {e}")
+        finally:
+            try:
+                if pub is not None:
+                    pub.close()
+            except Exception:
+                pass
+
+        kb = _currency_screen_keyboard()
+        await message.answer(text, reply_markup=kb.as_markup())
+
+    @dp.callback_query(lambda c: c.data == "menu_currency")
+    async def cb_menu_currency(query: CallbackQuery) -> None:
+        if query.message:
+            await _send_currency_screen(query.message, force_refresh=False)
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "currency_refresh")
+    async def cb_currency_refresh(query: CallbackQuery) -> None:
+        if query.message:
+            await _send_currency_screen(query.message, force_refresh=True)
+        await query.answer("Оновлено")
+
+    @dp.callback_query(lambda c: c.data == "currency_back")
+    async def cb_currency_back(query: CallbackQuery) -> None:
+        if query.message:
+            kb = build_main_menu_keyboard()
+            await query.message.answer("Меню:", reply_markup=kb.as_markup())
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_help")
