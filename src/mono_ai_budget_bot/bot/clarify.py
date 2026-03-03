@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from mono_ai_budget_bot.bot.ui import BTN_CANCEL, BTN_OTHER
+
 try:
     from aiogram.types import InlineKeyboardMarkup
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -56,10 +58,10 @@ def build_nlq_clarify_keyboard(
             rows.append([_SimpleButton(text=f"{i}) {text}", callback_data=f"{pick_prefix}{i}")])
 
         if include_other:
-            rows.append([_SimpleButton(text="✍️ Інший варіант", callback_data=other_data)])
+            rows.append([_SimpleButton(text=BTN_OTHER, callback_data=other_data)])
 
         if include_cancel:
-            rows.append([_SimpleButton(text="❌ Скасувати", callback_data=cancel_data)])
+            rows.append([_SimpleButton(text=BTN_CANCEL, callback_data=cancel_data)])
 
         return _SimpleMarkup(inline_keyboard=rows)
 
@@ -71,10 +73,10 @@ def build_nlq_clarify_keyboard(
         kb.button(text=f"{i}) {text}", callback_data=f"{pick_prefix}{i}")
 
     if include_other:
-        kb.button(text="✍️ Інший варіант", callback_data=other_data)
+        kb.button(text=BTN_OTHER, callback_data=other_data)
 
     if include_cancel:
-        kb.button(text="❌ Скасувати", callback_data=cancel_data)
+        kb.button(text=BTN_CANCEL, callback_data=cancel_data)
 
     kb.adjust(1)
     return kb.as_markup()
