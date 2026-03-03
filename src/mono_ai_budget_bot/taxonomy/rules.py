@@ -118,8 +118,18 @@ def categorize_tx(
     tax: dict[str, Any],
     tx: TxRecord,
     rules: Sequence[Rule],
+    override_leaf_id: str | None = None,
+    alias_categories: dict[str, list[str]] | None = None,
 ) -> Categorization:
     tx_kind = classify_kind(tx.amount, tx.mcc, tx.description)
+
+    if override_leaf_id:
+        ensure_leaf_target(tax, node_id=override_leaf_id)
+        n = _node(tax, override_leaf_id)
+        kind = str(n.get("kind"))
+        if kind == "income":
+            return Categorization(bucket="real_income", leaf_id=override_leaf_id, reason="override")
+        return Categorization(bucket="real_expense", leaf_id=override_leaf_id, reason="override")
 
     for r in rules:
         if _rule_matches(r, tx, tx_kind):
@@ -131,6 +141,22 @@ def categorize_tx(
                     bucket="real_income", leaf_id=r.leaf_id, reason=f"rule:{r.id}"
                 )
             return Categorization(bucket="real_expense", leaf_id=r.leaf_id, reason=f"rule:{r.id}")
+
+    if alias_categories:
+        for cat_name, terms in alias_categories.items():
+            if not isinstance(cat_name, str):
+                continue
+            if not isinstance(terms, list):
+                continue
+            lid = find_leaf_by_name(tax, root_kind="expense", name=cat_name)
+            if not lid:
+                continue
+            for t in terms:
+                if not isinstance(t, str) or not t.strip():
+                    continue
+                if _match_contains(tx.description, t):
+                    ensure_leaf_target(tax, node_id=lid)
+                    return Categorization(bucket="real_expense", leaf_id=lid, reason="alias")
 
     if tx_kind in {"transfer_out", "transfer_in"}:
         return Categorization(bucket="turnover", leaf_id=None, reason="transfer_without_rule")
