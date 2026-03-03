@@ -24,7 +24,9 @@ from mono_ai_budget_bot.storage.tx_store import TxStore
 from ..analytics.profile import build_user_profile
 from ..config import load_settings
 from ..logging_setup import setup_logging
+from ..reports.config import build_reports_preset
 from ..storage.profile_store import ProfileStore
+from ..storage.reports_store import ReportsStore
 from ..storage.taxonomy_store import TaxonomyStore
 from ..storage.user_store import UserConfig, UserStore
 from ..taxonomy.presets import build_taxonomy_preset
@@ -526,6 +528,7 @@ async def main() -> None:
     setup_logging(settings.log_level)
     profile_store = ProfileStore(Path(".cache") / "profiles")
     taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
+    reports_store = ReportsStore(Path(".cache") / "reports")
 
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
@@ -1192,10 +1195,48 @@ async def main() -> None:
         tax = build_taxonomy_preset(preset)
         taxonomy_store.save(tg_id, tax)
 
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="⚡ Мінімальний", callback_data="rep_preset_min"))
+        kb.row(InlineKeyboardButton(text="🧠 Максимальний", callback_data="rep_preset_max"))
+        kb.row(InlineKeyboardButton(text="🛠️ Custom (пізніше)", callback_data="rep_preset_custom"))
+
+        await query.message.answer(
+            "\n".join(
+                [
+                    "📊 Обери пресет звітів:",
+                    "",
+                    "⚡ Мінімальний — коротко (основні суми та порівняння).",
+                    "🧠 Максимальний — додає тренди/аномалії/what-if.",
+                    "🛠️ Custom — налаштуєш блоки пізніше.",
+                ]
+            ),
+            reply_markup=kb.as_markup(),
+        )
+        await query.answer("Збережено")
+
+    @dp.callback_query(
+        lambda c: c.data in ("rep_preset_min", "rep_preset_max", "rep_preset_custom")
+    )
+    async def cb_rep_preset(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        preset_map = {
+            "rep_preset_min": "min",
+            "rep_preset_max": "max",
+            "rep_preset_custom": "custom",
+        }
+        preset = preset_map[str(query.data)]
+        cfg = build_reports_preset(preset)  # type: ignore[arg-type]
+        reports_store.save(tg_id, cfg)
+
         if query.message:
-            await query.message.answer(
-                "✅ Пресет категорій збережено. Далі — можеш робити /week або /month."
-            )
+            await query.message.answer("✅ Пресет звітів збережено.")
         await query.answer("Збережено")
 
     @dp.message(Command("refresh"))
