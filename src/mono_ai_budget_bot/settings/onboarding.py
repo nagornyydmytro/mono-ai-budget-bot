@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 ActivityMode = Literal["loud", "quiet", "custom"]
 UncatPromptFrequency = Literal["immediate", "daily", "weekly", "before_report"]
+Persona = Literal["supportive", "rational", "motivator"]
 
 
 def apply_onboarding_settings(
@@ -11,6 +12,7 @@ def apply_onboarding_settings(
     *,
     activity_mode: ActivityMode | None = None,
     uncategorized_prompt_frequency: UncatPromptFrequency | None = None,
+    persona: Persona | None = None,
 ) -> dict[str, Any]:
     out = dict(profile)
 
@@ -23,5 +25,10 @@ def apply_onboarding_settings(
         if uncategorized_prompt_frequency not in ("immediate", "daily", "weekly", "before_report"):
             raise ValueError("invalid uncategorized_prompt_frequency")
         out["uncategorized_prompt_frequency"] = uncategorized_prompt_frequency
+
+    if persona is not None:
+        if persona not in ("supportive", "rational", "motivator"):
+            raise ValueError("invalid persona")
+        out["persona"] = persona
 
     return out

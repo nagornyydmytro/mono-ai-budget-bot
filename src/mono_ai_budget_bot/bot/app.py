@@ -1326,10 +1326,53 @@ async def main() -> None:
         profile_store.save(tg_id, prof)
 
         if query.message:
+            from aiogram.types import InlineKeyboardButton
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="🤝 Supportive", callback_data="persona_supportive"))
+            kb.row(InlineKeyboardButton(text="🧠 Rational", callback_data="persona_rational"))
+            kb.row(InlineKeyboardButton(text="🔥 Motivator", callback_data="persona_motivator"))
+
             await query.message.answer(
-                "✅ Налаштування збережено. Далі — обери persona (наступний крок)."
+                "\n".join(
+                    [
+                        "🧑‍🎤 Обери стиль спілкування (persona):",
+                        "",
+                        "🤝 Supportive — м’якше, підтримка і спокійні інсайти.",
+                        "🧠 Rational — коротко, структурно, без емоцій.",
+                        "🔥 Motivator — енергійно, фокус на діях і дисципліні.",
+                    ]
+                ),
+                reply_markup=kb.as_markup(),
             )
 
+        await query.answer("Збережено")
+
+    @dp.callback_query(
+        lambda c: c.data in ("persona_supportive", "persona_rational", "persona_motivator")
+    )
+    async def cb_persona(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        persona_map = {
+            "persona_supportive": "supportive",
+            "persona_rational": "rational",
+            "persona_motivator": "motivator",
+        }
+        persona = persona_map[str(query.data)]
+
+        prof = profile_store.load(tg_id) or {}
+        prof = apply_onboarding_settings(prof, persona=persona)
+        profile_store.save(tg_id, prof)
+
+        if query.message:
+            await query.message.answer(
+                "✅ Persona збережено. Онбординг завершено — можна робити /week або /month."
+            )
         await query.answer("Збережено")
 
     @dp.message(Command("refresh"))

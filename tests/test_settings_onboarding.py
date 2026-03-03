@@ -11,6 +11,8 @@ def test_apply_onboarding_settings_valid():
 
     p = apply_onboarding_settings(p, uncategorized_prompt_frequency="daily")
     assert p["uncategorized_prompt_frequency"] == "daily"
+    p = apply_onboarding_settings(p, persona="rational")
+    assert p["persona"] == "rational"
 
 
 def test_apply_onboarding_settings_rejects_invalid():
@@ -20,11 +22,17 @@ def test_apply_onboarding_settings_rejects_invalid():
     with pytest.raises(ValueError):
         apply_onboarding_settings({}, uncategorized_prompt_frequency="x")
 
+    with pytest.raises(ValueError):
+        apply_onboarding_settings({}, persona="x")
+
 
 def test_profile_store_roundtrip(tmp_path):
     st = ProfileStore(tmp_path / "profiles")
     prof = apply_onboarding_settings(
-        {}, activity_mode="quiet", uncategorized_prompt_frequency="before_report"
+        {},
+        activity_mode="quiet",
+        uncategorized_prompt_frequency="before_report",
+        persona="supportive",
     )
     st.save(1, prof)
     loaded = st.load(1)
