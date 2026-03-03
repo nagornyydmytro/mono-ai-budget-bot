@@ -29,8 +29,10 @@ from ..settings.onboarding import apply_onboarding_settings
 from ..storage.profile_store import ProfileStore
 from ..storage.reports_store import ReportsStore
 from ..storage.taxonomy_store import TaxonomyStore
+from ..storage.uncat_store import UncatStore
 from ..storage.user_store import UserConfig, UserStore
 from ..taxonomy.presets import build_taxonomy_preset
+from ..uncat.queue import build_uncat_queue
 from . import templates
 
 if TYPE_CHECKING:
@@ -507,6 +509,8 @@ async def _compute_and_cache_reports_for_user(
     profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
     profile = build_user_profile(profile_records)
     profile_store.save(tg_id, profile)
+    taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
+    uncat_store = UncatStore(Path(".cache") / "uncat")
 
     for period, days_back in (("week", 7), ("month", 30)):
         now_ts = int(time.time())
@@ -518,6 +522,12 @@ async def _compute_and_cache_reports_for_user(
         current_facts = enrich_period_facts(records, days_back=days_back, now_ts=now_ts)
 
         store.save(tg_id, period, current_facts)
+    tax = taxonomy_store.load(tg_id)
+    if tax is None:
+        tax = build_taxonomy_preset("min")
+
+    uncat_items = build_uncat_queue(tax=tax, records=profile_records, limit=200)
+    uncat_store.save(tg_id, uncat_items)
 
 
 async def main() -> None:
