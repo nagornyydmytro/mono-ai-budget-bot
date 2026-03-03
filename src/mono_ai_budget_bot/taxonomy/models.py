@@ -247,3 +247,51 @@ def validate_taxonomy(tax: dict[str, Any]) -> None:
                 raise ValueError("child parent mismatch")
             if c.get("kind") != kind:
                 raise ValueError("child kind mismatch")
+
+
+def leaf_ids(tax: dict[str, Any], *, root_kind: TaxKind) -> list[str]:
+    roots = tax.get("roots")
+    if not isinstance(roots, dict):
+        raise ValueError("taxonomy.roots is missing")
+    rid = roots.get(root_kind)
+    if not isinstance(rid, str) or not rid:
+        raise ValueError("invalid root_kind")
+
+    nodes = tax.get("nodes")
+    if not isinstance(nodes, dict):
+        raise ValueError("taxonomy.nodes is missing")
+
+    out: list[str] = []
+
+    rnode = _node(tax, rid)
+    ch = rnode.get("children")
+    if not isinstance(ch, list):
+        ch = []
+
+    for cid in ch:
+        if not isinstance(cid, str):
+            continue
+        if is_leaf(tax, cid):
+            out.append(cid)
+            continue
+        cnode = _node(tax, cid)
+        gch = cnode.get("children")
+        if not isinstance(gch, list):
+            gch = []
+        for sid in gch:
+            if not isinstance(sid, str):
+                continue
+            if is_leaf(tax, sid):
+                out.append(sid)
+
+    return out
+
+
+def ensure_leaf_target(tax: dict[str, Any], *, node_id: str) -> None:
+    nid = (node_id or "").strip()
+    if not nid:
+        raise ValueError("missing node_id")
+    if nid in ("income", "expense"):
+        raise ValueError("root cannot hold transactions")
+    if not is_leaf(tax, nid):
+        raise ValueError("transactions must be assigned to leaf categories only")
