@@ -177,6 +177,51 @@ def validate_and_consume_pending(
     return True
 
 
+def set_pending_manual_mode(
+    telegram_user_id: int,
+    *,
+    expected: str,
+    hint: str | None = None,
+    source: str | None = None,
+    ttl_sec: int = 600,
+) -> str:
+    mem = load_memory(telegram_user_id)
+    pid = secrets.token_hex(8)
+
+    mem["pending_manual_mode"] = {
+        "expected": (expected or "").strip(),
+        "hint": (hint or "").strip() if isinstance(hint, str) else None,
+        "source": (source or "").strip() if isinstance(source, str) else None,
+    }
+    mem["pending_id"] = pid
+    mem["pending_created_ts"] = int(time.time())
+    mem["pending_ttl_sec"] = int(ttl_sec)
+    save_memory(telegram_user_id, mem)
+    return pid
+
+
+def get_pending_manual_mode(
+    telegram_user_id: int,
+    *,
+    now_ts: int,
+) -> dict[str, Any] | None:
+    mem = load_memory(telegram_user_id)
+    mode = mem.get("pending_manual_mode")
+    if not isinstance(mode, dict):
+        return None
+    if not pending_is_alive(mem, now_ts=int(now_ts)):
+        return None
+    return mode
+
+
+def pop_pending_manual_mode(telegram_user_id: int) -> dict[str, Any] | None:
+    mem = load_memory(telegram_user_id)
+    mode = mem.get("pending_manual_mode")
+    mem["pending_manual_mode"] = None
+    save_memory(telegram_user_id, mem)
+    return mode if isinstance(mode, dict) else None
+
+
 def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) -> None:
     a = (alias or "").strip().lower()
     v = (match_value or "").strip().lower()
