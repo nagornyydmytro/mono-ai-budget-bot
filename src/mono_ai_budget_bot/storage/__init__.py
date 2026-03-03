@@ -1,6 +1,7 @@
 from .ledger_meta_store import LedgerAccountMeta, LedgerMetaStore
 from .report_store import ReportStore
 from .reports_store import ReportsStore
+from .rules_store import RulesStore
 from .tx_store import TxRecord, TxStore
 from .uncat_store import UncatStore
 from .user_store import UserConfig, UserStore
@@ -15,4 +16,5 @@ __all__ = [
     "LedgerAccountMeta",
     "ReportsStore",
     "UncatStore",
+    "RulesStore",
 ]

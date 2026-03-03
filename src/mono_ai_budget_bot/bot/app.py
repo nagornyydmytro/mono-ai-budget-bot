@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections import defaultdict
@@ -28,11 +29,16 @@ from ..reports.config import build_reports_preset
 from ..settings.onboarding import apply_onboarding_settings
 from ..storage.profile_store import ProfileStore
 from ..storage.reports_store import ReportsStore
+from ..storage.rules_store import RulesStore
 from ..storage.taxonomy_store import TaxonomyStore
 from ..storage.uncat_store import UncatStore
 from ..storage.user_store import UserConfig, UserStore
+from ..taxonomy.models import add_category
 from ..taxonomy.presets import build_taxonomy_preset
+from ..taxonomy.rules import Rule
+from ..uncat.pending import UncatPendingStore
 from ..uncat.queue import build_uncat_queue
+from ..uncat.ui import list_leaf_options
 from . import templates
 
 if TYPE_CHECKING:
@@ -164,6 +170,9 @@ def build_main_menu_keyboard():
     )
     kb.row(
         InlineKeyboardButton(text="📘 Help", callback_data="menu_help"),
+    )
+    kb.row(
+        InlineKeyboardButton(text="🧩 Uncat", callback_data="menu_uncat"),
     )
     return kb
 
@@ -540,6 +549,9 @@ async def main() -> None:
     profile_store = ProfileStore(Path(".cache") / "profiles")
     taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
     reports_store = ReportsStore(Path(".cache") / "reports")
+    uncat_store = UncatStore(Path(".cache") / "uncat")
+    rules_store = RulesStore(Path(".cache") / "rules")
+    uncat_pending_store = UncatPendingStore(Path(".cache") / "uncat_pending")
 
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
@@ -899,6 +911,195 @@ async def main() -> None:
                 "🔐 Встав токен одним повідомленням.\n\nЩоб скасувати — напиши `cancel`."
             )
         await query.answer("Ок")
+
+    async def _send_next_uncat(message: Message, tg_id: int) -> None:
+        tax = taxonomy_store.load(tg_id)
+        if tax is None:
+            tax = build_taxonomy_preset("min")
+
+        items = uncat_store.load(tg_id)
+        if not items:
+            await message.answer("✅ Немає некатегоризованих покупок.")
+            return
+
+        item = items[0]
+        pending = uncat_pending_store.create(
+            tg_id, tx_id=item.tx_id, stage="pick_leaf", ttl_sec=900
+        )
+
+        leaves = list_leaf_options(tax, root_kind="expense")
+        leaves = leaves[:8]
+
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+        kb = InlineKeyboardBuilder()
+        for opt in leaves:
+            kb.row(
+                InlineKeyboardButton(
+                    text=opt.name,
+                    callback_data=f"uncat_pick:{pending.pending_id}:{opt.leaf_id}",
+                )
+            )
+
+        kb.row(
+            InlineKeyboardButton(
+                text="➕ Створити категорію", callback_data=f"uncat_create:{pending.pending_id}"
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="❌ Скасувати", callback_data=f"uncat_cancel:{pending.pending_id}"
+            )
+        )
+
+        amount_uah = abs(int(item.amount)) / 100.0
+        await message.answer(
+            "\n".join(
+                [
+                    "🧩 Некатегоризована покупка:",
+                    f"• {item.description}",
+                    f"• {amount_uah:.2f} грн",
+                    "",
+                    "Обери категорію:",
+                ]
+            ),
+            reply_markup=kb.as_markup(),
+        )
+
+    @dp.callback_query(lambda c: c.data == "menu_uncat")
+    async def cb_menu_uncat(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+        if query.message:
+            await _send_next_uncat(query.message, tg_id)
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("uncat_cancel:"))
+    async def cb_uncat_cancel(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        parts = str(query.data).split(":")
+        pid = parts[1] if len(parts) > 1 else ""
+
+        cur = uncat_pending_store.load(tg_id)
+        now_ts = int(time.time())
+        if cur is None or cur.pending_id != pid or cur.used or cur.is_expired(now_ts):
+            await query.answer("Ця кнопка застаріла.", show_alert=True)
+            return
+
+        uncat_pending_store.mark_used(tg_id)
+        uncat_pending_store.clear(tg_id)
+
+        if query.message:
+            await query.message.answer("Ок, скасовано.")
+        await query.answer("Скасовано")
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("uncat_create:"))
+    async def cb_uncat_create(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        parts = str(query.data).split(":")
+        pid = parts[1] if len(parts) > 1 else ""
+
+        cur = uncat_pending_store.load(tg_id)
+        now_ts = int(time.time())
+        if (
+            cur is None
+            or cur.pending_id != pid
+            or cur.used
+            or cur.is_expired(now_ts)
+            or cur.stage != "pick_leaf"
+        ):
+            await query.answer("Ця кнопка застаріла.", show_alert=True)
+            return
+
+        uncat_pending_store.create(tg_id, tx_id=cur.tx_id, stage="create_name", ttl_sec=900)
+
+        if query.message:
+            await query.message.answer(
+                "\n".join(
+                    [
+                        "✍️ Введи назву нової категорії (до 60 символів).",
+                        "",
+                        "Приклади:",
+                        "• Доставка їжі",
+                        "• Кафе/Ресторани",
+                        "• Таксі",
+                        "",
+                        "Щоб скасувати — напиши `cancel`.",
+                    ]
+                )
+            )
+
+        await query.answer("Ок")
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("uncat_pick:"))
+    async def cb_uncat_pick(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        parts = str(query.data).split(":")
+        pid = parts[1] if len(parts) > 1 else ""
+        leaf_id = parts[2] if len(parts) > 2 else ""
+
+        cur = uncat_pending_store.load(tg_id)
+        now_ts = int(time.time())
+        if (
+            cur is None
+            or cur.pending_id != pid
+            or cur.used
+            or cur.is_expired(now_ts)
+            or cur.stage != "pick_leaf"
+        ):
+            await query.answer("Ця кнопка застаріла.", show_alert=True)
+            return
+
+        tax = taxonomy_store.load(tg_id)
+        if tax is None:
+            tax = build_taxonomy_preset("min")
+
+        nodes = tax.get("nodes")
+        leaf_name = ""
+        if isinstance(nodes, dict):
+            n = nodes.get(leaf_id)
+            if isinstance(n, dict):
+                leaf_name = str(n.get("name") or "")
+
+        items = uncat_store.load(tg_id)
+        item = next((x for x in items if x.tx_id == cur.tx_id), None)
+        if item is None:
+            uncat_pending_store.clear(tg_id)
+            await query.answer("Немає цієї покупки в черзі.", show_alert=True)
+            return
+
+        base = f"{leaf_id}:{item.description.lower().strip()}"
+        rid = hashlib.sha1(base.encode("utf-8")).hexdigest()[:10]
+        rules_store.add(tg_id, Rule(id=rid, leaf_id=leaf_id, merchant_contains=item.description))
+
+        remaining = [x for x in items if x.tx_id != item.tx_id]
+        uncat_store.save(tg_id, remaining)
+
+        uncat_pending_store.mark_used(tg_id)
+        uncat_pending_store.clear(tg_id)
+
+        if query.message:
+            await query.message.answer(
+                f"✅ Збережено: {item.description} → {leaf_name or 'категорія'}"
+            )
+            await _send_next_uncat(query.message, tg_id)
+
+        await query.answer("Збережено")
 
     @dp.callback_query(lambda c: c.data == "onb_back_main")
     async def cb_onb_back_main(query: CallbackQuery) -> None:
@@ -1610,6 +1811,53 @@ async def main() -> None:
         now_ts = int(time.time())
         text_raw = (message.text or "").strip()
         text_lower = text_raw.lower()
+        uncat_pending = uncat_pending_store.load(user_id)
+        if uncat_pending is not None and uncat_pending.stage == "create_name":
+            if uncat_pending.used or uncat_pending.is_expired(now_ts):
+                uncat_pending_store.clear(user_id)
+            else:
+                if text_lower == "cancel":
+                    uncat_pending_store.clear(user_id)
+                    await message.answer("Ок, скасовано.")
+                    return
+
+                tax = taxonomy_store.load(user_id)
+                if tax is None:
+                    tax = build_taxonomy_preset("min")
+
+                try:
+                    leaf_id = add_category(tax, root_kind="expense", name=text_raw)
+                except Exception:
+                    await message.answer(
+                        "❌ Некоректна назва категорії. Спробуй ще раз (1–60 символів)."
+                    )
+                    return
+
+                taxonomy_store.save(user_id, tax)
+
+                items = uncat_store.load(user_id)
+                item = next((x for x in items if x.tx_id == uncat_pending.tx_id), None)
+                if item is None:
+                    uncat_pending_store.clear(user_id)
+                    await message.answer("Немає цієї покупки в черзі.")
+                    return
+
+                base = f"{leaf_id}:{item.description.lower().strip()}"
+                rid = hashlib.sha1(base.encode("utf-8")).hexdigest()[:10]
+                rules_store.add(
+                    user_id, Rule(id=rid, leaf_id=leaf_id, merchant_contains=item.description)
+                )
+
+                remaining = [x for x in items if x.tx_id != item.tx_id]
+                uncat_store.save(user_id, remaining)
+                uncat_pending_store.mark_used(user_id)
+                uncat_pending_store.clear(user_id)
+
+                await message.answer(
+                    f"✅ Категорію створено і застосовано: {text_raw} → {item.description}"
+                )
+                await _send_next_uncat(message, user_id)
+                return
 
         manual = memory_store.get_pending_manual_mode(user_id, now_ts=now_ts)
         if manual is not None and str(manual.get("expected") or "") == "mono_token":
