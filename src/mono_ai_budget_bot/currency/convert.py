@@ -91,12 +91,12 @@ def _alpha_from_token(tok: str) -> str | None:
     if s in _SYM_TO_ALPHA:
         return _SYM_TO_ALPHA[s]
 
-    if len(s) == 3 and s.isalpha():
-        return s.upper()
-
     for k, v in _NAME_TO_ALPHA.items():
         if k in s:
             return v
+
+    if len(s) == 3 and s.isalpha():
+        return s.upper()
 
     return None
 
@@ -106,9 +106,7 @@ def parse_currency_conversion_query(text: str) -> ParsedConversion | None:
     if not t:
         return None
 
-    m_amt = _AMOUNT_RE.search(t.replace(" ", ""))
-    if m_amt is None:
-        m_amt = _AMOUNT_RE.search(t)
+    m_amt = _AMOUNT_RE.search(t)
     if m_amt is None:
         return None
 
@@ -124,10 +122,10 @@ def parse_currency_conversion_query(text: str) -> ParsedConversion | None:
     if not after:
         return None
 
-    after_norm = after.replace("—", " ").replace("-", " ")
+    after_norm = after.replace("—", " ").replace("–", " ")
 
     parts = re.split(
-        r"\bв\b|\bу\b|\bto\b|\bin\b|\binto\b|\b=>\b|\b->\b",
+        r"\bв\b|\bу\b|\bto\b|\bin\b|\binto\b|=>|->",
         after_norm,
         maxsplit=1,
         flags=re.IGNORECASE,
