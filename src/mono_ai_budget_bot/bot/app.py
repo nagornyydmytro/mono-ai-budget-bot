@@ -828,15 +828,11 @@ async def main() -> None:
             return
 
         kb = InlineKeyboardBuilder()
-        kb.row(
-            InlineKeyboardButton(text="📥 Bootstrap 1 місяць", callback_data="boot_30"),
-        )
-        kb.row(
-            InlineKeyboardButton(text="📥 Bootstrap 3 місяці", callback_data="boot_90"),
-        )
-        kb.row(
-            InlineKeyboardButton(text="➡️ Skip", callback_data="boot_skip"),
-        )
+        kb.row(InlineKeyboardButton(text="📥 Bootstrap 1 місяць", callback_data="boot_30"))
+        kb.row(InlineKeyboardButton(text="📥 Bootstrap 3 місяці", callback_data="boot_90"))
+        kb.row(InlineKeyboardButton(text="📥 Bootstrap 6 місяців", callback_data="boot_180"))
+        kb.row(InlineKeyboardButton(text="📥 Bootstrap 12 місяців", callback_data="boot_365"))
+        kb.row(InlineKeyboardButton(text="➡️ Skip", callback_data="boot_skip"))
 
         if query.message:
             await query.message.edit_text(
@@ -854,7 +850,44 @@ async def main() -> None:
     @dp.callback_query(lambda c: c.data == "menu_connect")
     async def cb_menu_connect(query: CallbackQuery) -> None:
         if query.message:
-            await query.message.answer(templates.connect_instructions())
+            from aiogram.types import InlineKeyboardButton
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="✅ Ввести токен", callback_data="onb_token"))
+            kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="onb_back_main"))
+
+            await query.message.answer(
+                templates.connect_instructions(), reply_markup=kb.as_markup()
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "onb_token")
+    async def cb_onb_token(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        memory_store.set_pending_manual_mode(
+            tg_id,
+            expected="mono_token",
+            hint="Встав сюди Monobank Personal API token. Щоб скасувати — напиши `cancel`.",
+            source="onboarding",
+            ttl_sec=900,
+        )
+
+        if query.message:
+            await query.message.answer(
+                "🔐 Встав токен одним повідомленням.\n\nЩоб скасувати — напиши `cancel`."
+            )
+        await query.answer("Ок")
+
+    @dp.callback_query(lambda c: c.data == "onb_back_main")
+    async def cb_onb_back_main(query: CallbackQuery) -> None:
+        if query.message:
+            kb = build_main_menu_keyboard()
+            await query.message.answer(templates.start_message(), reply_markup=kb.as_markup())
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_help")
@@ -1015,7 +1048,9 @@ async def main() -> None:
             await query.message.answer("Ок, скасовано.")
         await query.answer("Скасовано")
 
-    @dp.callback_query(lambda c: c.data in ("boot_30", "boot_90", "boot_skip"))
+    @dp.callback_query(
+        lambda c: c.data in ("boot_30", "boot_90", "boot_180", "boot_365", "boot_skip")
+    )
     async def cb_bootstrap(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
@@ -1040,7 +1075,8 @@ async def main() -> None:
             await query.answer("Пропущено")
             return
 
-        days = 30 if query.data == "boot_30" else 90
+        days_map = {"boot_30": 30, "boot_90": 90, "boot_180": 180, "boot_365": 365}
+        days = int(days_map[str(query.data)])
 
         if query.message:
             await query.message.edit_text(
@@ -1331,7 +1367,41 @@ async def main() -> None:
     @dp.message(F.text & ~F.text.startswith("/"))
     async def handle_plain_text(message: Message) -> None:
         user_id = message.from_user.id
-        text_lower = (message.text or "").strip().lower()
+        now_ts = int(time.time())
+        text_raw = (message.text or "").strip()
+        text_lower = text_raw.lower()
+
+        manual = memory_store.get_pending_manual_mode(user_id, now_ts=now_ts)
+        if manual is not None and str(manual.get("expected") or "") == "mono_token":
+            if text_lower == "cancel":
+                memory_store.pop_pending_manual_mode(user_id)
+                await message.answer("Ок, скасовано.")
+                return
+
+            mono_token = text_raw
+            if len(mono_token) < 20:
+                await message.answer(templates.connect_validation_error())
+                return
+
+            await message.answer("🔍 Перевіряю токен через Monobank API… (read-only)")
+
+            try:
+                mb = MonobankClient(token=mono_token)
+                try:
+                    mb.client_info()
+                finally:
+                    mb.close()
+            except Exception as e:
+                mapped = _map_monobank_error(e)
+                await message.answer(mapped or templates.error("Помилка перевірки токена."))
+                return
+
+            users.save(user_id, mono_token=mono_token, selected_account_ids=[])
+            memory_store.pop_pending_manual_mode(user_id)
+
+            await message.answer(templates.connect_success_confirm())
+            await cmd_accounts(message)
+            return
 
         if text_lower == "cancel":
             memory_store.pop_pending_intent(user_id)
