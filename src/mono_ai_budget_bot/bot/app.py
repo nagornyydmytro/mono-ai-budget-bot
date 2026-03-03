@@ -607,6 +607,8 @@ async def main() -> None:
         recompute_reports_for_user=lambda tg_id, account_ids: _compute_and_cache_reports_for_user(
             tg_id, account_ids, profile_store
         ),
+        profile_store=profile_store,
+        uncat_store=uncat_store,
     )
 
     @dp.message(Command("start"))

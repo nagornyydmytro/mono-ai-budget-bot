@@ -3,12 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import timezone
+from pathlib import Path
 
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+
+from mono_ai_budget_bot.storage.profile_store import ProfileStore
+from mono_ai_budget_bot.storage.uncat_store import UncatStore
+from mono_ai_budget_bot.uncat.prompting import UncatPromptMetaStore, build_uncat_prompt_message
 
 try:
     from zoneinfo import ZoneInfo
@@ -115,8 +122,48 @@ def start_jobs(
     logger: logging.Logger,
     sync_user_ledger,
     recompute_reports_for_user,
+    profile_store: ProfileStore,
+    uncat_store: UncatStore,
 ) -> None:
     cfg = load_schedule_config()
+    uncat_meta = UncatPromptMetaStore(Path(".cache") / "uncat_prompt_meta")
+
+    async def maybe_send_uncat_prompt(u, *, mode: str) -> None:
+        if not getattr(u, "autojobs_enabled", True):
+            return
+        if not getattr(u, "chat_id", None):
+            return
+
+        prof = profile_store.load(u.telegram_user_id) or {}
+        freq = str(prof.get("uncategorized_prompt_frequency") or "").strip() or "before_report"
+        items = uncat_store.load(u.telegram_user_id)
+
+        now_ts = int(time.time())
+        if not uncat_meta.should_send(
+            u.telegram_user_id,
+            frequency=freq,
+            items=items,
+            now_ts=now_ts,
+            mode=mode,
+        ):
+            return
+
+        text = build_uncat_prompt_message(items, frequency=freq)
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🧩 Розкласти по категоріях", callback_data="menu_uncat"
+                    )
+                ]
+            ]
+        )
+
+        try:
+            await bot.send_message(chat_id=u.chat_id, text=text, reply_markup=kb, parse_mode=None)
+            uncat_meta.mark_sent(u.telegram_user_id, items=items, now_ts=now_ts)
+        except Exception as e:
+            logger.warning("Failed to send uncat prompt to chat_id=%s: %s", u.chat_id, e)
 
     async def _refresh_user(u, *, days_back: int) -> bool:
         """
@@ -152,6 +199,7 @@ def start_jobs(
             ok = await _refresh_user(u, days_back=days_back)
             if ok:
                 refreshed += 1
+            await maybe_send_uncat_prompt(u, mode="refresh")
         logger.info(
             "Scheduler: refresh_all_users done. scanned=%s refreshed=%s (days_back=%s)",
             scanned,
@@ -169,7 +217,7 @@ def start_jobs(
             stored = report_store.load(u.telegram_user_id, "week")
             if stored is None:
                 continue
-
+            await maybe_send_uncat_prompt(u, mode="before_report")
             text = render_report_text("week", stored.facts)
             await safe_send(bot, u.chat_id, text, logger)
 
@@ -185,7 +233,7 @@ def start_jobs(
             stored = report_store.load(u.telegram_user_id, "month")
             if stored is None:
                 continue
-
+            await maybe_send_uncat_prompt(u, mode="before_report")
             text = render_report_text("month", stored.facts)
             await safe_send(bot, u.chat_id, text, logger)
 
