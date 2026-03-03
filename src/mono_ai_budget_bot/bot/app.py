@@ -958,9 +958,36 @@ async def main() -> None:
             await query.answer("Ця кнопка вже неактуальна.", show_alert=True)
             return
 
+        mem = memory_store.load_memory(tg_id)
+        kind = mem.get("pending_kind") if isinstance(mem.get("pending_kind"), str) else None
+
+        if kind == "recipient":
+            expected = "recipient"
+            hint = "Приклад: 'Олександр Іванов', 'MonoMarket', 'GETMANCAR'. Введи як у виписці."
+        elif kind == "category_alias":
+            expected = "category"
+            hint = "Введи назву категорії/підкатегорії так, як вона вже існує в твоєму дереві."
+        else:
+            expected = "merchant_or_recipient"
+            hint = "Введи назву мерчанта/отримувача як у виписці (можна частину)."
+
+        memory_store.set_pending_manual_mode(
+            tg_id,
+            expected=expected,
+            hint=hint,
+            source="nlq_other",
+            ttl_sec=600,
+        )
+
         if query.message:
             await query.message.answer(
-                "Ок. Напиши в чат мерчанта/отримувача як у виписці (можна частину назви)."
+                "\n".join(
+                    [
+                        "✍️ Ок, введи вручну:",
+                        hint,
+                        "Щоб скасувати — напиши: cancel",
+                    ]
+                )
             )
         await query.answer("Ок")
 
