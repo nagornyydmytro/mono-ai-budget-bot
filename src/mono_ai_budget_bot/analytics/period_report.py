@@ -8,6 +8,7 @@ from ..storage.tx_store import TxRecord
 from .compare import compare_categories, compare_totals
 from .compute import compute_facts
 from .from_ledger import rows_from_ledger
+from .refunds import detect_refund_pairs, refund_ignore_ids
 from .whatif import build_whatif_suggestions
 
 SECONDS_IN_DAY = 24 * 60 * 60
@@ -69,10 +70,13 @@ def build_period_report_from_ledger(
     Output: dict with period windows, current/previous facts, compare blocks.
     """
     current_w, prev_w = build_period_windows(days_back=days_back, now_ts=now_ts)
-
+    pairs = detect_refund_pairs(records)
+    ignore_ids = refund_ignore_ids(pairs)
     current_records = _filter_records(records, current_w)
     prev_records = _filter_records(records, prev_w)
-
+    if ignore_ids:
+        current_records = [r for r in current_records if r.id not in ignore_ids]
+        prev_records = [r for r in prev_records if r.id not in ignore_ids]
     current_rows = rows_from_ledger(current_records)
     prev_rows = rows_from_ledger(prev_records)
 

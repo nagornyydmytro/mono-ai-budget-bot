@@ -5,6 +5,7 @@ from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
+from mono_ai_budget_bot.analytics.refunds import detect_refund_pairs, refund_ignore_ids
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.memory_store import (
@@ -96,6 +97,23 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         ts_from=ts_from,
         ts_to=ts_to,
     )
+    ignore_ids: set[str] = set()
+    try:
+        can_run = all(
+            hasattr(r, "id")
+            and hasattr(r, "time")
+            and hasattr(r, "account_id")
+            and hasattr(r, "amount")
+            and hasattr(r, "description")
+            for r in rows
+        )
+        if can_run:
+            ignore_ids = refund_ignore_ids(detect_refund_pairs(rows))
+    except Exception:
+        ignore_ids = set()
+
+    if ignore_ids:
+        rows = [r for r in rows if str(getattr(r, "id", "")) not in ignore_ids]
 
     if intent == "profile_refresh":
         return "Профіль оновлено."
