@@ -418,10 +418,7 @@ def register_handlers(
         text, kb = render_accounts_screen(accounts, set(selected))
 
         if query.message:
-            prefix = ""
-            msg_text = query.message.text or ""
-            if "Monobank підключено успішно" in msg_text:
-                prefix = f"{templates.connect_success_confirm()}\n\n"
+            prefix = f"{templates.connect_success_confirm()}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
         await query.answer()
 
@@ -452,10 +449,7 @@ def register_handlers(
         text, kb = render_accounts_screen(accounts, set())
 
         if query.message:
-            prefix = ""
-            msg_text = query.message.text or ""
-            if "Monobank підключено успішно" in msg_text:
-                prefix = f"{templates.connect_success_confirm()}\n\n"
+            prefix = f"{templates.connect_success_confirm()}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
         await query.answer()
 
@@ -726,8 +720,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "onb_resume")
     async def cb_onb_resume(query: CallbackQuery) -> None:
-        await _send_onboarding_next(query)
         await query.answer()
+        await _send_onboarding_next(query)
 
     async def _send_currency_screen(message: Message, *, force_refresh: bool) -> None:
         try:
@@ -1035,20 +1029,19 @@ def register_handlers(
 
                     if chat_id is not None:
                         prof = profile_store.load(tg_id) or {}
-                        onboarding_done = bool(prof.get("persona"))
 
-                        await bot.send_message(
-                            chat_id,
-                            (
-                                templates.bootstrap_done_message(
-                                    accounts=res.accounts,
-                                    fetched_requests=res.fetched_requests,
-                                    appended=res.appended,
-                                )
-                                if onboarding_done
-                                else templates.bootstrap_done_onboarding_message()
-                            ),
-                        )
+                        prof = profile_store.load(tg_id) or {}
+
+                        if prof.get("persona"):
+                            text = templates.bootstrap_done_message(
+                                accounts=res.accounts,
+                                fetched_requests=res.fetched_requests,
+                                appended=res.appended,
+                            )
+                        else:
+                            text = templates.bootstrap_done_onboarding_message()
+
+                        await bot.send_message(chat_id, text)
 
             except Exception as e:
                 if chat_id is not None:
