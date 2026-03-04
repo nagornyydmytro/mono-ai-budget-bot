@@ -33,6 +33,7 @@ from ..taxonomy.presets import build_taxonomy_preset
 from ..uncat.pending import UncatPendingStore
 from ..uncat.queue import build_uncat_queue
 from . import templates
+from .formatting import format_money_uah_pretty
 
 if TYPE_CHECKING:
     pass
@@ -74,10 +75,6 @@ def _map_monobank_error(e: Exception) -> str | None:
 
 def _map_llm_error(_: Exception) -> str:
     return templates.llm_unavailable_message()
-
-
-def _fmt_money(v: float) -> str:
-    return f"{v:,.2f} ₴".replace(",", " ")
 
 
 def _safe_get(d: dict, path: list[str], default=None):
@@ -201,10 +198,10 @@ def _render_totals_section(facts: dict) -> str | None:
     tr_out = float(totals.get("transfer_out_total_uah", 0.0))
 
     summary_lines = [
-        f"💸 Реальні витрати: *{md_escape(_fmt_money(real_spend))}*",
-        f"🧾 Всі списання: {md_escape(_fmt_money(spend))}",
-        f"💰 Надходження: {md_escape(_fmt_money(income))}",
-        f"🔁 Перекази: +{md_escape(_fmt_money(tr_in))} / -{md_escape(_fmt_money(tr_out))}",
+        f"💸 Реальні витрати: *{md_escape(format_money_uah_pretty(real_spend))}*",
+        f"🧾 Всі списання: {md_escape(format_money_uah_pretty(spend))}",
+        f"💰 Надходження: {md_escape(format_money_uah_pretty(income))}",
+        f"🔁 Перекази: +{md_escape(format_money_uah_pretty(tr_in))} / -{md_escape(format_money_uah_pretty(tr_out))}",
     ]
     return templates.section("Факти", summary_lines)
 
@@ -218,7 +215,7 @@ def _render_breakdowns_section(facts: dict) -> str | None:
         for i, row in enumerate(top_named[:5], start=1):
             cat = md_escape(str(row.get("category", "—")))
             amt = float(row.get("amount_uah", 0.0))
-            items.append(f"{i}. {cat} — {md_escape(_fmt_money(amt))}")
+            items.append(f"{i}. {cat} — {md_escape(format_money_uah_pretty(amt))}")
         parts.append(templates.section("Топ категорій", items))
 
     top_merchants = facts.get("top_merchants_real_spend", []) or []
@@ -227,7 +224,7 @@ def _render_breakdowns_section(facts: dict) -> str | None:
         for i, row in enumerate(top_merchants[:5], start=1):
             m = md_escape(str(row.get("merchant", "—")))
             amt = float(row.get("amount_uah", 0.0))
-            items2.append(f"{i}. {m} — {md_escape(_fmt_money(amt))}")
+            items2.append(f"{i}. {m} — {md_escape(format_money_uah_pretty(amt))}")
         parts.append(templates.section("Топ мерчантів", items2))
 
     deep_categories_block = _render_categories_deep_block(facts)
@@ -259,7 +256,7 @@ def _render_compare_section(facts: dict) -> str | None:
     pct_txt = "—" if p_real is None else f"{float(p_real):+.2f}%"
 
     cmp_lines: list[str] = [
-        f"Реальні витрати: {md_escape(sign + _fmt_money(d_real_f))} ({md_escape(pct_txt)})"
+        f"Реальні витрати: {md_escape(sign + format_money_uah_pretty(d_real_f))} ({md_escape(pct_txt)})"
     ]
 
     cat_cmp = comparison.get("categories", {})
@@ -275,7 +272,7 @@ def _render_compare_section(facts: dict) -> str | None:
             sign2 = "+" if dlt >= 0 else ""
             pct_txt2 = "—" if pctv is None else f"{float(pctv):+.2f}%"
             cmp_lines.append(
-                f"{md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
+                f"{md_escape(k)}: {md_escape(sign2 + format_money_uah_pretty(dlt))} ({md_escape(pct_txt2)})"
             )
 
     return templates.section("Порівняння з попереднім періодом", cmp_lines)
@@ -321,7 +318,7 @@ def _render_trends_block(trends: dict) -> str | None:
         pct = x.get("pct")
         sign = "+" if delta > 0 else ""
         pct_part = f" ({sign}{int(pct)}%)" if isinstance(pct, (int, float)) else ""
-        return f"• {label} {sign}{md_escape(_fmt_money(delta))}{pct_part}"
+        return f"• {label} {sign}{md_escape(format_money_uah_pretty(delta))}{pct_part}"
 
     if growing:
         lines.append("")
@@ -373,7 +370,7 @@ def _render_categories_deep_block(facts: dict) -> str | None:
     spend_lines: list[str] = []
     spend_lines.append("*За часткою витрат:*")
     for cat, cur, share, delta, pct in top_by_spend:
-        base = f"• {md_escape(cat)} — {md_escape(_fmt_money(cur))} ({md_escape(f'{share:.1f}%')})"
+        base = f"• {md_escape(cat)} — {md_escape(format_money_uah_pretty(cur))} ({md_escape(f'{share:.1f}%')})"
         if delta is None:
             spend_lines.append(base)
             continue
@@ -381,7 +378,7 @@ def _render_categories_deep_block(facts: dict) -> str | None:
         sign = "+" if delta >= 0 else ""
         pct_txt = "—" if pct is None else f"{pct:+.2f}%"
         spend_lines.append(
-            f"{base} | Δ {md_escape(sign + _fmt_money(delta))} ({md_escape(pct_txt)})"
+            f"{base} | Δ {md_escape(sign + format_money_uah_pretty(delta))} ({md_escape(pct_txt)})"
         )
 
     movers_lines: list[str] = []
@@ -397,7 +394,7 @@ def _render_categories_deep_block(facts: dict) -> str | None:
             sign = "+" if d >= 0 else ""
             pct_txt = "—" if pct is None else f"{float(pct):+.2f}%"
             movers_lines.append(
-                f"• {md_escape(cat)}: Δ {md_escape(sign + _fmt_money(d))} ({md_escape(pct_txt)})"
+                f"• {md_escape(cat)}: Δ {md_escape(sign + format_money_uah_pretty(d))} ({md_escape(pct_txt)})"
             )
 
     return templates.section("Категорії детально", [*spend_lines, *movers_lines])
@@ -433,8 +430,8 @@ def _render_anomalies_block(facts: dict) -> str | None:
         reason_txt = _ANOMALY_REASON_TEXT.get(reason, reason if reason else "аномалія")
 
         lines.append(
-            f"{i}. {label} — *{md_escape(_fmt_money(last_uah))}* "
-            f"(звично ~ {md_escape(_fmt_money(base_uah))}) · {md_escape(reason_txt)}"
+            f"{i}. {label} — *{md_escape(format_money_uah_pretty(last_uah))}* "
+            f"(звично ~ {md_escape(format_money_uah_pretty(base_uah))}) · {md_escape(reason_txt)}"
         )
 
     return templates.section("Аномалії", lines)
@@ -455,11 +452,13 @@ def _render_refunds_block(facts: dict) -> str | None:
         items = []
 
     if count <= 1:
-        lines = [f"• Виявлено повернення: *{md_escape(_fmt_money(total))}*"]
+        lines = [f"• Виявлено повернення: *{md_escape(format_money_uah_pretty(total))}*"]
         return templates.section("Повернення", lines)
 
     lines: list[str] = []
-    lines.append(f"• Виявлено повернень: *{count}* на суму *{md_escape(_fmt_money(total))}*")
+    lines.append(
+        f"• Виявлено повернень: *{count}* на суму *{md_escape(format_money_uah_pretty(total))}*"
+    )
 
     top = items[:3]
     if top:
@@ -470,7 +469,7 @@ def _render_refunds_block(facts: dict) -> str | None:
                 continue
             merchant = md_escape(str(it.get("merchant") or "—"))
             amt = float(it.get("amount_uah") or 0.0)
-            lines.append(f"• {merchant} — {md_escape(_fmt_money(amt))}")
+            lines.append(f"• {merchant} — {md_escape(format_money_uah_pretty(amt))}")
 
     return templates.section("Повернення", lines)
 
@@ -493,10 +492,10 @@ def _render_whatif_block(facts: dict) -> str | None:
             for s in scenarios[:2]:
                 pct = int(s.get("pct", 0))
                 sav = float(s.get("monthly_savings_uah", 0.0))
-                parts.append(f"-{pct}% → ~{md_escape(_fmt_money(sav))}/міс")
+                parts.append(f"-{pct}% → ~{md_escape(format_money_uah_pretty(sav))}/міс")
 
         tail = "; ".join(parts) if parts else "—"
-        lines.append(f"• {title} (зараз ~{md_escape(_fmt_money(base))}/міс): {tail}")
+        lines.append(f"• {title} (зараз ~{md_escape(format_money_uah_pretty(base))}/міс): {tail}")
 
     return "\n".join(lines).strip()
 

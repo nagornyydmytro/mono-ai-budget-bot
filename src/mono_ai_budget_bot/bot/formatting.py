@@ -24,6 +24,10 @@ def format_money_uah(value: float) -> str:
     return format_money_symbol_uah(value)
 
 
+def format_money_uah_pretty(value: float) -> str:
+    return f"{value:,.2f} ₴".replace(",", " ")
+
+
 def format_money_grn(value: float) -> str:
     return f"{format_decimal_2(value)} грн"
 
