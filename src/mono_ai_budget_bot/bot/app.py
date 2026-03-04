@@ -1697,8 +1697,9 @@ async def main() -> None:
         await query.answer("Збережено")
 
     @dp.callback_query(
-        lambda c: c.data
-        in ("uncat_immediate", "uncat_daily", "uncat_weekly", "uncat_before_report")
+        lambda c: (
+            c.data in ("uncat_immediate", "uncat_daily", "uncat_weekly", "uncat_before_report")
+        )
     )
     async def cb_uncat_frequency(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None

@@ -26,8 +26,8 @@ cryptography = "^46.0.5"
 openai = "^2.24.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-ruff = "^0.3.0"
+ruff = "0.3.7"
+pytest = "^8.0"
 pre-commit = "^3.7.1"
 
 [tool.pytest.ini_options]

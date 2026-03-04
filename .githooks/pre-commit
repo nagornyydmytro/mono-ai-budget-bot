@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+set -eu
+
+if command -v poetry >/dev/null 2>&1; then
+  exec poetry run python -m pre_commit run --hook-stage pre-commit "$@"
+fi
+
+echo "poetry not found. Install Poetry and ensure it's on PATH." >&2
+exit 1

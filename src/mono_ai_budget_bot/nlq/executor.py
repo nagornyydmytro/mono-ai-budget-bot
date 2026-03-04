@@ -219,9 +219,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
         sign = "+" if r.delta_cents >= 0 else ""
         return (
-            f"{prefix}: {format_money_grn(r.current_cents/100)}. "
-            f"Зазвичай (медіана): {format_money_grn(r.baseline_median_cents/100)}. "
-            f"Різниця: {sign}{format_decimal_2(r.delta_cents/100)} грн."
+            f"{prefix}: {format_money_grn(r.current_cents / 100)}. "
+            f"Зазвичай (медіана): {format_money_grn(r.baseline_median_cents / 100)}. "
+            f"Різниця: {sign}{format_decimal_2(r.delta_cents / 100)} грн."
         )
 
     recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
@@ -300,7 +300,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        parts: list[str] = [f"{prefix} ти витратив {format_money_grn(total_cents/100)}."]
+        parts: list[str] = [f"{prefix} ти витратив {format_money_grn(total_cents / 100)}."]
 
         page_raw = intent_payload.get("page")
         try:
@@ -337,21 +337,21 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "income_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} було поповнень на {format_money_grn(total_cents/100)}."
+        return f"{prefix} було поповнень на {format_money_grn(total_cents / 100)}."
 
     if intent == "income_count":
         return f"{prefix} було {len(filtered)} поповнень."
 
     if intent == "transfer_out_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} ти переказав {format_money_grn(total_cents/100)}."
+        return f"{prefix} ти переказав {format_money_grn(total_cents / 100)}."
 
     if intent == "transfer_out_count":
         return f"{prefix} було {len(filtered)} вихідних переказів."
 
     if intent == "transfer_in_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} ти отримав {format_money_grn(total_cents/100)}."
+        return f"{prefix} ти отримав {format_money_grn(total_cents / 100)}."
 
     if intent == "transfer_in_count":
         return f"{prefix} було {len(filtered)} вхідних переказів."
@@ -423,7 +423,7 @@ def _prompt_learn_category_alias(
         "Вибери мерчанти, які до цього відносяться:",
     ]
     for i, (name, cents) in enumerate(candidates, start=1):
-        lines.append(f"{i}) {name}: {format_money_symbol_uah(cents/100)}")
+        lines.append(f"{i}) {name}: {format_money_symbol_uah(cents / 100)}")
     lines.append("Напиши номери через кому (наприклад: 1,3) або 0 щоб скасувати.")
     return "\n".join(lines)
 

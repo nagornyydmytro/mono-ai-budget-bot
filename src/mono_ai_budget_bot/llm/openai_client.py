@@ -248,7 +248,7 @@ class OpenAIClient:
             "- page: int optional\n"
         )
 
-        user = f"Now (unix ts): {int(now_ts)}\n" f"User text: {user_text}\n" "Return JSON now."
+        user = f"Now (unix ts): {int(now_ts)}\nUser text: {user_text}\nReturn JSON now."
 
         raw = self._chat(system=system, user=user, temperature=0.0)
 
