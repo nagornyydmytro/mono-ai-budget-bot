@@ -42,12 +42,10 @@ class TxStore:
         return self._user_dir(telegram_user_id) / f"{account_id}.jsonl"
 
     def last_ts(self, telegram_user_id: int, account_id: str) -> int | None:
-        # 1️⃣ Fast path: try meta
         meta = self._meta.get(telegram_user_id, account_id)
         if meta.last_ts is not None:
             return meta.last_ts
 
-        # 2️⃣ Fallback: scan JSONL once
         path = self._path(telegram_user_id, account_id)
         if not path.exists():
             return None
@@ -64,11 +62,28 @@ class TxStore:
         except Exception:
             return None
 
-        # 3️⃣ Persist into meta for future fast access
         if last is not None:
             self._meta.update(telegram_user_id, account_id, last_ts=last)
 
         return last
+
+    def update_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_id: str,
+        *,
+        coverage_from_ts: int,
+        coverage_to_ts: int,
+    ) -> None:
+        self._meta.update_coverage_window(
+            telegram_user_id,
+            account_id,
+            coverage_from_ts=coverage_from_ts,
+            coverage_to_ts=coverage_to_ts,
+        )
+
+    def coverage_window(self, telegram_user_id: int, account_id: str) -> tuple[int, int] | None:
+        return self._meta.get_coverage_window(telegram_user_id, account_id)
 
     def _load_ids_set(self, telegram_user_id: int, account_id: str) -> set[str]:
         path = self._path(telegram_user_id, account_id)

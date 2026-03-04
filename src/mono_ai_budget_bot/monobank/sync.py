@@ -76,12 +76,22 @@ def sync_accounts_ledger(
         else:
             start = max(0, last - 3600)
 
+        requested_from = int(start)
+        requested_to = int(now)
+
         for frm, to in iter_statement_windows(start, now):
             items = mb.statement(account=acc_id, date_from=frm, date_to=to)
             fetched_requests += 1
 
             normalized = [_normalize_item(acc_id, it) for it in items]
             appended_total += tx_store.append_many(telegram_user_id, acc_id, normalized)
+
+        tx_store.update_coverage_window(
+            telegram_user_id,
+            acc_id,
+            coverage_from_ts=requested_from,
+            coverage_to_ts=requested_to,
+        )
 
     return SyncResult(
         accounts=len(account_ids), fetched_requests=fetched_requests, appended=appended_total
