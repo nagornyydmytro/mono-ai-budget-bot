@@ -53,6 +53,7 @@ from .ui import (
     build_reports_custom_period_keyboard,
     build_reports_menu_keyboard,
     build_start_menu_keyboard,
+    build_uncat_leaf_picker_keyboard,
     build_vertical_options_keyboard,
 )
 
@@ -658,8 +659,6 @@ def register_handlers(
 
     async def _send_next_uncat(message: Message, tg_id: int) -> None:
         tax = taxonomy_store.load(tg_id)
-        from aiogram.types import InlineKeyboardButton
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         if tax is None:
             tax = build_taxonomy_preset("min")
@@ -677,31 +676,15 @@ def register_handlers(
         leaves = list_leaf_options(tax, root_kind="expense")
         leaves = leaves[:8]
 
-        kb = InlineKeyboardBuilder()
-        for opt in leaves:
-            kb.row(
-                InlineKeyboardButton(
-                    text=opt.name,
-                    callback_data=f"uncat_pick:{pending.pending_id}:{opt.leaf_id}",
-                )
-            )
-
-        kb.row(
-            InlineKeyboardButton(
-                text="➕ Створити категорію", callback_data=f"uncat_create:{pending.pending_id}"
-            )
-        )
-
-        kb.row(
-            InlineKeyboardButton(
-                text="❌ Скасувати", callback_data=f"uncat_cancel:{pending.pending_id}"
-            )
+        kb = build_uncat_leaf_picker_keyboard(
+            pending_id=pending.pending_id,
+            leaves=[(opt.name, opt.leaf_id) for opt in leaves],
         )
 
         amount_uah = abs(int(item.amount)) / 100.0
         await message.answer(
             templates.uncat_purchase_prompt(item.description, format_money_grn(amount_uah)),
-            reply_markup=kb.as_markup(),
+            reply_markup=kb,
         )
 
     @dp.callback_query(lambda c: c.data == "menu_uncat")

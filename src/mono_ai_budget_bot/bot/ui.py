@@ -159,6 +159,37 @@ def build_bootstrap_picker_keyboard(*, include_skip: bool = True) -> Any:
     return _build_rows(rows)
 
 
+def build_uncat_leaf_picker_keyboard(
+    *,
+    pending_id: str,
+    leaves: Iterable[tuple[str, str]],
+) -> Any:
+    kb = InlineKeyboardBuilder()
+
+    for name, leaf_id in leaves:
+        kb.row(
+            InlineKeyboardButton(
+                text=name,
+                callback_data=f"uncat_pick:{pending_id}:{leaf_id}",
+            )
+        )
+
+    kb.row(
+        InlineKeyboardButton(
+            text="➕ Створити категорію",
+            callback_data=f"uncat_create:{pending_id}",
+        )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text=BTN_CANCEL,
+            callback_data=f"uncat_cancel:{pending_id}",
+        )
+    )
+
+    return kb.as_markup()
+
+
 def build_uncat_keyboard() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Створити категорію", callback_data="uncat_create")
