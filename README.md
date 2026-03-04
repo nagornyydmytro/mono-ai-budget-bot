@@ -396,6 +396,58 @@ poetry run pytest
 
 Якщо OPENAI_API_KEY не задано → facts-only mode.
 
+### Developer workflow
+
+#### Enable repo-local git hooks (recommended)
+
+This repo uses a repo-local pre-commit hook that runs inside the Poetry environment.
+
+Run once after cloning the repository:
+
+git config core.hooksPath .githooks
+
+After this every `git commit` will automatically run formatting and lint checks.
+
+---
+
+#### Reset local cache (clean testing)
+
+The bot stores runtime data in `.cache/`.
+
+To safely wipe it and start from a clean state:
+
+poetry run python -m mono_ai_budget_bot.cli reset-cache
+
+This is useful before testing:
+
+- onboarding
+- bootstrap sync
+- NLQ flows
+- categorization flows
+
+---
+
+#### Lint / format
+
+poetry run ruff format .
+poetry run ruff check . --fix
+
+---
+
+#### Run tests
+
+poetry run pytest
+
+---
+
+#### Monobank API rate limit (429)
+
+If you see `429 Too Many Requests`, wait a few minutes and retry.
+
+For a clean local retest you can also reset the cache:
+
+poetry run python -m mono_ai_budget_bot.cli reset-cache
+
 ## Demo Screenshots
 
 ### Start flow
