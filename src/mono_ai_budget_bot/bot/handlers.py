@@ -121,7 +121,7 @@ def register_handlers(
 
         if cfg is None or not cfg.mono_token:
             kb = build_start_menu_keyboard()
-            await msg.answer(templates.start_message(), reply_markup=kb)
+            await msg.answer(templates.start_message(), reply_markup=kb.as_markup())
             return
 
         if not cfg.selected_account_ids:
@@ -137,7 +137,9 @@ def register_handlers(
             ]
             selected_ids = set(cfg.selected_account_ids or [])
             text, kb = render_accounts_screen(accounts, selected_ids)
-            await msg.answer(f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb)
+            await msg.answer(
+                f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb.as_markup()
+            )
             return
 
         if taxonomy_store.load(tg_id) is None:
@@ -145,7 +147,7 @@ def register_handlers(
             kb = build_bootstrap_picker_keyboard(include_skip=False)
             await msg.answer(
                 templates.accounts_after_done_with_count(count),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
             return
 
@@ -157,7 +159,7 @@ def register_handlers(
                     ("🛠️ Custom (пізніше)", "rep_preset_custom"),
                 ]
             )
-            await msg.answer(templates.reports_preset_prompt(), reply_markup=kb)
+            await msg.answer(templates.reports_preset_prompt(), reply_markup=kb.as_markup())
             return
 
         if not prof.get("activity_mode"):
@@ -168,7 +170,7 @@ def register_handlers(
                     ("🛠️ Custom", "act_custom"),
                 ]
             )
-            await msg.answer(templates.activity_mode_prompt(), reply_markup=kb)
+            await msg.answer(templates.activity_mode_prompt(), reply_markup=kb.as_markup())
             return
 
         if not prof.get("uncategorized_prompt_frequency"):
@@ -180,7 +182,7 @@ def register_handlers(
                     ("🧾 Перед звітом", "uncat_before_report"),
                 ]
             )
-            await msg.answer(templates.uncat_frequency_prompt(), reply_markup=kb)
+            await msg.answer(templates.uncat_frequency_prompt(), reply_markup=kb.as_markup())
             return
 
         if not prof.get("persona"):
@@ -191,11 +193,11 @@ def register_handlers(
                     ("🔥 Motivator", "persona_motivator"),
                 ]
             )
-            await msg.answer(templates.persona_prompt(), reply_markup=kb)
+            await msg.answer(templates.persona_prompt(), reply_markup=kb.as_markup())
             return
 
         kb = build_main_menu_keyboard()
-        await msg.answer(templates.menu_root_message(), reply_markup=kb)
+        await msg.answer(templates.menu_root_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
@@ -212,7 +214,7 @@ def register_handlers(
         if cfg is not None and cfg.mono_token:
             text = templates.start_message_connected()
 
-        await message.answer(text, reply_markup=kb)
+        await message.answer(text, reply_markup=kb.as_markup())
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
@@ -223,11 +225,11 @@ def register_handlers(
         cfg = users.load(tg_id)
         if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
             kb = build_back_keyboard("onb_back_main")
-            await message.answer(templates.help_message(), reply_markup=kb)
+            await message.answer(templates.help_message(), reply_markup=kb.as_markup())
             return
 
         kb = build_main_menu_keyboard()
-        await message.answer(templates.help_message(), reply_markup=kb)
+        await message.answer(templates.help_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("menu"))
     async def cmd_menu(message: Message) -> None:
@@ -248,12 +250,12 @@ def register_handlers(
             kb = build_start_menu_keyboard()
             await message.answer(
                 "Спочатку заверши онбординг через кнопки нижче 👇",
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
             return
 
         kb = build_main_menu_keyboard()
-        await message.answer(templates.menu_root_message(), reply_markup=kb)
+        await message.answer(templates.menu_root_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
@@ -291,7 +293,7 @@ def register_handlers(
 
         kb = build_main_menu_keyboard()
         await message.answer(templates.connect_success_confirm())
-        await message.answer(templates.connect_success_next_steps(), reply_markup=kb)
+        await message.answer(templates.connect_success_next_steps(), reply_markup=kb.as_markup())
 
     @dp.message(Command("status"))
     async def cmd_status(message: Message) -> None:
@@ -377,7 +379,7 @@ def register_handlers(
         ]
         selected_ids = set(cfg.selected_account_ids or [])
         text, kb = render_accounts_screen(accounts, selected_ids)
-        await message.answer(text, reply_markup=kb)
+        await message.answer(text, reply_markup=kb.as_markup())
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("acc_toggle:"))
     async def cb_toggle_account(query: CallbackQuery) -> None:
@@ -419,7 +421,7 @@ def register_handlers(
 
         if query.message:
             prefix = f"{templates.connect_success_confirm()}\n\n"
-            await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
+            await query.message.edit_text(f"{prefix}{text}", reply_markup=kb.as_markup())
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "acc_clear")
@@ -455,7 +457,7 @@ def register_handlers(
 
         if query.message:
             prefix = f"{templates.connect_success_confirm()}\n\n"
-            await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
+            await query.message.edit_text(f"{prefix}{text}", reply_markup=kb.as_markup())
 
         await query.answer()
 
@@ -476,7 +478,7 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(
                 templates.accounts_after_done_with_count(count),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
         await query.answer()
 
@@ -486,7 +488,9 @@ def register_handlers(
             kb = build_vertical_options_keyboard(
                 [("✅ Ввести токен", "onb_token"), ("⬅️ Назад", "onb_back_main")]
             )
-            await query.message.answer(templates.connect_instructions(), reply_markup=kb)
+            await query.message.answer(
+                templates.connect_instructions(), reply_markup=kb.as_markup()
+            )
         await query.answer()
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:root")
@@ -494,7 +498,7 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(
                 templates.menu_root_message(),
-                reply_markup=build_main_menu_keyboard(),
+                reply_markup=build_main_menu_keyboard().as_markup(),
             )
         await query.answer()
 
@@ -503,7 +507,7 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(
                 templates.menu_reports_message(),
-                reply_markup=build_reports_menu_keyboard(),
+                reply_markup=build_reports_menu_keyboard().as_markup(),
             )
         await query.answer()
 
@@ -512,7 +516,7 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(
                 templates.menu_data_message(),
-                reply_markup=build_data_menu_keyboard(),
+                reply_markup=build_data_menu_keyboard().as_markup(),
             )
         await query.answer()
 
@@ -564,7 +568,7 @@ def register_handlers(
         text, kb = render_accounts_screen(accounts, selected_ids)
 
         if query.message:
-            await query.message.edit_text(text, reply_markup=kb)
+            await query.message.edit_text(text, reply_markup=kb.as_markup())
         await query.answer()
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:refresh")
@@ -622,7 +626,7 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(
                 templates.menu_categories_message(),
-                reply_markup=build_categories_menu_keyboard(),
+                reply_markup=build_categories_menu_keyboard().as_markup(),
             )
         await query.answer()
 
@@ -697,18 +701,18 @@ def register_handlers(
         amount_uah = abs(int(item.amount)) / 100.0
         await message.answer(
             templates.uncat_purchase_prompt(item.description, format_money_grn(amount_uah)),
-            reply_markup=kb,
+            reply_markup=kb.as_markup(),
         )
 
     @dp.callback_query(lambda c: c.data == "menu_uncat")
     async def cb_menu_uncat(query: CallbackQuery) -> None:
-        tg_id = query.from_user.id if query.from_user else None
-        if tg_id is None:
-            await query.answer("Немає tg id", show_alert=True)
-            return
-        if query.message:
-            await _send_next_uncat(query.message, tg_id)
         await query.answer()
+
+        if query.message:
+            await query.message.answer(
+                "🧾 Некатегоризовані транзакції\n\nЦя функція ще в розробці.",
+                reply_markup=build_back_keyboard("menu:root"),
+            )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("uncat_cancel:"))
     async def cb_uncat_cancel(query: CallbackQuery) -> None:
@@ -823,7 +827,7 @@ def register_handlers(
         if query.message:
             memory_store.pop_pending_manual_mode(query.from_user.id)
             kb = build_start_menu_keyboard()
-            await query.message.answer(templates.start_message(), reply_markup=kb)
+            await query.message.answer(templates.start_message(), reply_markup=kb.as_markup())
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "onb_resume")
@@ -846,7 +850,7 @@ def register_handlers(
                 pass
 
         kb = _currency_screen_keyboard()
-        await message.answer(text, reply_markup=kb)
+        await message.answer(text, reply_markup=kb.as_markup())
 
     @dp.callback_query(lambda c: c.data == "menu_currency")
     async def cb_menu_currency(query: CallbackQuery) -> None:
@@ -879,10 +883,12 @@ def register_handlers(
         if query.message:
             if not onboarding_done:
                 kb = build_start_menu_keyboard()
-                await query.message.answer(templates.start_message(), reply_markup=kb)
+                await query.message.answer(templates.start_message(), reply_markup=kb.as_markup())
             else:
                 kb = build_main_menu_keyboard()
-                await query.message.answer(templates.menu_root_message(), reply_markup=kb)
+                await query.message.answer(
+                    templates.menu_root_message(), reply_markup=kb.as_markup()
+                )
 
         await query.answer()
 
@@ -910,7 +916,9 @@ def register_handlers(
                     await query.message.answer(templates.help_message(), reply_markup=kb)
                 else:
                     kb = build_main_menu_keyboard()
-                    await query.message.answer(templates.help_message(), reply_markup=kb)
+                    await query.message.answer(
+                        templates.help_message(), reply_markup=kb.as_markup()
+                    )
 
         await query.answer()
 
@@ -1107,7 +1115,7 @@ def register_handlers(
         if query.message:
             await query.message.answer(
                 templates.taxonomy_preset_prompt(),
-                reply_markup=kb2,
+                reply_markup=kb2.as_markup(),
             )
 
         chat_id = query.message.chat.id if query.message else None
@@ -1189,7 +1197,7 @@ def register_handlers(
 
         await query.message.answer(
             templates.reports_preset_prompt(),
-            reply_markup=kb,
+            reply_markup=kb.as_markup(),
         )
         await query.answer()
 
@@ -1222,7 +1230,9 @@ def register_handlers(
             reports_store.save(tg_id, cfg_custom)
 
             kb0 = build_reports_custom_period_keyboard()
-            await query.message.answer(templates.reports_custom_period_prompt(), reply_markup=kb0)
+            await query.message.answer(
+                templates.reports_custom_period_prompt(), reply_markup=kb0.as_markup()
+            )
             await query.answer("Custom")
             return
 
@@ -1236,7 +1246,7 @@ def register_handlers(
 
         await query.message.answer(
             templates.activity_mode_prompt(),
-            reply_markup=kb,
+            reply_markup=kb.as_markup(),
         )
 
         await query.answer()
@@ -1261,7 +1271,7 @@ def register_handlers(
         if query.message:
             await query.message.answer(
                 templates.reports_custom_blocks_prompt(period),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
         await query.answer("OK")
 
@@ -1297,7 +1307,7 @@ def register_handlers(
         if query.message:
             await query.message.answer(
                 templates.reports_custom_blocks_prompt(period),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
         await query.answer()
 
@@ -1307,7 +1317,7 @@ def register_handlers(
         if query.message:
             await query.message.answer(
                 templates.reports_custom_period_prompt(),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
         await query.answer("Back")
 
@@ -1323,7 +1333,7 @@ def register_handlers(
         if query.message:
             await query.message.answer(
                 templates.activity_mode_prompt(),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
         await query.answer()
 
@@ -1353,7 +1363,7 @@ def register_handlers(
 
             await query.message.answer(
                 templates.uncat_frequency_prompt(),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
 
         await query.answer()
@@ -1378,7 +1388,7 @@ def register_handlers(
         freq = freq_map[str(query.data)]
 
         prof = profile_store.load(tg_id) or {}
-        prof = apply_onboarding_settings(prof, uncategorized_prompt_frequency=freq)  # type: ignore[arg-type]
+        prof = apply_onboarding_settings(prof, uncategorized_prompt_frequency=freq)
         profile_store.save(tg_id, prof)
 
         if query.message:
@@ -1392,7 +1402,7 @@ def register_handlers(
 
             await query.message.answer(
                 templates.persona_prompt(),
-                reply_markup=kb,
+                reply_markup=kb.as_markup(),
             )
 
         await query.answer()
@@ -1739,7 +1749,7 @@ def register_handlers(
             text, kb = render_accounts_screen(accounts, selected_ids)
 
             await message.answer(
-                f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb
+                f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb.as_markup()
             )
             return
 
@@ -1794,7 +1804,7 @@ def register_handlers(
                         include_other=(kind != "paging"),
                         include_cancel=True,
                     )
-                    await message.answer(resp.result.text, reply_markup=kb)
+                    await message.answer(resp.result.text, reply_markup=kb.as_markup())
                     return
 
                 await message.answer(resp.result.text)

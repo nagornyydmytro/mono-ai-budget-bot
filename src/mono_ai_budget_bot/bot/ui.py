@@ -159,6 +159,15 @@ def build_bootstrap_picker_keyboard(*, include_skip: bool = True) -> Any:
     return _build_rows(rows)
 
 
+def build_uncat_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Створити категорію", callback_data="uncat_create")
+    kb.button(text="➡️ Далі", callback_data="uncat_next")
+    kb.button(text="⬅️ Back", callback_data="menu_root")
+    kb.adjust(1)
+    return kb
+
+
 def build_paging_keyboard(
     *,
     prev_cb: str | None = None,
