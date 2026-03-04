@@ -47,6 +47,7 @@ from ..uncat.pending import UncatPendingStore
 from ..uncat.queue import build_uncat_queue
 from ..uncat.ui import list_leaf_options
 from . import templates
+from .formatting import format_money_grn
 
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery, Message
@@ -993,6 +994,7 @@ async def main() -> None:
                 text="➕ Створити категорію", callback_data=f"uncat_create:{pending.pending_id}"
             )
         )
+
         kb.row(
             InlineKeyboardButton(
                 text="❌ Скасувати", callback_data=f"uncat_cancel:{pending.pending_id}"
@@ -1001,7 +1003,7 @@ async def main() -> None:
 
         amount_uah = abs(int(item.amount)) / 100.0
         await message.answer(
-            templates.uncat_purchase_prompt(item.description, f"{amount_uah:.2f} грн"),
+            templates.uncat_purchase_prompt(item.description, format_money_grn(amount_uah)),
             reply_markup=kb,
         )
 

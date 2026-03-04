@@ -5,6 +5,7 @@ from typing import Iterable
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.normalization import normalize_merchant
+from mono_ai_budget_bot.bot.formatting import format_money_symbol_uah
 from mono_ai_budget_bot.storage.tx_store import TxRecord
 
 
@@ -16,7 +17,7 @@ class TablePage:
 
 
 def _fmt_uah(cents: int) -> str:
-    return f"{cents/100:.2f} ₴"
+    return format_money_symbol_uah(cents / 100)
 
 
 def _top_merchants(rows: Iterable[TxRecord]) -> list[tuple[str, int, int]]:

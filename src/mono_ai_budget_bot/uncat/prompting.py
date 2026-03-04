@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mono_ai_budget_bot.bot.formatting import format_money_grn
 from mono_ai_budget_bot.uncat.queue import UncatItem
 
 
@@ -116,7 +117,7 @@ def build_uncat_prompt_message(items: list[UncatItem], *, frequency: str) -> str
         lines = ["🧩 Є некатегоризовані покупки:", f"• Кількість: {n}", "", "Останні:"]
         for it in top:
             amt = abs(int(it.amount)) / 100.0
-            lines.append(f"• {it.description} — {amt:.2f} грн")
+            lines.append(f"• {it.description} — {format_money_grn(amt)}")
         if n > len(top):
             lines.append(f"• …ще {n - len(top)}")
         lines.append("")
