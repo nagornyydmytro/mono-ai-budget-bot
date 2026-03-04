@@ -56,14 +56,17 @@ def _build_rows(rows: Sequence[Sequence[tuple[str, str]]]) -> Any:
     return kb.as_markup()
 
 
-def build_main_menu_keyboard() -> Any:
-    return _build_rows(
-        [
-            [("📊 Звіти", "menu:reports"), ("⚙️ Дані", "menu:data")],
-            [("🗂️ Категорії", "menu:categories"), (MENU_UNCAT, "menu_uncat")],
-            [(MENU_CURRENCY, "menu_currency"), (MENU_HELP, "menu_help")],
-        ]
-    )
+def build_main_menu_keyboard(*, uncat_enabled: bool = True) -> Any:
+    rows = [
+        [("📊 Звіти", "menu:reports"), ("⚙️ Дані", "menu:data")],
+        [("🗂️ Категорії", "menu:categories")],
+        [(MENU_CURRENCY, "menu_currency"), (MENU_HELP, "menu_help")],
+    ]
+
+    if uncat_enabled:
+        rows.insert(1, [(MENU_UNCAT, "menu_uncat")])
+
+    return _build_rows(rows)
 
 
 def build_onboarding_resume_keyboard() -> Any:

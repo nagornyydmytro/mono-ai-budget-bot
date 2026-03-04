@@ -13,7 +13,8 @@ def test_main_menu_keyboard_snapshot():
     kb = build_main_menu_keyboard()
     assert _kb_dump(kb) == [
         [("📊 Звіти", "menu:reports"), ("⚙️ Дані", "menu:data")],
-        [("🗂️ Категорії", "menu:categories"), ("🧩 Uncat", "menu_uncat")],
+        [("🧩 Uncat", "menu_uncat")],
+        [("🗂️ Категорії", "menu:categories")],
         [("💱 Курси", "menu_currency"), ("📘 Help", "menu_help")],
     ]
 

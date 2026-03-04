@@ -197,7 +197,7 @@ def register_handlers(
             await msg.answer(templates.persona_prompt(), reply_markup=kb.as_markup())
             return
 
-        kb = build_main_menu_keyboard()
+        kb = build_main_menu_keyboard(uncat_enabled=True)
         await msg.answer(templates.menu_root_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("start"))
@@ -229,7 +229,7 @@ def register_handlers(
             await message.answer(templates.help_message(), reply_markup=kb.as_markup())
             return
 
-        kb = build_main_menu_keyboard()
+        kb = build_main_menu_keyboard(uncat_enabled=True)
         await message.answer(templates.help_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("menu"))
@@ -248,14 +248,14 @@ def register_handlers(
         )
 
         if not onboarding_done:
-            kb = build_start_menu_keyboard()
+            kb = build_main_menu_keyboard(uncat_enabled=True)
             await message.answer(
                 "Спочатку заверши онбординг через кнопки нижче 👇",
                 reply_markup=kb.as_markup(),
             )
             return
 
-        kb = build_main_menu_keyboard()
+        kb = build_main_menu_keyboard(uncat_enabled=True)
         await message.answer(templates.menu_root_message(), reply_markup=kb.as_markup())
 
     @dp.message(Command("connect"))
@@ -292,7 +292,7 @@ def register_handlers(
 
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
 
-        kb = build_main_menu_keyboard()
+        kb = build_main_menu_keyboard(uncat_enabled=True)
         await message.answer(templates.connect_success_confirm())
         await message.answer(templates.connect_success_next_steps(), reply_markup=kb.as_markup())
 
@@ -499,7 +499,7 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(
                 templates.menu_root_message(),
-                reply_markup=build_main_menu_keyboard().as_markup(),
+                reply_markup=build_main_menu_keyboard(uncat_enabled=True).as_markup(),
             )
         await query.answer()
 
@@ -868,7 +868,7 @@ def register_handlers(
                 kb = build_start_menu_keyboard()
                 await query.message.answer(templates.start_message(), reply_markup=kb.as_markup())
             else:
-                kb = build_main_menu_keyboard()
+                kb = build_main_menu_keyboard(uncat_enabled=True)
                 await query.message.answer(
                     templates.menu_root_message(), reply_markup=kb.as_markup()
                 )
@@ -898,7 +898,7 @@ def register_handlers(
                     kb = build_back_keyboard("onb_back_main")
                     await query.message.answer(templates.help_message(), reply_markup=kb)
                 else:
-                    kb = build_main_menu_keyboard()
+                    kb = build_main_menu_keyboard(uncat_enabled=True)
                     await query.message.answer(
                         templates.help_message(), reply_markup=kb.as_markup()
                     )
