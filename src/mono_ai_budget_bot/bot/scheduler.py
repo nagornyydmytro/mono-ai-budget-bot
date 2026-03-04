@@ -218,7 +218,7 @@ def start_jobs(
             if stored is None:
                 continue
             await maybe_send_uncat_prompt(u, mode="before_report")
-            text = render_report_text("week", stored.facts)
+            text = render_report_text(u.telegram_user_id, "week", stored.facts)
             await safe_send(bot, u.chat_id, text, logger)
 
         logger.info("Scheduler: weekly_report done")
@@ -234,7 +234,7 @@ def start_jobs(
             if stored is None:
                 continue
             await maybe_send_uncat_prompt(u, mode="before_report")
-            text = render_report_text("month", stored.facts)
+            text = render_report_text(u.telegram_user_id, "month", stored.facts)
             await safe_send(bot, u.chat_id, text, logger)
 
         logger.info("Scheduler: monthly_report done")

@@ -1,7 +1,13 @@
-from mono_ai_budget_bot.bot.app import render_report
+from __future__ import annotations
+
+from pathlib import Path
+
+from mono_ai_budget_bot.bot.app import _render_report_for_user
+from mono_ai_budget_bot.reports.config import ReportsConfig
+from mono_ai_budget_bot.storage.reports_store import ReportsStore
 
 
-def test_render_report_includes_trends_and_anomalies():
+def test_render_report_includes_trends_and_anomalies(tmp_path: Path):
     facts = {
         "totals": {
             "real_spend_total_uah": 1000.0,
@@ -25,7 +31,24 @@ def test_render_report_includes_trends_and_anomalies():
         ],
     }
 
-    s = render_report("week", facts, ai_block=None)
+    store = ReportsStore(tmp_path / "reports")
+
+    cfg = ReportsConfig(
+        preset="custom",
+        daily={"totals": True},
+        weekly={
+            "totals": True,
+            "breakdowns": True,
+            "compare_baseline": True,
+            "trends": True,
+            "anomalies": True,
+        },
+        monthly={"totals": True},
+    )
+    store.save(123, cfg)
+
+    s = _render_report_for_user(store, 123, "week", facts, ai_block=None)
+
     assert "Тренди" in s
     assert "Зростання" in s
     assert "Падіння" in s

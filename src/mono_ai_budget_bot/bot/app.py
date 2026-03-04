@@ -32,7 +32,7 @@ from mono_ai_budget_bot.storage.tx_store import TxStore
 from ..analytics.profile import build_user_profile
 from ..config import load_settings
 from ..logging_setup import setup_logging
-from ..reports.config import build_reports_preset
+from ..reports.config import ReportsConfig, build_reports_preset
 from ..settings.onboarding import apply_onboarding_settings
 from ..storage.profile_store import ProfileStore
 from ..storage.reports_store import ReportsStore
@@ -209,9 +209,8 @@ def _render_currency_screen_text(rates) -> str:
     return templates.currency_screen_text(md_escape(updated), usd_s, eur_s, pln_s)
 
 
-def _render_facts_block(facts: dict) -> str:
+def _render_totals_section(facts: dict) -> str | None:
     totals = _safe_get(facts, ["totals"], {}) or {}
-    comparison = facts.get("comparison")
 
     real_spend = float(totals.get("real_spend_total_uah", 0.0))
     spend = float(totals.get("spend_total_uah", 0.0))
@@ -219,15 +218,17 @@ def _render_facts_block(facts: dict) -> str:
     tr_in = float(totals.get("transfer_in_total_uah", 0.0))
     tr_out = float(totals.get("transfer_out_total_uah", 0.0))
 
-    parts: list[str] = []
-
     summary_lines = [
         f"💸 Реальні витрати: *{md_escape(_fmt_money(real_spend))}*",
         f"🧾 Всі списання: {md_escape(_fmt_money(spend))}",
         f"💰 Надходження: {md_escape(_fmt_money(income))}",
         f"🔁 Перекази: +{md_escape(_fmt_money(tr_in))} / -{md_escape(_fmt_money(tr_out))}",
     ]
-    parts.append(templates.section("Факти", summary_lines))
+    return templates.section("Факти", summary_lines)
+
+
+def _render_breakdowns_section(facts: dict) -> str | None:
+    parts: list[str] = []
 
     top_named = facts.get("top_categories_named_real_spend", []) or []
     if top_named:
@@ -247,40 +248,74 @@ def _render_facts_block(facts: dict) -> str:
             items2.append(f"{i}. {m} — {md_escape(_fmt_money(amt))}")
         parts.append(templates.section("Топ мерчантів", items2))
 
-    if isinstance(comparison, dict):
-        totals_cmp = comparison.get("totals", {})
-        delta = totals_cmp.get("delta", {}) if isinstance(totals_cmp, dict) else {}
-        pct = totals_cmp.get("pct_change", {}) if isinstance(totals_cmp, dict) else {}
+    deep_categories_block = _render_categories_deep_block(facts)
+    if deep_categories_block:
+        parts.append(deep_categories_block)
 
-        d_real = delta.get("real_spend_total_uah")
-        p_real = pct.get("real_spend_total_uah")
+    if not parts:
+        return None
+    return "\n\n".join(parts).strip()
 
-        if d_real is not None:
-            d_real_f = float(d_real)
-            sign = "+" if d_real_f >= 0 else ""
-            pct_txt = "—" if p_real is None else f"{float(p_real):+.2f}%"
 
-            cmp_lines: list[str] = [
-                f"Реальні витрати: {md_escape(sign + _fmt_money(d_real_f))} ({md_escape(pct_txt)})"
-            ]
+def _render_compare_section(facts: dict) -> str | None:
+    comparison = facts.get("comparison")
+    if not isinstance(comparison, dict):
+        return None
 
-            cat_cmp = comparison.get("categories", {})
-            if isinstance(cat_cmp, dict) and cat_cmp:
-                items3: list[tuple[str, float, float | None]] = []
-                for k, v in cat_cmp.items():
-                    if not isinstance(v, dict):
-                        continue
-                    items3.append((str(k), float(v.get("delta_uah", 0.0)), v.get("pct_change")))
-                items3.sort(key=lambda x: abs(x[1]), reverse=True)
+    totals_cmp = comparison.get("totals", {})
+    delta = totals_cmp.get("delta", {}) if isinstance(totals_cmp, dict) else {}
+    pct = totals_cmp.get("pct_change", {}) if isinstance(totals_cmp, dict) else {}
 
-                for k, dlt, pctv in items3[:5]:
-                    sign2 = "+" if dlt >= 0 else ""
-                    pct_txt2 = "—" if pctv is None else f"{float(pctv):+.2f}%"
-                    cmp_lines.append(
-                        f"{md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
-                    )
+    d_real = delta.get("real_spend_total_uah")
+    p_real = pct.get("real_spend_total_uah")
 
-            parts.append(templates.section("Порівняння з попереднім періодом", cmp_lines))
+    if d_real is None:
+        return None
+
+    d_real_f = float(d_real)
+    sign = "+" if d_real_f >= 0 else ""
+    pct_txt = "—" if p_real is None else f"{float(p_real):+.2f}%"
+
+    cmp_lines: list[str] = [
+        f"Реальні витрати: {md_escape(sign + _fmt_money(d_real_f))} ({md_escape(pct_txt)})"
+    ]
+
+    cat_cmp = comparison.get("categories", {})
+    if isinstance(cat_cmp, dict) and cat_cmp:
+        items3: list[tuple[str, float, float | None]] = []
+        for k, v in cat_cmp.items():
+            if not isinstance(v, dict):
+                continue
+            items3.append((str(k), float(v.get("delta_uah", 0.0)), v.get("pct_change")))
+        items3.sort(key=lambda x: abs(x[1]), reverse=True)
+
+        for k, dlt, pctv in items3[:5]:
+            sign2 = "+" if dlt >= 0 else ""
+            pct_txt2 = "—" if pctv is None else f"{float(pctv):+.2f}%"
+            cmp_lines.append(
+                f"{md_escape(k)}: {md_escape(sign2 + _fmt_money(dlt))} ({md_escape(pct_txt2)})"
+            )
+
+    return templates.section("Порівняння з попереднім періодом", cmp_lines)
+
+
+def _render_facts_block_by_config(facts: dict, enabled: set[str]) -> str:
+    parts: list[str] = []
+
+    if "totals" in enabled:
+        sec = _render_totals_section(facts)
+        if sec:
+            parts.append(sec)
+
+    if "breakdowns" in enabled:
+        sec2 = _render_breakdowns_section(facts)
+        if sec2:
+            parts.append(sec2)
+
+    if "compare_baseline" in enabled:
+        sec3 = _render_compare_section(facts)
+        if sec3:
+            parts.append(sec3)
 
     return "\n\n".join(parts).strip()
 
@@ -490,19 +525,49 @@ def _render_ai_block(ai_block: str | None) -> str | None:
     return f"🤖 *AI інсайти:*\n{ai_block.strip()}"
 
 
-def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
+def _period_to_cfg_period(period: str) -> str:
+    if period == "today":
+        return "daily"
+    if period == "week":
+        return "weekly"
+    if period == "month":
+        return "monthly"
+    return period
+
+
+def _render_report_for_user(
+    reports_store: ReportsStore,
+    tg_id: int,
+    period: str,
+    facts: dict,
+    *,
+    ai_block: str | None = None,
+) -> str:
+    cfg: ReportsConfig = reports_store.load(tg_id)
+    cfg_period = _period_to_cfg_period(period)
+    enabled = set(cfg.get_enabled_blocks(cfg_period))
+
     title_map = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}
     title = title_map.get(period, period)
 
     header = f"📊 {md_escape(title)}"
-    facts_block = _render_facts_block(facts)
-    deep_categories_block = _render_categories_deep_block(facts)
-    if deep_categories_block:
-        facts_block = (facts_block + "\n\n" + deep_categories_block).strip()
-    trends_block = _render_trends_block(facts.get("trends") or {})
-    anomalies_block = _render_anomalies_block(facts)
+
+    facts_block = _render_facts_block_by_config(facts, enabled)
+
+    trends_block = None
+    if "trends" in enabled:
+        trends_block = _render_trends_block(facts.get("trends") or {})
+
+    anomalies_block = None
+    if "anomalies" in enabled:
+        anomalies_block = _render_anomalies_block(facts)
+
+    whatif_block = None
+    if "what_if" in enabled:
+        whatif_block = _render_whatif_block(facts)
+
+    refunds_block = _render_refunds_block(facts) if "totals" in enabled else None
     insight_block = _render_ai_block(ai_block)
-    whatif_block = _render_whatif_block(facts)
 
     return templates.report_layout(
         header=header,
@@ -511,7 +576,7 @@ def render_report(period: str, facts: dict, ai_block: str | None = None) -> str:
         anomalies_block=anomalies_block,
         whatif_block=whatif_block,
         insight_block=insight_block,
-        refunds_block=_render_refunds_block(facts),
+        refunds_block=refunds_block,
     )
 
 
@@ -630,6 +695,22 @@ async def main() -> None:
     profile_store = ProfileStore(Path(".cache") / "profiles")
     taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
     reports_store = ReportsStore(Path(".cache") / "reports")
+
+    def render_report_for_user(
+        tg_id: int,
+        period: str,
+        facts: dict,
+        *,
+        ai_block: str | None = None,
+    ) -> str:
+        return _render_report_for_user(
+            reports_store,
+            tg_id,
+            period,
+            facts,
+            ai_block=ai_block,
+        )
+
     uncat_store = UncatStore(Path(".cache") / "uncat")
     rules_store = RulesStore(Path(".cache") / "rules")
     uncat_pending_store = UncatPendingStore(Path(".cache") / "uncat_pending")
@@ -682,7 +763,7 @@ async def main() -> None:
         bot=bot,
         users=users,
         report_store=store,
-        render_report_text=render_report,
+        render_report_text=render_report_for_user,
         logger=logger,
         sync_user_ledger=sync_user_ledger,
         recompute_reports_for_user=lambda tg_id, account_ids: _compute_and_cache_reports_for_user(
@@ -1742,7 +1823,7 @@ async def main() -> None:
                     await message.answer(_map_llm_error(e))
                     ai_block = None
 
-        text = render_report(period, stored.facts, ai_block=ai_block)
+        text = render_report_for_user(tg_id, period, stored.facts, ai_block=ai_block)
         await message.answer(text)
 
     @dp.message(Command("today"))

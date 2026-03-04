@@ -41,6 +41,18 @@ class ReportsConfig:
             preset=preset, daily=_m("daily"), weekly=_m("weekly"), monthly=_m("monthly")
         )
 
+    def get_enabled_blocks(self, period: str) -> list[str]:
+        if period == "daily":
+            return [b for b, enabled in self.daily.items() if enabled]
+
+        if period == "weekly":
+            return [b for b, enabled in self.weekly.items() if enabled]
+
+        if period == "monthly":
+            return [b for b, enabled in self.monthly.items() if enabled]
+
+        raise ValueError(f"Unknown report period: {period}")
+
 
 def build_reports_preset(preset: ReportPreset) -> ReportsConfig:
     if preset == "custom":
