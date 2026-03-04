@@ -43,10 +43,16 @@ from .clarify import (
 )
 from .formatting import format_money_grn
 from .ui import (
+    build_back_keyboard,
     build_bootstrap_picker_keyboard,
+    build_categories_menu_keyboard,
+    build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_onboarding_resume_keyboard,
     build_reports_custom_blocks_keyboard,
     build_reports_custom_period_keyboard,
+    build_reports_menu_keyboard,
+    build_start_menu_keyboard,
     build_vertical_options_keyboard,
 )
 
@@ -85,6 +91,112 @@ def register_handlers(
     sync_user_ledger,
     render_report_for_user,
 ) -> None:
+    def _onboarding_done(tg_id: int) -> bool:
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
+            return False
+        prof = profile_store.load(tg_id) or {}
+        return bool(prof.get("persona"))
+
+    async def _prompt_finish_onboarding(message: Message, *, text: str | None = None) -> None:
+        kb = build_onboarding_resume_keyboard()
+        await message.answer(
+            text or "Спочатку заверши онбординг 👇",
+            reply_markup=kb,
+        )
+
+    async def _send_onboarding_next(chat: Message | CallbackQuery) -> None:
+        if isinstance(chat, CallbackQuery):
+            tg_id = chat.from_user.id if chat.from_user else None
+            msg = chat.message
+        else:
+            tg_id = chat.from_user.id if chat.from_user else None
+            msg = chat
+
+        if tg_id is None or msg is None:
+            return
+
+        cfg = users.load(tg_id)
+        prof = profile_store.load(tg_id) or {}
+
+        if cfg is None or not cfg.mono_token:
+            kb = build_start_menu_keyboard()
+            await msg.answer(templates.start_message(), reply_markup=kb)
+            return
+
+        if not cfg.selected_account_ids:
+            mb = MonobankClient(token=cfg.mono_token)
+            try:
+                info = mb.client_info()
+            finally:
+                mb.close()
+
+            accounts = [
+                {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
+                for a in info.accounts
+            ]
+            selected_ids = set(cfg.selected_account_ids or [])
+            text, kb = render_accounts_screen(accounts, selected_ids)
+            await msg.answer(f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb)
+            return
+
+        if taxonomy_store.load(tg_id) is None:
+            count = len(cfg.selected_account_ids)
+            kb = build_bootstrap_picker_keyboard(include_skip=False)
+            await msg.answer(
+                templates.accounts_after_done_with_count(count),
+                reply_markup=kb,
+            )
+            return
+
+        if reports_store.load(tg_id) is None:
+            kb = build_vertical_options_keyboard(
+                [
+                    ("⚡ Мінімальний", "rep_preset_min"),
+                    ("🧠 Максимальний", "rep_preset_max"),
+                    ("🛠️ Custom (пізніше)", "rep_preset_custom"),
+                ]
+            )
+            await msg.answer(templates.reports_preset_prompt(), reply_markup=kb)
+            return
+
+        if not prof.get("activity_mode"):
+            kb = build_vertical_options_keyboard(
+                [
+                    ("🔊 Loud", "act_loud"),
+                    ("🔕 Quiet", "act_quiet"),
+                    ("🛠️ Custom", "act_custom"),
+                ]
+            )
+            await msg.answer(templates.activity_mode_prompt(), reply_markup=kb)
+            return
+
+        if not prof.get("uncategorized_prompt_frequency"):
+            kb = build_vertical_options_keyboard(
+                [
+                    ("⚡ Одразу (кожне)", "uncat_immediate"),
+                    ("🗓️ Раз на день", "uncat_daily"),
+                    ("📅 Раз на тиждень", "uncat_weekly"),
+                    ("🧾 Перед звітом", "uncat_before_report"),
+                ]
+            )
+            await msg.answer(templates.uncat_frequency_prompt(), reply_markup=kb)
+            return
+
+        if not prof.get("persona"):
+            kb = build_vertical_options_keyboard(
+                [
+                    ("🤝 Supportive", "persona_supportive"),
+                    ("🧠 Rational", "persona_rational"),
+                    ("🔥 Motivator", "persona_motivator"),
+                ]
+            )
+            await msg.answer(templates.persona_prompt(), reply_markup=kb)
+            return
+
+        kb = build_main_menu_keyboard()
+        await msg.answer(templates.menu_root_message(), reply_markup=kb)
+
     @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
         tg_id = message.from_user.id if message.from_user else None
@@ -94,7 +206,7 @@ def register_handlers(
         users.save(tg_id, chat_id=message.chat.id)
         cfg = users.load(tg_id)
 
-        kb = build_main_menu_keyboard()
+        kb = build_start_menu_keyboard()
 
         text = templates.start_message()
         if cfg is not None and cfg.mono_token:
@@ -104,8 +216,44 @@ def register_handlers(
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
+            kb = build_back_keyboard("onb_back_main")
+            await message.answer(templates.help_message(), reply_markup=kb)
+            return
+
         kb = build_main_menu_keyboard()
         await message.answer(templates.help_message(), reply_markup=kb)
+
+    @dp.message(Command("menu"))
+    async def cmd_menu(message: Message) -> None:
+        tg_id = message.from_user.id if message.from_user else None
+        if tg_id is None:
+            return
+
+        cfg = users.load(tg_id)
+        prof = profile_store.load(tg_id) or {}
+        onboarding_done = (
+            cfg is not None
+            and bool(cfg.mono_token)
+            and bool(cfg.selected_account_ids)
+            and bool(prof.get("persona"))
+        )
+
+        if not onboarding_done:
+            kb = build_start_menu_keyboard()
+            await message.answer(
+                "Спочатку заверши онбординг через кнопки нижче 👇",
+                reply_markup=kb,
+            )
+            return
+
+        kb = build_main_menu_keyboard()
+        await message.answer(templates.menu_root_message(), reply_markup=kb)
 
     @dp.message(Command("connect"))
     async def cmd_connect(message: Message) -> None:
@@ -270,7 +418,11 @@ def register_handlers(
         text, kb = render_accounts_screen(accounts, set(selected))
 
         if query.message:
-            await query.message.edit_text(text, reply_markup=kb)
+            prefix = ""
+            msg_text = query.message.text or ""
+            if "Monobank підключено успішно" in msg_text:
+                prefix = f"{templates.connect_success_confirm()}\n\n"
+            await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
         await query.answer("Ок")
 
     @dp.callback_query(lambda c: c.data == "acc_clear")
@@ -300,7 +452,11 @@ def register_handlers(
         text, kb = render_accounts_screen(accounts, set())
 
         if query.message:
-            await query.message.edit_text(text, reply_markup=kb)
+            prefix = ""
+            msg_text = query.message.text or ""
+            if "✅ Monobank підключено успішно" in msg_text:
+                prefix = f"{templates.connect_success_confirm()}\n\n"
+            await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
         await query.answer("Очищено")
 
     @dp.callback_query(lambda c: c.data == "acc_done")
@@ -313,14 +469,16 @@ def register_handlers(
             await query.answer("Спочатку вибери хоча б 1 картку", show_alert=True)
             return
 
-        kb = build_bootstrap_picker_keyboard()
+        prof = profile_store.load(tg_id) or {}
+        onboarding_done = bool(prof.get("persona"))
+        kb = build_bootstrap_picker_keyboard(include_skip=onboarding_done)
 
         if query.message:
             await query.message.edit_text(
                 templates.accounts_after_done_with_count(count),
                 reply_markup=kb,
             )
-        await query.answer("Done")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_connect")
     async def cb_menu_connect(query: CallbackQuery) -> None:
@@ -330,6 +488,46 @@ def register_handlers(
             )
             await query.message.answer(templates.connect_instructions(), reply_markup=kb)
         await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:root")
+    async def cb_menu_root(query: CallbackQuery) -> None:
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_root_message(),
+                reply_markup=build_main_menu_keyboard(),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:reports")
+    async def cb_menu_reports(query: CallbackQuery) -> None:
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_reports_message(),
+                reply_markup=build_reports_menu_keyboard(),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data")
+    async def cb_menu_data(query: CallbackQuery) -> None:
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_data_message(),
+                reply_markup=build_data_menu_keyboard(),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories")
+    async def cb_menu_categories(query: CallbackQuery) -> None:
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_categories_message(),
+                reply_markup=build_categories_menu_keyboard(),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:"))
+    async def cb_menu_categories_placeholders(query: CallbackQuery) -> None:
+        await query.answer(templates.coming_soon_message(), show_alert=True)
 
     @dp.callback_query(lambda c: c.data == "onb_token")
     async def cb_onb_token(query: CallbackQuery) -> None:
@@ -341,14 +539,15 @@ def register_handlers(
         memory_store.set_pending_manual_mode(
             tg_id,
             expected="mono_token",
-            hint="Встав сюди Monobank Personal API token. Щоб скасувати — напиши `cancel`.",
+            hint="Встав сюди Monobank Personal API token.",
             source="onboarding",
             ttl_sec=900,
         )
 
         if query.message:
             await query.message.answer(
-                "🔐 Встав токен одним повідомленням.\n\nЩоб скасувати — напиши `cancel`."
+                "🔐 Встав токен одним повідомленням.",
+                reply_markup=build_back_keyboard("onb_back_main"),
             )
         await query.answer("Ок")
 
@@ -516,17 +715,21 @@ def register_handlers(
             )
             await _send_next_uncat(query.message, tg_id)
 
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "onb_back_main")
     async def cb_onb_back_main(query: CallbackQuery) -> None:
         if query.message:
-            kb = build_main_menu_keyboard()
+            kb = build_start_menu_keyboard()
             await query.message.answer(templates.start_message(), reply_markup=kb)
         await query.answer()
 
+    @dp.callback_query(lambda c: c.data == "onb_resume")
+    async def cb_onb_resume(query: CallbackQuery) -> None:
+        await _send_onboarding_next(query)
+        await query.answer()
+
     async def _send_currency_screen(message: Message, *, force_refresh: bool) -> None:
-        pub = None
         try:
             pub = MonobankPublicClient()
             rates = pub.currency(force_refresh=force_refresh)
@@ -557,16 +760,56 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "currency_back")
     async def cb_currency_back(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer()
+            return
+
+        cfg = users.load(tg_id)
+        prof = profile_store.load(tg_id) or {}
+        onboarding_done = (
+            cfg is not None
+            and bool(cfg.mono_token)
+            and bool(cfg.selected_account_ids)
+            and bool(prof.get("persona"))
+        )
+
         if query.message:
-            kb = build_main_menu_keyboard()
-            await query.message.answer("Меню:", reply_markup=kb)
+            if not onboarding_done:
+                kb = build_start_menu_keyboard()
+                await query.message.answer(templates.start_message(), reply_markup=kb)
+            else:
+                kb = build_main_menu_keyboard()
+                await query.message.answer(templates.menu_root_message(), reply_markup=kb)
+
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_help")
     async def cb_menu_help(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer()
+            return
+
+        cfg = users.load(tg_id)
+
         if query.message:
-            kb = build_main_menu_keyboard()
-            await query.message.answer(templates.help_message(), reply_markup=kb)
+            prof = profile_store.load(tg_id) or {}
+            onboarding_done = (
+                cfg is not None
+                and bool(cfg.mono_token)
+                and bool(cfg.selected_account_ids)
+                and bool(prof.get("persona"))
+            )
+
+            if query.message:
+                if not onboarding_done:
+                    kb = build_back_keyboard("onb_back_main")
+                    await query.message.answer(templates.help_message(), reply_markup=kb)
+                else:
+                    kb = build_main_menu_keyboard()
+                    await query.message.answer(templates.help_message(), reply_markup=kb)
+
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_week")
@@ -732,23 +975,15 @@ def register_handlers(
             return
 
         if query.data == "boot_skip":
+            prof = profile_store.load(tg_id) or {}
+            onboarding_done = bool(prof.get("persona"))
+            if not onboarding_done:
+                await query.answer("На онбордингу пропуск недоступний.", show_alert=True)
+                return
+
             if query.message:
-                await query.message.edit_text(
-                    "Ок! Можеш зробити `/refresh week` або одразу `/week` (якщо кеш уже є)."
-                )
+                await query.message.edit_text("Ок.")
 
-            kb = build_vertical_options_keyboard(
-                [
-                    ("⚡ Мінімальний", "tax_preset_min"),
-                    ("🧠 Максимальний (детально)", "tax_preset_max"),
-                    ("🛠️ Custom (пізніше)", "tax_preset_custom"),
-                ]
-            )
-
-            await query.message.answer(
-                templates.taxonomy_preset_prompt(),
-                reply_markup=kb,
-            )
             await query.answer("Пропущено")
             return
 
@@ -758,6 +993,20 @@ def register_handlers(
         if query.message:
             await query.message.edit_text(templates.bootstrap_started_message(days))
         await query.answer("Старт")
+
+        kb2 = build_vertical_options_keyboard(
+            [
+                ("⚡ Мінімальний", "tax_preset_min"),
+                ("🧠 Максимальний (детально)", "tax_preset_max"),
+                ("🛠️ Custom — налаштую потім", "tax_preset_custom"),
+            ]
+        )
+
+        if query.message:
+            await query.message.answer(
+                templates.taxonomy_preset_prompt(),
+                reply_markup=kb2,
+            )
 
         chat_id = query.message.chat.id if query.message else None
         token = cfg.mono_token
@@ -785,14 +1034,22 @@ def register_handlers(
                     await _compute_and_cache_reports_for_user(tg_id, account_ids, profile_store)
 
                     if chat_id is not None:
+                        prof = profile_store.load(tg_id) or {}
+                        onboarding_done = bool(prof.get("persona"))
+
                         await bot.send_message(
                             chat_id,
-                            templates.bootstrap_done_message(
-                                accounts=res.accounts,
-                                fetched_requests=res.fetched_requests,
-                                appended=res.appended,
+                            (
+                                templates.bootstrap_done_message(
+                                    accounts=res.accounts,
+                                    fetched_requests=res.fetched_requests,
+                                    appended=res.appended,
+                                )
+                                if onboarding_done
+                                else templates.bootstrap_done_onboarding_message()
                             ),
                         )
+
             except Exception as e:
                 if chat_id is not None:
                     msg = _map_monobank_error(e)
@@ -833,7 +1090,7 @@ def register_handlers(
             templates.reports_preset_prompt(),
             reply_markup=kb,
         )
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.callback_query(
         lambda c: c.data in ("rep_preset_min", "rep_preset_max", "rep_preset_custom")
@@ -881,9 +1138,7 @@ def register_handlers(
             reply_markup=kb,
         )
 
-        if query.message:
-            await query.message.answer("✅ Пресет звітів збережено.")
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.callback_query(
         lambda c: isinstance(c.data, str) and c.data.startswith("rep_custom_period:")
@@ -943,7 +1198,7 @@ def register_handlers(
                 templates.reports_custom_blocks_prompt(period),
                 reply_markup=kb,
             )
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "rep_custom_back")
     async def cb_rep_custom_back(query: CallbackQuery) -> None:
@@ -969,8 +1224,7 @@ def register_handlers(
                 templates.activity_mode_prompt(),
                 reply_markup=kb,
             )
-            await query.message.answer("✅ Налаштування звітів збережено.")
-        await query.answer("Done")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data in ("act_loud", "act_quiet", "act_custom"))
     async def cb_activity_mode(query: CallbackQuery) -> None:
@@ -1001,7 +1255,7 @@ def register_handlers(
                 reply_markup=kb,
             )
 
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.callback_query(
         lambda c: (
@@ -1040,7 +1294,7 @@ def register_handlers(
                 reply_markup=kb,
             )
 
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.callback_query(
         lambda c: c.data in ("persona_supportive", "persona_rational", "persona_motivator")
@@ -1064,9 +1318,16 @@ def register_handlers(
 
         if query.message:
             await query.message.answer(
-                "✅ Persona збережено. Онбординг завершено — можна робити /week або /month."
+                "\n".join(
+                    [
+                        templates.success("Дані збережено. Онбординг завершено."),
+                        "",
+                        "Тепер тобі доступне головне меню: /menu",
+                        "Там — звіти, налаштування даних, категорії, uncat та інше.",
+                    ]
+                ).strip()
             )
-        await query.answer("Збережено")
+        await query.answer()
 
     @dp.message(Command("refresh"))
     async def cmd_refresh(message: Message) -> None:
@@ -1189,6 +1450,9 @@ def register_handlers(
             return
         if not cfg.selected_account_ids:
             await message.answer(templates.err_no_accounts_selected())
+            return
+        if not _onboarding_done(tg_id):
+            await _prompt_finish_onboarding(message)
             return
 
         stored = store.load(tg_id, period)
@@ -1346,7 +1610,7 @@ def register_handlers(
             try:
                 mb = MonobankClient(token=mono_token)
                 try:
-                    mb.client_info()
+                    info = mb.client_info()
                 finally:
                     mb.close()
             except Exception as e:
@@ -1357,8 +1621,16 @@ def register_handlers(
             users.save(user_id, mono_token=mono_token, selected_account_ids=[])
             memory_store.pop_pending_manual_mode(user_id)
 
-            await message.answer(templates.connect_success_confirm())
-            await cmd_accounts(message)
+            accounts = [
+                {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
+                for a in info.accounts
+            ]
+            selected_ids: set[str] = set()
+            text, kb = render_accounts_screen(accounts, selected_ids)
+
+            await message.answer(
+                f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb
+            )
             return
 
         if text_lower == "cancel":
@@ -1372,6 +1644,9 @@ def register_handlers(
             return
         if not cfg.selected_account_ids:
             await message.answer(templates.err_no_accounts_selected())
+            return
+        if not _onboarding_done(user_id):
+            await _prompt_finish_onboarding(message)
             return
 
         stored = store.load(user_id, "week")

@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
@@ -35,7 +35,7 @@ from ..uncat.queue import build_uncat_queue
 from . import templates
 
 if TYPE_CHECKING:
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    pass
 
 
 store = ReportStore()
@@ -112,9 +112,8 @@ def _ensure_ready(cfg: UserConfig | None) -> str | None:
     return None
 
 
-def render_accounts_screen(
-    accounts: list[dict], selected_ids: set[str]
-) -> tuple[str, InlineKeyboardBuilder]:
+def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, Any]:
+    from aiogram.types import InlineKeyboardMarkup
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     lines: list[str] = []
@@ -140,7 +139,8 @@ def render_accounts_screen(
     kb.button(text="✅ Done", callback_data="acc_done")
     kb.adjust(1, 2)
 
-    return "\n".join(lines).strip(), kb
+    markup: InlineKeyboardMarkup = kb.as_markup()
+    return "\n".join(lines).strip(), markup
 
 
 def _currency_screen_keyboard():

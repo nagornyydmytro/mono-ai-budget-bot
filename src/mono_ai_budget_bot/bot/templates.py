@@ -85,75 +85,28 @@ class StartCopy:
 
 
 def start_message() -> str:
-    lines: list[str] = []
-    lines.append("👋 *Mono AI Budget Bot*")
-    lines.append("")
-    lines.append("Звіти по витратах Monobank: факти → тренди → аномалії → (опційно) AI інсайти.")
-    lines.append("")
-    lines.append(
-        section(
-            "Що бот робить",
-            [
-                "• /week, /month — звіти з порівнянням з попереднім періодом",
-                "• тренди й аномалії по категоріях/мерчантах",
-                "• можна ставити питання звичайним текстом (NLQ)",
-            ],
-        )
-    )
-    lines.append("")
-    lines.append(
-        section(
-            "Що бот НЕ робить",
-            [
-                "• НЕ може створювати, змінювати або видаляти транзакції",
-                "• НЕ має доступу до переказів, платежів чи управління коштами",
-                "• НЕ може ініціювати списання або надходження",
-                "• НЕ дає фінансових порад і не приймає рішень за тебе",
-            ],
-        )
-    )
-    lines.append("")
-    lines.append(
-        section(
-            "Privacy",
-            [
-                "• токен зберігається локально (зашифровано) у .cache",
-                "• повний wipe: видалити папку .cache",
-            ],
-        )
-    )
-
-    lines.append(
-        section(
-            "Access model (важливо)",
-            [
-                "• використовується тільки Monobank Personal API",
-                "• доступ лише до читання виписки (read-only)",
-                "• бот не має технічної можливості проводити операції",
-            ],
-        )
-    )
-    lines.append("")
-    lines.append(
-        section(
-            "Приклади запитів",
-            [
-                bullets(
-                    [
-                        "Скільки я витратив на Мак за останні 5 днів?",
-                        "Скільки було поповнень вчора?",
-                        "Скільки я скинув дівчині за січень?",
-                        "На скільки більше я вчора витратив на бари ніж зазвичай?",
-                    ]
-                )
-            ],
-        )
-    )
-    lines.append("")
-    lines.append(onboarding_steps_not_connected())
-    lines.append("")
-    lines.append("🧭 Натисни кнопку в меню або введи команду.")
-    return "\n".join(lines).strip()
+    return "\n".join(
+        [
+            "👋 *SpendLens*",
+            "",
+            "Персональний фінансовий асистент для Monobank (read-only):",
+            "• звіти: факти → тренди → аномалії",
+            "• питання звичайним текстом (NLQ)",
+            "• курси валют",
+            "",
+            section(
+                "Онбординг",
+                [
+                    "1) Підключи Monobank (🔐 Connect)",
+                    "2) Обери картки",
+                    "3) Завантаж історію (1/3/6/12 міс.)",
+                    "4) Персоналізація: категорії, активність, звіти, стиль",
+                ],
+            ),
+            "",
+            "Почни з кнопки 🔐 Connect нижче.",
+        ]
+    ).strip()
 
 
 def help_message() -> str:
@@ -247,8 +200,7 @@ def connect_instructions() -> str:
     parts.append("1) Відкрий сторінку Personal API:")
     parts.append("https://api.monobank.ua/index.html")
     parts.append("2) Створи Personal API token")
-    parts.append("3) Надішли його так:")
-    parts.append("`/connect YOUR_TOKEN`")
+    parts.append("3) Натисни кнопку ✅ Ввести токен і надішли токен одним повідомленням.")
     parts.append("")
     parts.append("Токен зберігається локально та не публікується.")
     return "\n".join(parts).strip()
@@ -317,7 +269,7 @@ def connect_success_confirm() -> str:
     parts.append("🔒 Доступ: тільки read-only (перегляд виписки)")
     parts.append("🔐 Токен збережено локально (зашифровано)")
     parts.append("")
-    parts.append("Наступний крок: `/accounts` — вибрати картки для аналізу.")
+    parts.append("Наступний крок: обери картки для аналізу 👇")
     return "\n".join(parts).strip()
 
 
@@ -375,21 +327,22 @@ def recipient_followup_saved(alias: str, resolved: str) -> str:
 
 def onboarding_steps_not_connected() -> str:
     return section(
-        "Початок (3 кроки)",
+        "Онбординг",
         [
-            "1) `/connect <token>` або кнопка 🔐 Connect",
-            "2) `/accounts` або кнопка 🧾 Accounts — вибери картки",
-            "3) `/bootstrap` — завантаж історію (1м або 3м)",
+            "1) Підключи Monobank (🔐 Connect)",
+            "2) Обери картки для аналізу",
+            "3) Завантаж історію (bootstrap) у фоні",
+            "4) Персоналізація: тон, активність, блоки звітів",
         ],
     )
 
 
 def onboarding_connected_next_steps() -> str:
     return section(
-        "Далі (2 кроки)",
+        "Далі",
         [
-            "1) `/accounts` або кнопка 🧾 Accounts — вибери картки",
-            "2) `/bootstrap` — завантаж історію (1м або 3м)",
+            "1) Обери картки для аналізу",
+            "2) Завантаж історію (bootstrap) у фоні",
         ],
     )
 
@@ -414,6 +367,8 @@ def accounts_after_done() -> str:
             "Тепер завантаж історію транзакцій:",
             "• 1 місяць — швидше для старту",
             "• 3 місяці — краще для трендів/аномалій",
+            "• 6 місяців — стабільніші тренди",
+            "• 12 місяців — максимум контексту (довше через ліміти API)",
         ]
     ).strip()
 
@@ -503,8 +458,6 @@ def bootstrap_started_message(days: int) -> str:
         [
             f"📥 Запустив завантаження історії за *{days} днів* у фоні…",
             "Це може зайняти час через ліміти Monobank API.",
-            "",
-            "Я напишу, коли буде готово ✅",
         ]
     ).strip()
 
@@ -512,17 +465,21 @@ def bootstrap_started_message(days: int) -> str:
 def bootstrap_done_message(accounts: int, fetched_requests: int, appended: int) -> str:
     return "\n".join(
         [
-            success("Готово!"),
+            success("Завантаження історії завершено."),
             "",
             f"Карток: {accounts}",
             f"Запитів до API: {fetched_requests}",
             f"Додано транзакцій: {appended}",
+        ]
+    ).strip()
+
+
+def bootstrap_done_onboarding_message() -> str:
+    return "\n".join(
+        [
+            success("Історію транзакцій завантажено."),
             "",
-            "Тепер можеш:",
-            "• /today",
-            "• /week",
-            "• /month",
-            "• /week ai",
+            "Продовжуємо онбординг 👇",
         ]
     ).strip()
 
@@ -647,3 +604,23 @@ def err_no_ledger(period: str) -> str:
             ]
         )
     )
+
+
+def menu_root_message() -> str:
+    return "🧭 *Головне меню*\n\nОбери розділ:"
+
+
+def menu_reports_message() -> str:
+    return "📊 *Звіти*\n\nОбери тип звіту:"
+
+
+def menu_data_message() -> str:
+    return "⚙️ *Дані*\n\nТут керування підключенням, картками та оновленням:"
+
+
+def menu_categories_message() -> str:
+    return "🗂️ *Категорії*\n\nКерування таксономією (буде розширено):"
+
+
+def coming_soon_message() -> str:
+    return "🚧 Цей екран ще в розробці."

@@ -6,9 +6,9 @@ from typing import Any, Iterable, Sequence
 try:
     from aiogram.types import InlineKeyboardButton
     from aiogram.utils.keyboard import InlineKeyboardBuilder
-except Exception:  # pragma: no cover
-    InlineKeyboardBuilder = None  # type: ignore
-    InlineKeyboardButton = None  # type: ignore
+except Exception:
+    InlineKeyboardBuilder = None
+    InlineKeyboardButton = None
 
 
 BTN_BACK = "⬅️ Назад"
@@ -57,14 +57,61 @@ def _build_rows(rows: Sequence[Sequence[tuple[str, str]]]) -> Any:
 
 
 def build_main_menu_keyboard() -> Any:
-    rows: list[list[tuple[str, str]]] = [
-        [(MENU_CONNECT, "menu_connect"), (MENU_ACCOUNTS, "menu_accounts")],
-        [(MENU_WEEK, "menu_week"), (MENU_MONTH, "menu_month")],
-        [(MENU_REFRESH_WEEK, "menu_refresh_week"), (MENU_STATUS, "menu_status")],
-        [(MENU_HELP, "menu_help"), (MENU_UNCAT, "menu_uncat")],
-        [(MENU_CURRENCY, "menu_currency")],
-    ]
-    return _build_rows(rows)
+    return _build_rows(
+        [
+            [("📊 Звіти", "menu:reports"), ("⚙️ Дані", "menu:data")],
+            [("🗂️ Категорії", "menu:categories"), (MENU_UNCAT, "menu_uncat")],
+            [(MENU_CURRENCY, "menu_currency"), (MENU_HELP, "menu_help")],
+        ]
+    )
+
+
+def build_onboarding_resume_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("➡️ Продовжити онбординг", "onb_resume")],
+            [(BTN_BACK, "onb_back_main")],
+        ]
+    )
+
+
+def build_start_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [(MENU_CONNECT, "menu_connect"), (MENU_HELP, "menu_help")],
+            [(MENU_CURRENCY, "menu_currency")],
+        ]
+    )
+
+
+def build_reports_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [(MENU_WEEK, "menu_week"), (MENU_MONTH, "menu_month")],
+            [(BTN_BACK, "menu:root")],
+        ]
+    )
+
+
+def build_data_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [(MENU_CONNECT, "menu_connect"), (MENU_ACCOUNTS, "menu_accounts")],
+            [(MENU_REFRESH_WEEK, "menu_refresh_week"), (MENU_STATUS, "menu_status")],
+            [(BTN_BACK, "menu:root")],
+        ]
+    )
+
+
+def build_categories_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("➕ Додати категорію", "menu:categories:add")],
+            [("✏️ Перейменувати", "menu:categories:rename")],
+            [("🗑️ Видалити", "menu:categories:delete")],
+            [(BTN_BACK, "menu:root")],
+        ]
+    )
 
 
 def build_vertical_options_keyboard(options: Iterable[tuple[str, str]]) -> Any:
@@ -98,16 +145,16 @@ def build_currency_screen_keyboard() -> Any:
     return _build_rows([[(BTN_REFRESH, "currency_refresh"), (BTN_BACK, "currency_back")]])
 
 
-def build_bootstrap_picker_keyboard() -> Any:
-    return _build_rows(
-        [
-            [("📥 Bootstrap 1 місяць", "boot_30")],
-            [("📥 Bootstrap 3 місяці", "boot_90")],
-            [("📥 Bootstrap 6 місяців", "boot_180")],
-            [("📥 Bootstrap 12 місяців", "boot_365")],
-            [(BTN_SKIP, "boot_skip")],
-        ]
-    )
+def build_bootstrap_picker_keyboard(*, include_skip: bool = True) -> Any:
+    rows: list[list[tuple[str, str]]] = [
+        [("📥 Bootstrap 1 місяць", "boot_30")],
+        [("📥 Bootstrap 3 місяці", "boot_90")],
+        [("📥 Bootstrap 6 місяців", "boot_180")],
+        [("📥 Bootstrap 12 місяців", "boot_365")],
+    ]
+    if include_skip:
+        rows.append([(BTN_SKIP, "boot_skip")])
+    return _build_rows(rows)
 
 
 def build_paging_keyboard(

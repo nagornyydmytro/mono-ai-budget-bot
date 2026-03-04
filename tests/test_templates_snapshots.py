@@ -79,13 +79,11 @@ def test_templates_persona_prompt_snapshot():
 
 def test_templates_bootstrap_started_message_snapshot():
     assert (
-        templates.bootstrap_started_message(90)
+        templates.bootstrap_started_message(30)
         == "\n".join(
             [
-                "📥 Запустив завантаження історії за *90 днів* у фоні…",
+                "📥 Запустив завантаження історії за *30 днів* у фоні…",
                 "Це може зайняти час через ліміти Monobank API.",
-                "",
-                "Я напишу, коли буде готово ✅",
             ]
         ).strip()
     )
