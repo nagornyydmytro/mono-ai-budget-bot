@@ -109,22 +109,6 @@ def cmd_bot() -> int:
     return 0
 
 
-def reset_cache(settings) -> None:
-    cache_dir: Path = settings.cache_dir
-
-    if not cache_dir.exists():
-        print("Cache directory does not exist.")
-        return
-
-    for item in cache_dir.iterdir():
-        if item.is_dir():
-            shutil.rmtree(item)
-        else:
-            item.unlink()
-
-    print("Cache cleared.")
-
-
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
