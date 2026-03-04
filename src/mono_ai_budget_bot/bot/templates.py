@@ -535,6 +535,27 @@ def reports_preset_prompt() -> str:
     ).strip()
 
 
+def reports_custom_period_prompt() -> str:
+    return "\n".join(
+        [
+            "🛠️ Custom звіти",
+            "",
+            "Обери період і увімкни/вимкни блоки.",
+        ]
+    ).strip()
+
+
+def reports_custom_blocks_prompt(period: str) -> str:
+    title = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}.get(period, period)
+    return "\n".join(
+        [
+            f"🧩 Налаштування блоків: *{title}*",
+            "",
+            "Тисни на блок, щоб перемкнути ✅/❌.",
+        ]
+    ).strip()
+
+
 def activity_mode_prompt() -> str:
     return "\n".join(
         [

@@ -18,6 +18,8 @@ from mono_ai_budget_bot.bot.ui import (
     build_bootstrap_picker_keyboard,
     build_currency_screen_keyboard,
     build_main_menu_keyboard,
+    build_reports_custom_blocks_keyboard,
+    build_reports_custom_period_keyboard,
     build_vertical_options_keyboard,
 )
 from mono_ai_budget_bot.core.time_ranges import range_today
@@ -1544,6 +1546,21 @@ async def main() -> None:
         cfg = build_reports_preset(preset)
         reports_store.save(tg_id, cfg)
 
+        if preset == "custom":
+            cfg_base = build_reports_preset("max")
+            cfg_custom = ReportsConfig(
+                preset="custom",
+                daily=dict(cfg_base.daily),
+                weekly=dict(cfg_base.weekly),
+                monthly=dict(cfg_base.monthly),
+            )
+            reports_store.save(tg_id, cfg_custom)
+
+            kb0 = build_reports_custom_period_keyboard()
+            await query.message.answer(templates.reports_custom_period_prompt(), reply_markup=kb0)
+            await query.answer("Custom")
+            return
+
         kb = build_vertical_options_keyboard(
             [
                 ("🔊 Loud", "act_loud"),
@@ -1560,6 +1577,93 @@ async def main() -> None:
         if query.message:
             await query.message.answer("✅ Пресет звітів збережено.")
         await query.answer("Збережено")
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str) and c.data.startswith("rep_custom_period:")
+    )
+    async def cb_rep_custom_period(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        period = str(query.data).split(":", 1)[1]
+        cfg = reports_store.load(tg_id)
+
+        enabled_map = {"daily": cfg.daily, "weekly": cfg.weekly, "monthly": cfg.monthly}.get(
+            period, {}
+        )
+        kb = build_reports_custom_blocks_keyboard(period, enabled_map)
+
+        if query.message:
+            await query.message.answer(
+                templates.reports_custom_blocks_prompt(period),
+                reply_markup=kb,
+            )
+        await query.answer("OK")
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str) and c.data.startswith("rep_custom_toggle:")
+    )
+    async def cb_rep_custom_toggle(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        _, period, key = str(query.data).split(":", 2)
+        cfg = reports_store.load(tg_id)
+
+        daily = dict(cfg.daily)
+        weekly = dict(cfg.weekly)
+        monthly = dict(cfg.monthly)
+
+        target = {"daily": daily, "weekly": weekly, "monthly": monthly}.get(period)
+        if target is None or key not in target:
+            await query.answer("Невідомий блок", show_alert=True)
+            return
+
+        target[key] = not bool(target[key])
+
+        cfg2 = ReportsConfig(preset="custom", daily=daily, weekly=weekly, monthly=monthly)
+        reports_store.save(tg_id, cfg2)
+
+        enabled_map = {"daily": daily, "weekly": weekly, "monthly": monthly}.get(period, {})
+        kb = build_reports_custom_blocks_keyboard(period, enabled_map)
+
+        if query.message:
+            await query.message.answer(
+                templates.reports_custom_blocks_prompt(period),
+                reply_markup=kb,
+            )
+        await query.answer("Збережено")
+
+    @dp.callback_query(lambda c: c.data == "rep_custom_back")
+    async def cb_rep_custom_back(query: CallbackQuery) -> None:
+        kb = build_reports_custom_period_keyboard()
+        if query.message:
+            await query.message.answer(
+                templates.reports_custom_period_prompt(),
+                reply_markup=kb,
+            )
+        await query.answer("Back")
+
+    @dp.callback_query(lambda c: c.data == "rep_custom_done")
+    async def cb_rep_custom_done(query: CallbackQuery) -> None:
+        kb = build_vertical_options_keyboard(
+            [
+                ("🔊 Loud", "act_loud"),
+                ("🔕 Quiet", "act_quiet"),
+                ("🛠️ Custom", "act_custom"),
+            ]
+        )
+        if query.message:
+            await query.message.answer(
+                templates.activity_mode_prompt(),
+                reply_markup=kb,
+            )
+            await query.message.answer("✅ Налаштування звітів збережено.")
+        await query.answer("Done")
 
     @dp.callback_query(lambda c: c.data in ("act_loud", "act_quiet", "act_custom"))
     async def cb_activity_mode(query: CallbackQuery) -> None:

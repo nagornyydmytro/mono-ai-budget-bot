@@ -131,3 +131,36 @@ def build_paging_keyboard(
     if back_cb:
         rows.append([(back_text, back_cb)])
     return _build_rows(rows)
+
+
+def build_reports_custom_period_keyboard() -> Any:
+    return build_vertical_options_keyboard(
+        [
+            ("🗓️ Daily", "rep_custom_period:daily"),
+            ("📅 Weekly", "rep_custom_period:weekly"),
+            ("🗓️ Monthly", "rep_custom_period:monthly"),
+            ("✅ Готово", "rep_custom_done"),
+        ]
+    )
+
+
+def build_reports_custom_blocks_keyboard(period: str, enabled: dict[str, bool]) -> Any:
+    order = ["totals", "breakdowns", "compare_baseline", "trends", "anomalies", "what_if"]
+    titles = {
+        "totals": "Факти (суми/оборот)",
+        "breakdowns": "Розбивки (категорії/мерчанти)",
+        "compare_baseline": "Порівняння (baseline)",
+        "trends": "Тренди",
+        "anomalies": "Аномалії",
+        "what_if": "What-if",
+    }
+
+    rows: list[tuple[str, str]] = []
+    for k in order:
+        if k not in enabled:
+            continue
+        mark = "✅" if enabled.get(k) else "❌"
+        rows.append((f"{mark} {titles.get(k, k)}", f"rep_custom_toggle:{period}:{k}"))
+
+    rows.append(("⬅️ Назад", "rep_custom_back"))
+    return build_vertical_options_keyboard(rows)
