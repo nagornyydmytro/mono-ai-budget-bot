@@ -215,6 +215,16 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
         records = tx_store.load_range(cfg.telegram_user_id, account_ids, ts_from, ts_to)
         rows = rows_from_ledger(records)
         facts = compute_facts(rows)
+
+        cov = tx_store.aggregated_coverage_window(cfg.telegram_user_id, account_ids)
+        if cov is not None:
+            facts["coverage"] = {
+                "coverage_from_ts": int(cov[0]),
+                "coverage_to_ts": int(cov[1]),
+                "requested_from_ts": int(ts_from),
+                "requested_to_ts": int(ts_to),
+            }
+
         store.save(cfg.telegram_user_id, period, facts)
         return
 
@@ -229,8 +239,19 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
     ts_to = now_ts
 
     records = tx_store.load_range(cfg.telegram_user_id, account_ids, ts_from, ts_to)
-
     current_facts = enrich_period_facts(records, days_back=days_back, now_ts=now_ts)
+
+    req_from = now_ts - days_back * 24 * 60 * 60
+    req_to = now_ts
+
+    cov = tx_store.aggregated_coverage_window(cfg.telegram_user_id, account_ids)
+    if cov is not None and isinstance(current_facts, dict):
+        current_facts["coverage"] = {
+            "coverage_from_ts": int(cov[0]),
+            "coverage_to_ts": int(cov[1]),
+            "requested_from_ts": int(req_from),
+            "requested_to_ts": int(req_to),
+        }
 
     store.save(cfg.telegram_user_id, period, current_facts)
 

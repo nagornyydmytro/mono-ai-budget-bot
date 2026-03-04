@@ -33,6 +33,13 @@ class DummyTxStore:
             Tx(amount=7000, mcc=None, description="top up"),
         ]
 
+    def aggregated_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_ids: list[str],
+    ) -> tuple[int, int] | None:
+        return None
+
 
 def test_executor_income_and_transfers(monkeypatch):
     import mono_ai_budget_bot.nlq.executor as ex

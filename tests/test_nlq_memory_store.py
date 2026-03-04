@@ -36,6 +36,13 @@ class DummyTxStore:
             Tx(time_=1100, amount=-5000, mcc=5411, description="ATB"),
         ]
 
+    def aggregated_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_ids: list[str],
+    ) -> tuple[int, int] | None:
+        return None
+
 
 def test_memory_file_created(tmp_path, monkeypatch):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")

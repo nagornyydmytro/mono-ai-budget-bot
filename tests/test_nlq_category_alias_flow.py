@@ -38,6 +38,13 @@ class DummyTxStore:
             Tx(time_=1200, amount=-285994, mcc=5411, description="Фора"),
         ]
 
+    def aggregated_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_ids: list[str],
+    ) -> tuple[int, int] | None:
+        return None
+
 
 def test_unknown_alias_triggers_clarify_and_learns(tmp_path, monkeypatch):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")

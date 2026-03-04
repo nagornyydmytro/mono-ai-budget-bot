@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from mono_ai_budget_bot.bot import templates
-from mono_ai_budget_bot.bot.formatting import format_money_uah_pretty
+from mono_ai_budget_bot.bot.formatting import format_money_uah_pretty, format_ts_local
 from mono_ai_budget_bot.reports.config import ReportsConfig
 from mono_ai_budget_bot.storage.reports_store import ReportsStore
 
@@ -40,6 +40,27 @@ def _period_to_cfg_period(period: str) -> str:
     if period == "month":
         return "monthly"
     return period
+
+
+def _render_coverage_warning(facts: dict) -> str | None:
+    cov = facts.get("coverage")
+    if not isinstance(cov, dict):
+        return None
+
+    try:
+        cov_from = int(cov["coverage_from_ts"])
+        cov_to = int(cov["coverage_to_ts"])
+        req_from = int(cov["requested_from_ts"])
+        req_to = int(cov["requested_to_ts"])
+    except Exception:
+        return None
+
+    if req_from >= cov_from and req_to <= cov_to:
+        return None
+
+    d1 = format_ts_local(cov_from)[:10]
+    d2 = format_ts_local(cov_to)[:10]
+    return templates.warning(f"Дані неповні для запитаного періоду. Coverage: {d1} — {d2}.")
 
 
 def _render_totals_section(facts: dict) -> str | None:
@@ -378,6 +399,10 @@ def render_report_for_user(
     header = f"📊 {md_escape(title)}"
 
     facts_block = _render_facts_block_by_config(facts, enabled)
+
+    cov_warn = _render_coverage_warning(facts)
+    if cov_warn:
+        facts_block = "\n\n".join([cov_warn, facts_block]).strip()
 
     trends_block = None
     if "trends" in enabled:

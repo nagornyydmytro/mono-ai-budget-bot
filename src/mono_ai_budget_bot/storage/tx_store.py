@@ -85,6 +85,27 @@ class TxStore:
     def coverage_window(self, telegram_user_id: int, account_id: str) -> tuple[int, int] | None:
         return self._meta.get_coverage_window(telegram_user_id, account_id)
 
+    def aggregated_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_ids: list[str],
+    ) -> tuple[int, int] | None:
+        if not account_ids:
+            return None
+
+        windows: list[tuple[int, int]] = []
+        for aid in account_ids:
+            w = self.coverage_window(telegram_user_id, aid)
+            if w is None:
+                return None
+            windows.append(w)
+
+        start_ts = max(w[0] for w in windows)
+        end_ts = min(w[1] for w in windows)
+        if end_ts < start_ts:
+            return None
+        return start_ts, end_ts
+
     def _load_ids_set(self, telegram_user_id: int, account_id: str) -> set[str]:
         path = self._path(telegram_user_id, account_id)
         ids: set[str] = set()

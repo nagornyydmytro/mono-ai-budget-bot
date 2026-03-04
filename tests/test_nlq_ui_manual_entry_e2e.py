@@ -42,6 +42,13 @@ class DummyTxStore:
             Tx(time_=1500, amount=-50000, mcc=4829, description="Переказ дівчині: Kate S."),
         ]
 
+    def aggregated_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_ids: list[str],
+    ) -> tuple[int, int] | None:
+        return None
+
 
 def _patch_stores(monkeypatch, tmp_path):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")

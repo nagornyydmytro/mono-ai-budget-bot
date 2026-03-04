@@ -33,6 +33,13 @@ class DummyTxStore:
             Tx(time_=1100, amount=-10000, mcc=5814, description="McDonald's"),
         ]
 
+    def aggregated_coverage_window(
+        self,
+        telegram_user_id: int,
+        account_ids: list[str],
+    ) -> tuple[int, int] | None:
+        return None
+
 
 def test_llm_planner_fallback_executes(monkeypatch, tmp_path):
     import mono_ai_budget_bot.nlq.executor as ex

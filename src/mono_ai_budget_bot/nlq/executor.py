@@ -10,6 +10,7 @@ from mono_ai_budget_bot.bot.formatting import (
     format_decimal_2,
     format_money_grn,
     format_money_symbol_uah,
+    format_ts_local,
 )
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.currency import MonobankPublicClient, alpha_to_numeric, convert_amount
@@ -138,6 +139,16 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         ts_from = spec.window.start_ts
 
     tx_store = TxStore()
+
+    cov = tx_store.aggregated_coverage_window(telegram_user_id, account_ids)
+    coverage_warning: str | None = None
+    if cov is not None:
+        cov_from, cov_to = cov
+        if spec.window.start_ts < cov_from or spec.window.end_ts > cov_to:
+            d1 = format_ts_local(int(cov_from))[:10]
+            d2 = format_ts_local(int(cov_to))[:10]
+            coverage_warning = f"⚠️ Дані неповні для запитаного періоду. Coverage: {d1} — {d2}."
+
     rows = tx_store.load_range(
         telegram_user_id=telegram_user_id,
         account_ids=account_ids,
@@ -298,6 +309,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         else:
             prefix = f"За останні {days} днів"
 
+    def _with_cov(text: str) -> str:
+        if coverage_warning:
+            return f"{coverage_warning}\n\n{text}"
+        return text
+
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
         parts: list[str] = [f"{prefix} ти витратив {format_money_grn(total_cents / 100)}."]
@@ -330,31 +346,31 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 if c.lines:
                     parts.append(f"\n{c.title}:\n" + "\n".join(c.lines))
 
-        return "\n".join(parts)
+        return _with_cov("\n".join(parts))
 
     if intent == "spend_count":
-        return f"{prefix} було {len(filtered)} витрат."
+        return _with_cov(f"{prefix} було {len(filtered)} витрат.")
 
     if intent == "income_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} було поповнень на {format_money_grn(total_cents / 100)}."
+        return _with_cov(f"{prefix} було поповнень на {format_money_grn(total_cents / 100)}.")
 
     if intent == "income_count":
-        return f"{prefix} було {len(filtered)} поповнень."
+        return _with_cov(f"{prefix} було {len(filtered)} поповнень.")
 
     if intent == "transfer_out_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} ти переказав {format_money_grn(total_cents / 100)}."
+        return _with_cov(f"{prefix} ти переказав {format_money_grn(total_cents / 100)}.")
 
     if intent == "transfer_out_count":
-        return f"{prefix} було {len(filtered)} вихідних переказів."
+        return _with_cov(f"{prefix} було {len(filtered)} вихідних переказів.")
 
     if intent == "transfer_in_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return f"{prefix} ти отримав {format_money_grn(total_cents / 100)}."
+        return _with_cov(f"{prefix} ти отримав {format_money_grn(total_cents / 100)}.")
 
     if intent == "transfer_in_count":
-        return f"{prefix} було {len(filtered)} вхідних переказів."
+        return _with_cov(f"{prefix} було {len(filtered)} вхідних переказів.")
 
     return "Поки що цей тип запиту не реалізовано."
 
