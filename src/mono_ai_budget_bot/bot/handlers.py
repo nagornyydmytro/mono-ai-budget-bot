@@ -687,7 +687,7 @@ def register_handlers(
             reply_markup=kb,
         )
 
-    @dp.callback_query(lambda c: c.data == "menu_uncat")
+    @dp.callback_query(lambda c: c.data == "menu:uncat")
     async def cb_menu_uncat(query: CallbackQuery) -> None:
         await query.answer()
 
@@ -835,7 +835,7 @@ def register_handlers(
         kb = _currency_screen_keyboard()
         await message.answer(text, reply_markup=kb.as_markup())
 
-    @dp.callback_query(lambda c: c.data == "menu_currency")
+    @dp.callback_query(lambda c: c.data == "menu:currency")
     async def cb_menu_currency(query: CallbackQuery) -> None:
         if query.message:
             await _send_currency_screen(query.message, force_refresh=False)
@@ -875,7 +875,7 @@ def register_handlers(
 
         await query.answer()
 
-    @dp.callback_query(lambda c: c.data == "menu_help")
+    @dp.callback_query(lambda c: c.data == "menu:help")
     async def cb_menu_help(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:

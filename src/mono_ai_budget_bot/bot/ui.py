@@ -59,12 +59,10 @@ def _build_rows(rows: Sequence[Sequence[tuple[str, str]]]) -> Any:
 def build_main_menu_keyboard(*, uncat_enabled: bool = True) -> Any:
     rows = [
         [("📊 Звіти", "menu:reports"), ("⚙️ Дані", "menu:data")],
+        [(MENU_UNCAT, "menu:uncat")],
         [("🗂️ Категорії", "menu:categories")],
-        [(MENU_CURRENCY, "menu_currency"), (MENU_HELP, "menu_help")],
+        [(MENU_CURRENCY, "menu:currency"), (MENU_HELP, "menu:help")],
     ]
-
-    if uncat_enabled:
-        rows.insert(1, [(MENU_UNCAT, "menu_uncat")])
 
     return _build_rows(rows)
 
