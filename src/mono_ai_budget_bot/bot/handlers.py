@@ -516,6 +516,107 @@ def register_handlers(
             )
         await query.answer()
 
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:new_token")
+    async def cb_data_new_token(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        memory_store.set_pending_manual_mode(
+            tg_id,
+            expected="mono_token",
+            hint="Встав сюди новий Monobank Personal API token.",
+            source="data_menu",
+            ttl_sec=900,
+        )
+
+        if query.message:
+            await query.message.answer(
+                "🔑 Встав новий токен одним повідомленням.",
+                reply_markup=build_back_keyboard("menu:data"),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:accounts")
+    async def cb_data_accounts(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token:
+            await query.answer("Monobank не підключено", show_alert=True)
+            return
+
+        mb = MonobankClient(token=cfg.mono_token)
+        try:
+            info = mb.client_info()
+        finally:
+            mb.close()
+
+        accounts = [
+            {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
+            for a in info.accounts
+        ]
+        selected_ids = set(cfg.selected_account_ids or [])
+        text, kb = render_accounts_screen(accounts, selected_ids)
+
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb)
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:refresh")
+    async def cb_data_refresh(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
+            await query.answer("Спочатку підключи Monobank і вибери картки", show_alert=True)
+            return
+
+        if query.message:
+            await query.message.answer(
+                "🔄 Оновлюю останні транзакції…\nЦе може зайняти кілька секунд.",
+            )
+
+        asyncio.create_task(sync_user_ledger(tg_id, cfg, days_back=30))
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:status")
+    async def cb_data_status(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token:
+            await query.answer("Monobank не підключено", show_alert=True)
+            return
+
+        acc_n = len(cfg.selected_account_ids or [])
+        prof = profile_store.load(tg_id) or {}
+        onboarding_done = bool(prof.get("persona"))
+
+        text = "\n".join(
+            [
+                "📊 Status",
+                "",
+                "Monobank: ✅",
+                f"Карток вибрано: {acc_n}",
+                f"Онбординг: {'✅' if onboarding_done else '⏳'}",
+            ]
+        ).strip()
+
+        if query.message:
+            await query.message.answer(text)
+        await query.answer()
+
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories")
     async def cb_menu_categories(query: CallbackQuery) -> None:
         if query.message:
@@ -815,14 +916,14 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu_week")
     async def cb_menu_week(query: CallbackQuery) -> None:
-        if query.message:
-            await _send_period_report(query.message, "week")
+        if query.message and query.from_user:
+            await _send_period_report(query.message, "week", tg_id_override=query.from_user.id)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_month")
     async def cb_menu_month(query: CallbackQuery) -> None:
-        if query.message:
-            await _send_period_report(query.message, "month")
+        if query.message and query.from_user:
+            await _send_period_report(query.message, "month", tg_id_override=query.from_user.id)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_status")
@@ -1436,10 +1537,19 @@ def register_handlers(
         )
         await message.answer(templates.aliases_cleared_message())
 
-    async def _send_period_report(message: Message, period: str) -> None:
+    async def _send_period_report(
+        message: Message,
+        period: str,
+        *,
+        tg_id_override: int | None = None,
+    ) -> None:
         want_ai = " ai" in (" " + (message.text or "").lower() + " ")
 
-        tg_id = message.from_user.id if message.from_user else None
+        tg_id = (
+            tg_id_override
+            if tg_id_override is not None
+            else (message.from_user.id if message.from_user else None)
+        )
         if tg_id is None:
             await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return

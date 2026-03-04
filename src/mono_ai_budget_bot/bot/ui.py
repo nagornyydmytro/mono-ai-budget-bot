@@ -96,8 +96,10 @@ def build_reports_menu_keyboard() -> Any:
 def build_data_menu_keyboard() -> Any:
     return _build_rows(
         [
-            [(MENU_CONNECT, "menu_connect"), (MENU_ACCOUNTS, "menu_accounts")],
-            [(MENU_REFRESH_WEEK, "menu_refresh_week"), (MENU_STATUS, "menu_status")],
+            [("🔑 New token", "menu:data:new_token")],
+            [("💳 Change accounts", "menu:data:accounts")],
+            [("🔄 Refresh latest", "menu:data:refresh")],
+            [("📊 Status", "menu:data:status")],
             [(BTN_BACK, "menu:root")],
         ]
     )

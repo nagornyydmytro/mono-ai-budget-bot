@@ -609,7 +609,13 @@ def menu_reports_message() -> str:
 
 
 def menu_data_message() -> str:
-    return "⚙️ *Дані*\n\nТут керування підключенням, картками та оновленням:"
+    return "\n".join(
+        [
+            "📊 Мої дані",
+            "",
+            "Тут можна керувати підключенням Monobank і синхронізацією.",
+        ]
+    ).strip()
 
 
 def menu_categories_message() -> str:
