@@ -419,7 +419,7 @@ def register_handlers(
         cur = uncat_pending_store.load(tg_id)
         now_ts = int(time.time())
         if cur is None or cur.pending_id != pid or cur.used or cur.is_expired(now_ts):
-            await query.answer("Ця кнопка застаріла.", show_alert=True)
+            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         uncat_pending_store.mark_used(tg_id)
@@ -448,7 +448,7 @@ def register_handlers(
             or cur.is_expired(now_ts)
             or cur.stage != "pick_leaf"
         ):
-            await query.answer("Ця кнопка застаріла.", show_alert=True)
+            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         uncat_pending_store.create(tg_id, tx_id=cur.tx_id, stage="create_name", ttl_sec=900)
@@ -478,7 +478,7 @@ def register_handlers(
             or cur.is_expired(now_ts)
             or cur.stage != "pick_leaf"
         ):
-            await query.answer("Ця кнопка застаріла.", show_alert=True)
+            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         tax = taxonomy_store.load(tg_id)
@@ -621,7 +621,7 @@ def register_handlers(
 
         now_ts = int(time.time())
         if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
-            await query.answer("Ця кнопка вже неактуальна. Запитай ще раз 🙂", show_alert=True)
+            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         try:
@@ -659,7 +659,7 @@ def register_handlers(
         pid = parts[1].strip()
         now_ts = int(time.time())
         if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
-            await query.answer("Ця кнопка вже неактуальна.", show_alert=True)
+            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         mem = memory_store.load_memory(tg_id)
@@ -703,7 +703,7 @@ def register_handlers(
         pid = parts[1].strip()
         now_ts = int(time.time())
         if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
-            await query.answer("Ця кнопка вже неактуальна.", show_alert=True)
+            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         memory_store.pop_pending_action(tg_id)

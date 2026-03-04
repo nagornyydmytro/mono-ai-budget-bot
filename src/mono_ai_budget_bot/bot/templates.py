@@ -25,6 +25,10 @@ def error(message: str) -> str:
     return f"❌ {message}"
 
 
+def stale_button_message() -> str:
+    return "Ця кнопка вже неактуальна. Запитай ще раз 🙂"
+
+
 def divider() -> str:
     return "──────────────────"
 
