@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from mono_ai_budget_bot.settings.activity import normalize_activity_settings
+
 ActivityMode = Literal["loud", "quiet", "custom"]
 UncatPromptFrequency = Literal["immediate", "daily", "weekly", "before_report"]
 Persona = Literal["supportive", "rational", "motivator"]
@@ -30,5 +32,5 @@ def apply_onboarding_settings(
         if persona not in ("supportive", "rational", "motivator"):
             raise ValueError("invalid persona")
         out["persona"] = persona
-
+    out = normalize_activity_settings(out)
     return out

@@ -8,6 +8,9 @@ def test_apply_onboarding_settings_valid():
     p = {}
     p = apply_onboarding_settings(p, activity_mode="loud")
     assert p["activity_mode"] == "loud"
+    assert p["activity"]["mode"] == "loud"
+    assert p["activity"]["toggles"]["auto_reports"] is True
+    assert p["activity"]["toggles"]["uncat_prompts"] is True
 
     p = apply_onboarding_settings(p, uncategorized_prompt_frequency="daily")
     assert p["uncategorized_prompt_frequency"] == "daily"
@@ -37,5 +40,8 @@ def test_profile_store_roundtrip(tmp_path):
     st.save(1, prof)
     loaded = st.load(1)
     assert loaded is not None
+    assert loaded["activity"]["mode"] == "quiet"
+    assert loaded["activity"]["toggles"]["auto_reports"] is False
+    assert loaded["activity"]["toggles"]["uncat_prompts"] is False
     assert loaded["activity_mode"] == "quiet"
     assert loaded["uncategorized_prompt_frequency"] == "before_report"
