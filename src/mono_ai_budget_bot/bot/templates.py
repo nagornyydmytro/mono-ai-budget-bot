@@ -475,13 +475,7 @@ def bootstrap_done_message(accounts: int, fetched_requests: int, appended: int) 
 
 
 def bootstrap_done_onboarding_message() -> str:
-    return "\n".join(
-        [
-            success("Історію транзакцій завантажено."),
-            "",
-            "Продовжуємо онбординг 👇",
-        ]
-    ).strip()
+    return success("Історію транзакцій завантажено.")
 
 
 def reports_preset_prompt() -> str:

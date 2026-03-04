@@ -434,6 +434,11 @@ def register_handlers(
             await query.answer("Спочатку підключи /connect", show_alert=True)
             return
 
+        selected_ids = set(cfg.selected_account_ids or [])
+        if not selected_ids:
+            await query.answer("Нічого очищати")
+            return
+
         _save_selected_accounts(users, tg_id, [])
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -451,6 +456,7 @@ def register_handlers(
         if query.message:
             prefix = f"{templates.connect_success_confirm()}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
+
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "acc_done")
@@ -714,6 +720,7 @@ def register_handlers(
     @dp.callback_query(lambda c: c.data == "onb_back_main")
     async def cb_onb_back_main(query: CallbackQuery) -> None:
         if query.message:
+            memory_store.pop_pending_manual_mode(query.from_user.id)
             kb = build_start_menu_keyboard()
             await query.message.answer(templates.start_message(), reply_markup=kb)
         await query.answer()
@@ -1030,9 +1037,9 @@ def register_handlers(
                     if chat_id is not None:
                         prof = profile_store.load(tg_id) or {}
 
-                        prof = profile_store.load(tg_id) or {}
+                        onboarding_done = bool(prof.get("persona"))
 
-                        if prof.get("persona"):
+                        if onboarding_done:
                             text = templates.bootstrap_done_message(
                                 accounts=res.accounts,
                                 fetched_requests=res.fetched_requests,
