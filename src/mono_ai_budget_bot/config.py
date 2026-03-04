@@ -63,9 +63,12 @@ def load_settings(
     require_master_key: bool = False,
 ) -> Settings:
     settings = Settings()
+
     settings.validate_required(
         require_bot_token=require_bot_token,
         require_master_key=require_master_key,
     )
+
     settings.cache_dir.mkdir(parents=True, exist_ok=True)
+
     return settings

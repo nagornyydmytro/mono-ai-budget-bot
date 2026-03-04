@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import shutil
+from pathlib import Path
 
 from . import __version__
 from .config import load_settings
@@ -24,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="health",
-        choices=["health", "status-env", "range", "bot"],
+        choices=["health", "status-env", "range", "reset-cache", "bot"],
         help="Command to run",
     )
     p.add_argument(
@@ -75,11 +77,52 @@ def cmd_range(period: str) -> int:
     return 0
 
 
+def cmd_reset_cache() -> int:
+    settings = load_settings()
+    cache_dir: Path = settings.cache_dir
+
+    if not cache_dir.exists():
+        print("Cache directory does not exist.")
+        return 0
+
+    if not cache_dir.is_dir():
+        raise ValueError(f"CACHE_DIR is not a directory: {cache_dir}")
+
+    resolved = cache_dir.resolve()
+    if str(resolved) in {str(Path("/").resolve()), str(Path.cwd().resolve())}:
+        raise ValueError(f"Refusing to wipe unsafe CACHE_DIR: {resolved}")
+
+    for item in cache_dir.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+
+    print("Cache cleared:", str(cache_dir))
+    return 0
+
+
 def cmd_bot() -> int:
     from .bot.app import main as bot_main
 
     asyncio.run(bot_main())
     return 0
+
+
+def reset_cache(settings) -> None:
+    cache_dir: Path = settings.cache_dir
+
+    if not cache_dir.exists():
+        print("Cache directory does not exist.")
+        return
+
+    for item in cache_dir.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+
+    print("Cache cleared.")
 
 
 def main() -> int:
@@ -96,6 +139,8 @@ def main() -> int:
         return cmd_status_env()
     if args.command == "range":
         return cmd_range(args.period)
+    if args.command == "reset-cache":
+        return cmd_reset_cache()
     if args.command == "bot":
         return cmd_bot()
 
