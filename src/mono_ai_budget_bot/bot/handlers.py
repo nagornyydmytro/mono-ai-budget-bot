@@ -36,7 +36,11 @@ from .app import (
     md_escape,
     render_accounts_screen,
 )
-from .clarify import build_nlq_clarify_keyboard
+from .clarify import (
+    build_nlq_clarify_keyboard,
+    validate_ok_or_alert,
+    validate_uncat_pending_or_alert,
+)
 from .formatting import format_money_grn
 from .ui import (
     build_bootstrap_picker_keyboard,
@@ -418,8 +422,7 @@ def register_handlers(
 
         cur = uncat_pending_store.load(tg_id)
         now_ts = int(time.time())
-        if cur is None or cur.pending_id != pid or cur.used or cur.is_expired(now_ts):
-            await query.answer(templates.stale_button_message(), show_alert=True)
+        if not await validate_uncat_pending_or_alert(query, cur, pid=pid, now_ts=now_ts):
             return
 
         uncat_pending_store.mark_used(tg_id)
@@ -441,14 +444,13 @@ def register_handlers(
 
         cur = uncat_pending_store.load(tg_id)
         now_ts = int(time.time())
-        if (
-            cur is None
-            or cur.pending_id != pid
-            or cur.used
-            or cur.is_expired(now_ts)
-            or cur.stage != "pick_leaf"
+        if not await validate_uncat_pending_or_alert(
+            query,
+            cur,
+            pid=pid,
+            now_ts=now_ts,
+            stage="pick_leaf",
         ):
-            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         uncat_pending_store.create(tg_id, tx_id=cur.tx_id, stage="create_name", ttl_sec=900)
@@ -471,14 +473,13 @@ def register_handlers(
 
         cur = uncat_pending_store.load(tg_id)
         now_ts = int(time.time())
-        if (
-            cur is None
-            or cur.pending_id != pid
-            or cur.used
-            or cur.is_expired(now_ts)
-            or cur.stage != "pick_leaf"
+        if not await validate_uncat_pending_or_alert(
+            query,
+            cur,
+            pid=pid,
+            now_ts=now_ts,
+            stage="pick_leaf",
         ):
-            await query.answer(templates.stale_button_message(), show_alert=True)
             return
 
         tax = taxonomy_store.load(tg_id)
@@ -620,8 +621,8 @@ def register_handlers(
             return
 
         now_ts = int(time.time())
-        if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
-            await query.answer(templates.stale_button_message(), show_alert=True)
+        ok = memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts)
+        if not await validate_ok_or_alert(query, ok):
             return
 
         try:
@@ -658,8 +659,8 @@ def register_handlers(
 
         pid = parts[1].strip()
         now_ts = int(time.time())
-        if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
-            await query.answer(templates.stale_button_message(), show_alert=True)
+        ok = memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts)
+        if not await validate_ok_or_alert(query, ok):
             return
 
         mem = memory_store.load_memory(tg_id)
@@ -702,8 +703,8 @@ def register_handlers(
 
         pid = parts[1].strip()
         now_ts = int(time.time())
-        if not memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts):
-            await query.answer(templates.stale_button_message(), show_alert=True)
+        ok = memory_store.validate_and_consume_pending(tg_id, pending_id=pid, now_ts=now_ts)
+        if not await validate_ok_or_alert(query, ok):
             return
 
         memory_store.pop_pending_action(tg_id)
