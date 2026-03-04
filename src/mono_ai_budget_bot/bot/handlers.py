@@ -423,7 +423,7 @@ def register_handlers(
             if "Monobank підключено успішно" in msg_text:
                 prefix = f"{templates.connect_success_confirm()}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
-        await query.answer("Ок")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "acc_clear")
     async def cb_clear_accounts(query: CallbackQuery) -> None:
@@ -454,10 +454,10 @@ def register_handlers(
         if query.message:
             prefix = ""
             msg_text = query.message.text or ""
-            if "✅ Monobank підключено успішно" in msg_text:
+            if "Monobank підключено успішно" in msg_text:
                 prefix = f"{templates.connect_success_confirm()}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
-        await query.answer("Очищено")
+        await query.answer()
 
     @dp.callback_query(lambda c: c.data == "acc_done")
     async def cb_done_accounts(query: CallbackQuery) -> None:
