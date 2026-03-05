@@ -71,4 +71,5 @@ def normalize_activity_settings(profile: dict[str, Any]) -> dict[str, Any]:
 
     out["activity_mode"] = mode
     out["activity"] = {"mode": mode, "toggles": merged}
+    out.setdefault("activity_ui", {})
     return out

@@ -634,15 +634,7 @@ def register_handlers(
         prof = profile_store.load(tg_id) or {}
         onboarding_done = bool(prof.get("persona"))
 
-        text = "\n".join(
-            [
-                "📊 Status",
-                "",
-                "Monobank: ✅",
-                f"Карток вибрано: {acc_n}",
-                f"Онбординг: {'✅' if onboarding_done else '⏳'}",
-            ]
-        ).strip()
+        text = templates.status_message(accounts_selected=acc_n, onboarding_done=onboarding_done)
 
         if query.message:
             await query.message.answer(text)
@@ -1431,16 +1423,7 @@ def register_handlers(
         profile_store.save(tg_id, prof)
 
         if query.message:
-            await query.message.answer(
-                "\n".join(
-                    [
-                        templates.success("Дані збережено. Онбординг завершено."),
-                        "",
-                        "Тепер тобі доступне головне меню: /menu",
-                        "Там — звіти, налаштування даних, категорії, uncat та інше.",
-                    ]
-                ).strip()
-            )
+            await query.message.answer(templates.onboarding_finished_message())
         await query.answer()
 
     @dp.message(Command("refresh"))

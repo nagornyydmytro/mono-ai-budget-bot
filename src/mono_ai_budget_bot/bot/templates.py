@@ -29,6 +29,29 @@ def stale_button_message() -> str:
     return "Ця кнопка вже неактуальна. Запитай ще раз 🙂"
 
 
+def status_message(*, accounts_selected: int, onboarding_done: bool) -> str:
+    return "\n".join(
+        [
+            "📊 Status",
+            "",
+            "Monobank: ✅",
+            f"Карток вибрано: {accounts_selected}",
+            f"Онбординг: {'✅' if onboarding_done else '⏳'}",
+        ]
+    ).strip()
+
+
+def onboarding_finished_message() -> str:
+    return "\n".join(
+        [
+            success("Дані збережено. Онбординг завершено."),
+            "",
+            "Тепер тобі доступне головне меню: /menu",
+            "Там — звіти, налаштування даних, категорії, uncat та інше.",
+        ]
+    ).strip()
+
+
 def divider() -> str:
     return "──────────────────"
 
