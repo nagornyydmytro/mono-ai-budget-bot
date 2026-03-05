@@ -90,12 +90,64 @@ def register_handlers(
     sync_user_ledger,
     render_report_for_user,
 ) -> None:
-    def _onboarding_done(tg_id: int) -> bool:
+    def _sync_onboarding_progress(tg_id: int) -> dict[str, bool]:
         cfg = users.load(tg_id)
-        if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
-            return False
         prof = profile_store.load(tg_id) or {}
-        return bool(prof.get("persona"))
+
+        token_done = bool(cfg is not None and cfg.mono_token)
+        accounts_done = bool(cfg is not None and (cfg.selected_account_ids or []))
+        taxonomy_done = taxonomy_store.load(tg_id) is not None
+        reports_done = reports_store.load(tg_id) is not None
+        activity_done = bool(prof.get("activity_mode"))
+        uncat_done = bool(prof.get("uncategorized_prompt_frequency"))
+        persona_done = bool(prof.get("persona"))
+
+        completed = bool(
+            token_done
+            and accounts_done
+            and taxonomy_done
+            and reports_done
+            and activity_done
+            and uncat_done
+            and persona_done
+        )
+
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+
+        onb.update(
+            {
+                "token": token_done,
+                "accounts": accounts_done,
+                "taxonomy": taxonomy_done,
+                "reports": reports_done,
+                "activity_mode": activity_done,
+                "uncat_frequency": uncat_done,
+                "persona": persona_done,
+                "completed": completed,
+            }
+        )
+
+        prof["onboarding"] = onb
+        prof["onboarding_completed"] = completed
+        profile_store.save(tg_id, prof)
+
+        return {
+            "token": token_done,
+            "accounts": accounts_done,
+            "taxonomy": taxonomy_done,
+            "reports": reports_done,
+            "activity_mode": activity_done,
+            "uncat_frequency": uncat_done,
+            "persona": persona_done,
+            "completed": completed,
+        }
+
+    def _onboarding_done(tg_id: int) -> bool:
+        _sync_onboarding_progress(tg_id)
+        prof = profile_store.load(tg_id) or {}
+        return bool(prof.get("onboarding_completed"))
 
     async def _prompt_finish_onboarding(message: Message, *, text: str | None = None) -> None:
         kb = build_onboarding_resume_keyboard()
@@ -238,14 +290,8 @@ def register_handlers(
         if tg_id is None:
             return
 
-        cfg = users.load(tg_id)
-        prof = profile_store.load(tg_id) or {}
-        onboarding_done = (
-            cfg is not None
-            and bool(cfg.mono_token)
-            and bool(cfg.selected_account_ids)
-            and bool(prof.get("persona"))
-        )
+        _sync_onboarding_progress(tg_id)
+        onboarding_done = _onboarding_done(tg_id)
 
         if not onboarding_done:
             kb = build_main_menu_keyboard(uncat_enabled=True)
@@ -291,6 +337,7 @@ def register_handlers(
             return
 
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
+        _sync_onboarding_progress(tg_id)
 
         kb = build_main_menu_keyboard(uncat_enabled=True)
         await message.answer(templates.connect_success_confirm())
@@ -378,6 +425,7 @@ def register_handlers(
             selected.add(acc_id)
 
         _save_selected_accounts(users, tg_id, sorted(selected))
+        _sync_onboarding_progress(tg_id)
 
         mb = MonobankClient(token=cfg.mono_token)
         try:
@@ -418,6 +466,7 @@ def register_handlers(
             return
 
         _save_selected_accounts(users, tg_id, [])
+        _sync_onboarding_progress(tg_id)
 
         mb = MonobankClient(token=cfg.mono_token)
         try:
@@ -447,8 +496,8 @@ def register_handlers(
             await query.answer("Спочатку вибери хоча б 1 картку", show_alert=True)
             return
 
-        prof = profile_store.load(tg_id) or {}
-        onboarding_done = bool(prof.get("persona"))
+        _sync_onboarding_progress(tg_id)
+        onboarding_done = _onboarding_done(tg_id)
 
         mem = memory_store.load_memory(tg_id) if tg_id is not None else {}
         picker = mem.get("accounts_picker") if isinstance(mem, dict) else None
@@ -605,8 +654,8 @@ def register_handlers(
             return
 
         acc_n = len(cfg.selected_account_ids or [])
-        prof = profile_store.load(tg_id) or {}
-        onboarding_done = bool(prof.get("persona"))
+        _sync_onboarding_progress(tg_id)
+        onboarding_done = _onboarding_done(tg_id)
 
         text = templates.status_message(accounts_selected=acc_n, onboarding_done=onboarding_done)
 
@@ -875,16 +924,9 @@ def register_handlers(
             await query.answer()
             return
 
-        cfg = users.load(tg_id)
-
         if query.message:
-            prof = profile_store.load(tg_id) or {}
-            onboarding_done = (
-                cfg is not None
-                and bool(cfg.mono_token)
-                and bool(cfg.selected_account_ids)
-                and bool(prof.get("persona"))
-            )
+            _sync_onboarding_progress(tg_id)
+            onboarding_done = _onboarding_done(tg_id)
 
             if query.message:
                 if not onboarding_done:
@@ -1059,8 +1101,8 @@ def register_handlers(
             return
 
         if query.data == "boot_skip":
-            prof = profile_store.load(tg_id) or {}
-            onboarding_done = bool(prof.get("persona"))
+            _sync_onboarding_progress(tg_id)
+            onboarding_done = _onboarding_done(tg_id)
             if not onboarding_done:
                 await query.answer("На онбордингу пропуск недоступний.", show_alert=True)
                 return
@@ -1118,9 +1160,8 @@ def register_handlers(
                     await _compute_and_cache_reports_for_user(tg_id, account_ids, profile_store)
 
                     if chat_id is not None:
-                        prof = profile_store.load(tg_id) or {}
-
-                        onboarding_done = bool(prof.get("persona"))
+                        _sync_onboarding_progress(tg_id)
+                        onboarding_done = _onboarding_done(tg_id)
 
                         if onboarding_done:
                             text = templates.bootstrap_done_message(
@@ -1160,6 +1201,7 @@ def register_handlers(
         preset = preset_map[str(query.data)]
         tax = build_taxonomy_preset(preset)
         taxonomy_store.save(tg_id, tax)
+        _sync_onboarding_progress(tg_id)
 
         kb = build_vertical_options_keyboard(
             [
@@ -1192,6 +1234,7 @@ def register_handlers(
         preset = preset_map[str(query.data)]
         cfg = build_reports_preset(preset)
         reports_store.save(tg_id, cfg)
+        _sync_onboarding_progress(tg_id)
 
         if preset == "custom":
             cfg_base = build_reports_preset("max")
@@ -1202,6 +1245,7 @@ def register_handlers(
                 monthly=dict(cfg_base.monthly),
             )
             reports_store.save(tg_id, cfg_custom)
+            _sync_onboarding_progress(tg_id)
 
             kb0 = build_reports_custom_period_keyboard()
             await query.message.answer(templates.reports_custom_period_prompt(), reply_markup=kb0)
@@ -1272,6 +1316,7 @@ def register_handlers(
 
         cfg2 = ReportsConfig(preset="custom", daily=daily, weekly=weekly, monthly=monthly)
         reports_store.save(tg_id, cfg2)
+        _sync_onboarding_progress(tg_id)
 
         enabled_map = {"daily": daily, "weekly": weekly, "monthly": monthly}.get(period, {})
         kb = build_reports_custom_blocks_keyboard(period, enabled_map)
@@ -1322,6 +1367,7 @@ def register_handlers(
         prof = profile_store.load(tg_id) or {}
         prof = apply_onboarding_settings(prof, activity_mode=mode)
         profile_store.save(tg_id, prof)
+        _sync_onboarding_progress(tg_id)
 
         if query.message:
             kb = build_vertical_options_keyboard(
@@ -1362,6 +1408,7 @@ def register_handlers(
         prof = profile_store.load(tg_id) or {}
         prof = apply_onboarding_settings(prof, uncategorized_prompt_frequency=freq)
         profile_store.save(tg_id, prof)
+        _sync_onboarding_progress(tg_id)
 
         if query.message:
             kb = build_vertical_options_keyboard(
@@ -1398,6 +1445,7 @@ def register_handlers(
         prof = profile_store.load(tg_id) or {}
         prof = apply_onboarding_settings(prof, persona=persona)
         profile_store.save(tg_id, prof)
+        _sync_onboarding_progress(tg_id)
 
         if query.message:
             await query.message.answer(templates.onboarding_finished_message())
@@ -1534,6 +1582,7 @@ def register_handlers(
         if not cfg.selected_account_ids:
             await message.answer(templates.err_no_accounts_selected())
             return
+        _sync_onboarding_progress(tg_id)
         if not _onboarding_done(tg_id):
             await _prompt_finish_onboarding(message)
             return
@@ -1703,6 +1752,7 @@ def register_handlers(
                 return
 
             users.save(user_id, mono_token=mono_token, selected_account_ids=[])
+            _sync_onboarding_progress(user_id)
             memory_store.pop_pending_manual_mode(user_id)
 
             accounts = [
@@ -1729,6 +1779,7 @@ def register_handlers(
         if not cfg.selected_account_ids:
             await message.answer(templates.err_no_accounts_selected())
             return
+        _sync_onboarding_progress(user_id)
         if not _onboarding_done(user_id):
             await _prompt_finish_onboarding(message)
             return
