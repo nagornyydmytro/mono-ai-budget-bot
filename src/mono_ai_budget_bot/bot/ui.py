@@ -19,6 +19,7 @@ BTN_REFRESH = "🔄 Оновити"
 BTN_SKIP = "➡️ Skip"
 BTN_NEXT = "➡️ Далі"
 BTN_PREV = "⬅️ Назад"
+BTN_DONE = "✅ Done"
 
 
 MENU_CONNECT = "🔐 Connect"
@@ -63,6 +64,22 @@ def build_main_menu_keyboard(*, uncat_enabled: bool = True) -> Any:
         [("🗂️ Категорії", "menu:categories")],
         [(MENU_CURRENCY, "menu:currency"), (MENU_HELP, "menu:help")],
     ]
+
+    return _build_rows(rows)
+
+
+def build_accounts_picker_keyboard(accounts: list[dict], selected_ids: set[str]) -> Any:
+    rows: list[list[tuple[str, str]]] = []
+
+    for acc in accounts:
+        acc_id = str(acc["id"])
+        masked = " / ".join(acc.get("maskedPan") or []) or "без картки"
+        cur = str(acc.get("currencyCode", ""))
+        mark = "✅" if acc_id in selected_ids else "⬜️"
+        text = f"{mark} {masked} ({cur})"
+        rows.append([(text, f"acc_toggle:{acc_id}")])
+
+    rows.append([("🧹 Clear", "acc_clear"), (BTN_DONE, "acc_done")])
 
     return _build_rows(rows)
 

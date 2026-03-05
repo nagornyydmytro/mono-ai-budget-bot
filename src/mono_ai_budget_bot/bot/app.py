@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
-from mono_ai_budget_bot.bot.ui import build_currency_screen_keyboard
+from mono_ai_budget_bot.bot.ui import build_accounts_picker_keyboard, build_currency_screen_keyboard
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.currency import MonobankPublicClient, normalize_records_to_uah
 from mono_ai_budget_bot.monobank import MonobankClient
@@ -108,9 +108,6 @@ def _ensure_ready(cfg: UserConfig | None) -> str | None:
 
 
 def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, Any]:
-    from aiogram.types import InlineKeyboardMarkup
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
     lines: list[str] = []
     lines.append(
         templates.accounts_picker_header(
@@ -119,22 +116,7 @@ def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tupl
         )
     )
 
-    kb = InlineKeyboardBuilder()
-
-    for acc in accounts:
-        acc_id = acc["id"]
-        masked = " / ".join(acc.get("maskedPan") or []) or "без картки"
-        cur = str(acc.get("currencyCode", ""))
-        mark = "✅" if acc_id in selected_ids else "⬜️"
-        text = f"{mark} {masked} ({cur})"
-        kb.button(text=text, callback_data=f"acc_toggle:{acc_id}")
-
-    kb.adjust(1)
-    kb.button(text="🧹 Clear", callback_data="acc_clear")
-    kb.button(text="✅ Done", callback_data="acc_done")
-    kb.adjust(1, 2)
-
-    markup: InlineKeyboardMarkup = kb.as_markup()
+    markup = build_accounts_picker_keyboard(accounts, selected_ids)
     return "\n".join(lines).strip(), markup
 
 
