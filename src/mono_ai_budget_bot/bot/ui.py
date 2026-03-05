@@ -294,3 +294,7 @@ def build_reports_custom_blocks_keyboard(period: str, enabled: dict[str, bool]) 
 
     rows.append(("⬅️ Назад", "rep_custom_back"))
     return build_vertical_options_keyboard(rows)
+
+
+def build_uncat_prompt_keyboard() -> Any:
+    return build_vertical_options_keyboard([("🧩 Розкласти по категоріях", "menu:uncat")])

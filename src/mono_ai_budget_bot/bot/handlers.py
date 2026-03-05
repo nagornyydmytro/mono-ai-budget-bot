@@ -37,11 +37,7 @@ from .app import (
     md_escape,
     render_accounts_screen,
 )
-from .clarify import (
-    build_nlq_clarify_keyboard,
-    validate_ok_or_alert,
-    validate_uncat_pending_or_alert,
-)
+from .clarify import validate_ok_or_alert, validate_uncat_pending_or_alert
 from .formatting import format_money_grn
 from .ui import (
     build_back_keyboard,
@@ -49,6 +45,7 @@ from .ui import (
     build_categories_menu_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_nlq_clarify_keyboard,
     build_onboarding_resume_keyboard,
     build_reports_custom_blocks_keyboard,
     build_reports_custom_period_keyboard,
