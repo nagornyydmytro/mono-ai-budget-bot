@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from datetime import timezone
 from pathlib import Path
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from mono_ai_budget_bot.bot.ui import build_uncat_prompt_keyboard
 from mono_ai_budget_bot.storage.profile_store import ProfileStore
 from mono_ai_budget_bot.storage.uncat_store import UncatStore
 from mono_ai_budget_bot.uncat.prompting import UncatPromptMetaStore, build_uncat_prompt_message
@@ -149,18 +149,14 @@ def start_jobs(
             return
 
         text = build_uncat_prompt_message(items, frequency=freq)
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🧩 Розкласти по категоріях", callback_data="menu_uncat"
-                    )
-                ]
-            ]
-        )
 
         try:
-            await bot.send_message(chat_id=u.chat_id, text=text, reply_markup=kb, parse_mode=None)
+            await bot.send_message(
+                chat_id=u.chat_id,
+                text=text,
+                reply_markup=build_uncat_prompt_keyboard(),
+                parse_mode=None,
+            )
             uncat_meta.mark_sent(u.telegram_user_id, items=items, now_ts=now_ts)
         except Exception as e:
             logger.warning("Failed to send uncat prompt to chat_id=%s: %s", u.chat_id, e)
