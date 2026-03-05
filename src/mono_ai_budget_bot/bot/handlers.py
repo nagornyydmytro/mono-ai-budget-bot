@@ -103,7 +103,7 @@ def register_handlers(
     async def _prompt_finish_onboarding(message: Message, *, text: str | None = None) -> None:
         kb = build_onboarding_resume_keyboard()
         await message.answer(
-            text or "Спочатку заверши онбординг 👇",
+            text or templates.onboarding_finish_prompt_message(),
             reply_markup=kb,
         )
 
@@ -152,45 +152,49 @@ def register_handlers(
             return
 
         if reports_store.load(tg_id) is None:
+            l1, l2, l3 = templates.reports_preset_labels()
             kb = build_vertical_options_keyboard(
                 [
-                    ("⚡ Мінімальний", "rep_preset_min"),
-                    ("🧠 Максимальний", "rep_preset_max"),
-                    ("🛠️ Custom (пізніше)", "rep_preset_custom"),
+                    (l1, "rep_preset_min"),
+                    (l2, "rep_preset_max"),
+                    (l3, "rep_preset_custom"),
                 ]
             )
             await msg.answer(templates.reports_preset_prompt(), reply_markup=kb)
             return
 
         if not prof.get("activity_mode"):
+            l1, l2, l3 = templates.activity_mode_labels()
             kb = build_vertical_options_keyboard(
                 [
-                    ("🔊 Loud", "act_loud"),
-                    ("🔕 Quiet", "act_quiet"),
-                    ("🛠️ Custom", "act_custom"),
+                    (l1, "act_loud"),
+                    (l2, "act_quiet"),
+                    (l3, "act_custom"),
                 ]
             )
             await msg.answer(templates.activity_mode_prompt(), reply_markup=kb)
             return
 
         if not prof.get("uncategorized_prompt_frequency"):
+            l1, l2, l3, l4 = templates.uncat_frequency_labels()
             kb = build_vertical_options_keyboard(
                 [
-                    ("⚡ Одразу (кожне)", "uncat_immediate"),
-                    ("🗓️ Раз на день", "uncat_daily"),
-                    ("📅 Раз на тиждень", "uncat_weekly"),
-                    ("🧾 Перед звітом", "uncat_before_report"),
+                    (l1, "uncat_immediate"),
+                    (l2, "uncat_daily"),
+                    (l3, "uncat_weekly"),
+                    (l4, "uncat_before_report"),
                 ]
             )
             await msg.answer(templates.uncat_frequency_prompt(), reply_markup=kb)
             return
 
         if not prof.get("persona"):
+            l1, l2, l3 = templates.persona_labels()
             kb = build_vertical_options_keyboard(
                 [
-                    ("🤝 Supportive", "persona_supportive"),
-                    ("🧠 Rational", "persona_rational"),
-                    ("🔥 Motivator", "persona_motivator"),
+                    (l1, "persona_supportive"),
+                    (l2, "persona_rational"),
+                    (l3, "persona_motivator"),
                 ]
             )
             await msg.answer(templates.persona_prompt(), reply_markup=kb)
@@ -249,7 +253,7 @@ def register_handlers(
         if not onboarding_done:
             kb = build_main_menu_keyboard(uncat_enabled=True)
             await message.answer(
-                "Спочатку заверши онбординг через кнопки нижче 👇",
+                templates.menu_finish_onboarding_message(),
                 reply_markup=kb,
             )
             return
@@ -276,7 +280,7 @@ def register_handlers(
             await message.answer(templates.error("Не зміг визначити твій Telegram user id."))
             return
 
-        await message.answer("🔍 Перевіряю токен через Monobank API… (read-only)")
+        await message.answer(templates.connect_token_validation_progress())
 
         try:
             mb = MonobankClient(token=mono_token)
@@ -300,26 +304,8 @@ def register_handlers(
         tg_id = message.from_user.id if message.from_user else None
         cfg = users.load(tg_id) if tg_id is not None else None
 
-        parts: list[str] = []
-        parts.append("🔎 *Статус*")
-        parts.append("")
-
         if cfg is None:
-            parts.append(
-                templates.section(
-                    "Monobank",
-                    [
-                        "🔐 Не підключено (зроби `/connect`)",
-                        "📌 Вибрані картки: —",
-                    ],
-                )
-            )
-            parts.append("")
-            parts.append(templates.section("Кеш звітів", []))
-            parts.append("• today: —")
-            parts.append("• week: —")
-            parts.append("• month: —")
-            await message.answer("\n".join(parts).strip())
+            await message.answer(templates.status_screen_not_connected())
             return
 
         masked = (
@@ -327,29 +313,22 @@ def register_handlers(
         )
         selected_cnt = len(cfg.selected_account_ids or [])
 
-        parts.append(
-            templates.section(
-                "Monobank",
-                [
-                    f"🔐 Підключено ({masked})",
-                    f"📌 Вибрані картки: {selected_cnt}",
-                    "• якщо кешу нема — зроби `/refresh week` або натисни 🔄 Refresh week",
-                ],
-            )
-        )
-
-        parts.append("")
-        parts.append(templates.section("Кеш звітів", []))
-
+        cache_lines: dict[str, str | None] = {}
         for p in ("today", "week", "month"):
             stored = store.load(cfg.telegram_user_id, p)
             if stored is None:
-                parts.append(f"• {p}: немає (зроби `/refresh {p}`)")
+                cache_lines[p] = None
             else:
                 ts = datetime.fromtimestamp(stored.generated_at).isoformat(timespec="seconds")
-                parts.append(f"• {p}: {md_escape(ts)}")
+                cache_lines[p] = md_escape(ts)
 
-        await message.answer("\n".join(parts).strip())
+        await message.answer(
+            templates.status_screen_connected(
+                masked_token=masked,
+                selected_cnt=selected_cnt,
+                cache_lines=cache_lines,
+            )
+        )
 
     @dp.message(Command("accounts"))
     async def cmd_accounts(message: Message) -> None:
@@ -551,14 +530,14 @@ def register_handlers(
         memory_store.set_pending_manual_mode(
             tg_id,
             expected="mono_token",
-            hint="Встав сюди новий Monobank Personal API token.",
+            hint=templates.token_paste_hint_new_token(),
             source="data_menu",
             ttl_sec=900,
         )
 
         if query.message:
             await query.message.answer(
-                "🔑 Встав новий токен одним повідомленням.",
+                templates.token_paste_prompt_new_token(),
                 reply_markup=build_back_keyboard("menu:data"),
             )
         await query.answer()
@@ -607,13 +586,11 @@ def register_handlers(
 
         cfg = users.load(tg_id)
         if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
-            await query.answer("Спочатку підключи Monobank і вибери картки", show_alert=True)
+            await query.message.answer(templates.need_connect_and_accounts_message())
             return
 
         if query.message:
-            await query.message.answer(
-                "🔄 Оновлюю останні транзакції…\nЦе може зайняти кілька секунд.",
-            )
+            await query.message.answer(templates.ledger_refresh_progress_message())
 
         asyncio.create_task(sync_user_ledger(tg_id, cfg, days_back=30))
         await query.answer()
@@ -663,14 +640,14 @@ def register_handlers(
         memory_store.set_pending_manual_mode(
             tg_id,
             expected="mono_token",
-            hint="Встав сюди Monobank Personal API token.",
+            hint=templates.token_paste_hint_connect(),
             source="onboarding",
             ttl_sec=900,
         )
 
         if query.message:
             await query.message.answer(
-                "🔐 Встав токен одним повідомленням.",
+                templates.onboarding_token_paste_prompt(),
                 reply_markup=build_back_keyboard("onb_back_main"),
             )
         await query.answer("Ок")
@@ -683,7 +660,7 @@ def register_handlers(
 
         items = uncat_store.load(tg_id)
         if not items:
-            await message.answer("✅ Немає некатегоризованих покупок.")
+            await message.answer(templates.uncat_empty_message())
             return
 
         item = items[0]
@@ -711,7 +688,7 @@ def register_handlers(
 
         if query.message:
             await query.message.answer(
-                "🧾 Некатегоризовані транзакції\n\nЦя функція ще в розробці.",
+                templates.uncat_menu_placeholder_message(),
                 reply_markup=build_back_keyboard("menu:root"),
             )
 
@@ -817,7 +794,10 @@ def register_handlers(
 
         if query.message:
             await query.message.answer(
-                f"✅ Збережено: {item.description} → {leaf_name or 'категорія'}"
+                templates.uncat_saved_mapping_message(
+                    description=item.description,
+                    leaf_name=(leaf_name or "категорія"),
+                )
             )
             await _send_next_uncat(query.message, tg_id)
 
@@ -1018,13 +998,13 @@ def register_handlers(
 
         if kind == "recipient":
             expected = "recipient"
-            hint = "Приклад: 'Олександр Іванов', 'MonoMarket', 'GETMANCAR'. Введи як у виписці."
+            hint = templates.manual_mode_hint_recipient()
         elif kind == "category_alias":
             expected = "merchant_or_recipient"
-            hint = "Введи назву мерчанта як у виписці (можна частину). Приклад: 'Getmancar', 'Aston express'."
+            hint = templates.manual_mode_hint_category_alias()
         else:
             expected = "merchant_or_recipient"
-            hint = "Введи назву мерчанта/отримувача як у виписці (можна частину)."
+            hint = templates.manual_mode_hint_default()
 
         memory_store.set_pending_manual_mode(
             tg_id,
@@ -1447,7 +1427,7 @@ def register_handlers(
         arg = parts[1].strip().lower() if len(parts) > 1 else "week"
 
         if arg not in ("today", "week", "month", "all"):
-            await message.answer(templates.warning("Використання: `/refresh today|week|month|all`"))
+            await message.answer(templates.refresh_usage_message())
             return
 
         if arg == "today":
@@ -1570,7 +1550,7 @@ def register_handlers(
         if want_ai:
             if not settings.openai_api_key:
                 await message.answer(
-                    templates.warning("OPENAI_API_KEY не задано в .env — AI недоступний.")
+                    await message.answer(templates.ai_disabled_missing_key_message())
                 )
             else:
                 period_label = {
@@ -1579,7 +1559,7 @@ def register_handlers(
                     "month": "Останні 30 днів",
                 }.get(period, period)
 
-                await message.answer("🤖 Генерую AI інсайти…")
+                await message.answer(templates.ai_insights_progress_message())
 
                 try:
                     from ..llm.openai_client import OpenAIClient
@@ -1625,9 +1605,7 @@ def register_handlers(
         tg_id = message.from_user.id
         cfg = users.load(tg_id)
         if cfg is None:
-            await message.answer(
-                templates.warning("Спочатку підключи Monobank: `/connect <token>`")
-            )
+            await message.answer(templates.need_connect_with_hint_message())
             return
 
         parts = (message.text or "").split()
@@ -1643,7 +1621,9 @@ def register_handlers(
             return
 
         cfg2 = users.load(tg_id)
-        await message.answer(f"Автозвіти: {'ON' if cfg2 and cfg2.autojobs_enabled else 'OFF'}")
+        await message.answer(
+            templates.autojobs_status_line(enabled=bool(cfg2 and cfg2.autojobs_enabled))
+        )
 
     @dp.message(F.text & ~F.text.startswith("/"))
     async def handle_plain_text(message: Message) -> None:
@@ -1668,9 +1648,7 @@ def register_handlers(
                 try:
                     leaf_id = add_category(tax, root_kind="expense", name=text_raw)
                 except Exception:
-                    await message.answer(
-                        "❌ Некоректна назва категорії. Спробуй ще раз (1–60 символів)."
-                    )
+                    await message.answer(templates.taxonomy_invalid_category_name_message())
                     return
 
                 taxonomy_store.save(user_id, tax)
@@ -1694,7 +1672,10 @@ def register_handlers(
                 uncat_pending_store.clear(user_id)
 
                 await message.answer(
-                    f"✅ Категорію створено і застосовано: {text_raw} → {item.description}"
+                    templates.uncat_category_created_and_applied_message(
+                        category_name=text_raw,
+                        description=item.description,
+                    )
                 )
                 await _send_next_uncat(message, user_id)
                 return
@@ -1711,7 +1692,7 @@ def register_handlers(
                 await message.answer(templates.connect_validation_error())
                 return
 
-            await message.answer("🔍 Перевіряю токен через Monobank API… (read-only)")
+            await message.answer(templates.connect_token_validation_progress())
 
             try:
                 mb = MonobankClient(token=mono_token)

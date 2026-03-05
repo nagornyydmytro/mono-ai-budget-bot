@@ -1,4 +1,4 @@
-from mono_ai_budget_bot.bot.clarify import build_nlq_clarify_keyboard
+from mono_ai_budget_bot.bot.ui import build_nlq_clarify_keyboard
 
 
 def test_build_nlq_clarify_keyboard_has_pick_other_cancel():

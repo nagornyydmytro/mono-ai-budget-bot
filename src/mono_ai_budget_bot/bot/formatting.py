@@ -4,8 +4,8 @@ from datetime import datetime
 
 try:
     from zoneinfo import ZoneInfo
-except Exception:  # pragma: no cover
-    ZoneInfo = None  # type: ignore
+except Exception:
+    ZoneInfo = None
 
 
 def format_decimal_2(value: float) -> str:

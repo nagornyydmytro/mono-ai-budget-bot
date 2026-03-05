@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.bot.formatting import format_money_grn
 from mono_ai_budget_bot.uncat.queue import UncatItem
 
@@ -114,21 +115,11 @@ def build_uncat_prompt_message(items: list[UncatItem], *, frequency: str) -> str
     n = len(items)
     if frequency in ("daily", "weekly"):
         top = items[:8]
-        lines = ["🧩 Є некатегоризовані покупки:", f"• Кількість: {n}", "", "Останні:"]
+        last_lines: list[str] = []
         for it in top:
             amt = abs(int(it.amount)) / 100.0
-            lines.append(f"• {it.description} — {format_money_grn(amt)}")
-        if n > len(top):
-            lines.append(f"• …ще {n - len(top)}")
-        lines.append("")
-        lines.append("Натисни кнопку нижче, щоб розкласти по категоріях.")
-        return "\n".join(lines)
+            last_lines.append(f"• {it.description} — {format_money_grn(amt)}")
+        more = max(0, n - len(top))
+        return templates.uncat_prompt_message_daily_weekly(n=n, last_lines=last_lines, more=more)
 
-    return "\n".join(
-        [
-            "🧩 Є некатегоризовані покупки.",
-            f"• Кількість: {n}",
-            "",
-            "Натисни кнопку нижче, щоб розкласти по категоріях.",
-        ]
-    )
+    return templates.uncat_prompt_message_generic(n=n)

@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from mono_ai_budget_bot.bot.formatting import (
+    format_decimal_2,
+)
+
 
 def section(title: str, lines: Iterable[str]) -> str:
     body = "\n".join(line for line in lines if line)
@@ -60,6 +64,16 @@ def accounts_picker_screen(*, selected: int, total: int) -> str:
             f"Обрано: {selected} з {total}",
             "",
             "Натисни на рахунок щоб додати або прибрати.",
+        ]
+    ).strip()
+
+
+def currency_picker_screen() -> str:
+    return "\n".join(
+        [
+            "💱 Обери валюту",
+            "",
+            "Вибери валюту, в якій будуть показуватись звіти.",
         ]
     ).strip()
 
@@ -659,3 +673,354 @@ def menu_categories_message() -> str:
 
 def coming_soon_message() -> str:
     return "🚧 Цей екран ще в розробці."
+
+
+def connect_token_validation_progress() -> str:
+    return "🔍 Перевіряю токен через Monobank API… (read-only)"
+
+
+def menu_finish_onboarding_message() -> str:
+    return "Спочатку заверши онбординг через кнопки нижче 👇"
+
+
+def onboarding_finish_prompt_message() -> str:
+    return "Спочатку заверши онбординг 👇"
+
+
+def onboarding_token_paste_prompt() -> str:
+    return "🔐 Встав токен одним повідомленням."
+
+
+def uncat_empty_message() -> str:
+    return "✅ Немає некатегоризованих покупок."
+
+
+def uncat_menu_placeholder_message() -> str:
+    return "🧾 Некатегоризовані транзакції\n\nЦя функція ще в розробці."
+
+
+def reports_preset_labels() -> tuple[str, str, str]:
+    return ("⚡ Мінімальний", "🧠 Максимальний", "🛠️ Custom (пізніше)")
+
+
+def activity_mode_labels() -> tuple[str, str, str]:
+    return ("🔊 Loud", "🔕 Quiet", "🛠️ Custom")
+
+
+def uncat_frequency_labels() -> tuple[str, str, str, str]:
+    return ("⚡ Одразу (кожне)", "🗓️ Раз на день", "📅 Раз на тиждень", "🧾 Перед звітом")
+
+
+def persona_labels() -> tuple[str, str, str]:
+    return ("🤝 Supportive", "🧠 Rational", "🔥 Motivator")
+
+
+def status_screen_not_connected() -> str:
+    parts: list[str] = []
+    parts.append("🔎 *Статус*")
+    parts.append("")
+    parts.append(
+        section(
+            "Monobank",
+            [
+                "🔐 Не підключено (зроби `/connect`)",
+                "📌 Вибрані картки: —",
+            ],
+        )
+    )
+    parts.append("")
+    parts.append(section("Кеш звітів", []))
+    parts.append("• today: —")
+    parts.append("• week: —")
+    parts.append("• month: —")
+    return "\n".join(parts).strip()
+
+
+def status_screen_connected(
+    *,
+    masked_token: str,
+    selected_cnt: int,
+    cache_lines: dict[str, str | None],
+) -> str:
+    parts: list[str] = []
+    parts.append("🔎 *Статус*")
+    parts.append("")
+    parts.append(
+        section(
+            "Monobank",
+            [
+                f"🔐 Підключено ({masked_token})",
+                f"📌 Вибрані картки: {selected_cnt}",
+                "• якщо кешу нема — зроби `/refresh week` або натисни 🔄 Refresh week",
+            ],
+        )
+    )
+    parts.append("")
+    parts.append(section("Кеш звітів", []))
+
+    for p in ("today", "week", "month"):
+        v = cache_lines.get(p)
+        if v is None:
+            parts.append(f"• {p}: немає (зроби `/refresh {p}`)")
+        else:
+            parts.append(f"• {p}: {v}")
+
+    return "\n".join(parts).strip()
+
+
+def ai_block_title_changes() -> str:
+    return "*Що змінилось:*"
+
+
+def ai_block_title_recommendations() -> str:
+    return "*Рекомендації:*"
+
+
+def ai_block_title_next_step() -> str:
+    return "*Наступний крок (7 днів):*"
+
+
+def uncat_prompt_message_daily_weekly(*, n: int, last_lines: list[str], more: int) -> str:
+    lines: list[str] = []
+    lines.append("🧩 Є некатегоризовані покупки:")
+    lines.append(f"• Кількість: {n}")
+    lines.append("")
+    lines.append("Останні:")
+    lines.extend(last_lines)
+    if more > 0:
+        lines.append(f"• …ще {more}")
+    lines.append("")
+    lines.append("Натисни кнопку нижче, щоб розкласти по категоріях.")
+    return "\n".join(lines)
+
+
+def uncat_prompt_message_generic(*, n: int) -> str:
+    return "\n".join(
+        [
+            "🧩 Є некатегоризовані покупки.",
+            f"• Кількість: {n}",
+            "",
+            "Натисни кнопку нижче, щоб розкласти по категоріях.",
+        ]
+    )
+
+
+def nlq_unsupported_message() -> str:
+    return "Я можу відповідати лише на питання про твої витрати."
+
+
+def nlq_currency_missing_amount() -> str:
+    return "Не бачу суму для конвертації. Наприклад: 1500 грн в USD."
+
+
+def nlq_currency_amount_nonpositive() -> str:
+    return "Сума має бути більшою за нуль."
+
+
+def nlq_currency_missing_currency() -> str:
+    return "Не бачу валюту. Наприклад: 1500 грн в USD."
+
+
+def nlq_currency_unknown_currency(code: str) -> str:
+    return f"Не знаю таку валюту: {code}. Спробуй ISO-код (наприклад USD, EUR, UAH)."
+
+
+def nlq_currency_rates_fetch_failed(err: str) -> str:
+    return f"Не вдалося отримати курси валют: {err}"
+
+
+def nlq_currency_pair_missing(from_alpha: str, to_alpha: str) -> str:
+    return f"Немає даних по парі {from_alpha}→{to_alpha} у /bank/currency."
+
+
+def nlq_need_connect() -> str:
+    return "Спочатку підключи Monobank через /connect."
+
+
+def nlq_need_accounts() -> str:
+    return "Обери картки для аналізу через /accounts."
+
+
+def nlq_profile_refreshed() -> str:
+    return "Профіль оновлено."
+
+
+def nlq_not_implemented_yet() -> str:
+    return "Поки що цей тип запиту не реалізовано."
+
+
+def nlq_recipient_ambiguous_with_options(*, alias: str, options: list[str]) -> str:
+    lines: list[str] = [f"Кого саме маєш на увазі під '{alias}'?"]
+    lines.append("Вибери номер або напиши точне ім'я як у виписці:")
+    for i, opt in enumerate(options, start=1):
+        lines.append(f"{i}) {opt}")
+    return "\n".join(lines)
+
+
+def nlq_recipient_ambiguous_no_options(*, alias: str) -> str:
+    return f"Кого саме маєш на увазі під '{alias}'? Напиши точне ім'я отримувача як у виписці."
+
+
+def nlq_prefix_today() -> str:
+    return "Сьогодні"
+
+
+def nlq_prefix_yesterday() -> str:
+    return "Вчора"
+
+
+def nlq_prefix_for_label(label: str) -> str:
+    return f"За {label}"
+
+
+def nlq_prefix_last_days(days: int) -> str:
+    return f"За останні {days} днів"
+
+
+def nlq_spend_sum_line(prefix: str, amount: str) -> str:
+    return f"{prefix} ти витратив {amount}."
+
+
+def nlq_spend_count_line(prefix: str, n: int) -> str:
+    return f"{prefix} було {n} витрат."
+
+
+def nlq_income_sum_line(prefix: str, amount: str) -> str:
+    return f"{prefix} було поповнень на {amount}."
+
+
+def nlq_income_count_line(prefix: str, n: int) -> str:
+    return f"{prefix} було {n} поповнень."
+
+
+def nlq_transfer_out_sum_line(prefix: str, amount: str) -> str:
+    return f"{prefix} ти переказав {amount}."
+
+
+def nlq_transfer_out_count_line(prefix: str, n: int) -> str:
+    return f"{prefix} було {n} вихідних переказів."
+
+
+def nlq_transfer_in_sum_line(prefix: str, amount: str) -> str:
+    return f"{prefix} ти отримав {amount}."
+
+
+def nlq_transfer_in_count_line(prefix: str, n: int) -> str:
+    return f"{prefix} було {n} вхідних переказів."
+
+
+def nlq_paging_hint() -> str:
+    return "Напиши 1 або 'далі', щоб показати ще."
+
+
+def nlq_unknown_alias_prompt_header(alias_raw: str) -> str:
+    return f"Я поки що не знаю, що для тебе означає '{alias_raw}'."
+
+
+def nlq_unknown_alias_prompt_choose_merchants() -> str:
+    return "Вибери мерчанти, які до цього відносяться:"
+
+
+def nlq_unknown_alias_prompt_input_hint() -> str:
+    return "Напиши номери через кому (наприклад: 1,3) або 0 щоб скасувати."
+
+
+def nlq_unknown_alias_option_line(*, idx: int, name: str, amount: str) -> str:
+    return f"{idx}) {name} — {amount}"
+
+
+def ledger_refresh_progress_message() -> str:
+    return "🔄 Оновлюю останні транзакції…\nЦе може зайняти кілька секунд."
+
+
+def uncat_saved_mapping_message(*, description: str, leaf_name: str) -> str:
+    return f"✅ Збережено: {description} → {leaf_name}"
+
+
+def manual_mode_hint_recipient() -> str:
+    return "Приклад: 'Олександр Іванов', 'MonoMarket', 'GETMANCAR'. Введи як у виписці."
+
+
+def manual_mode_hint_category_alias() -> str:
+    return (
+        "Введи назву мерчанта як у виписці (можна частину). Приклад: 'Getmancar', 'Aston express'."
+    )
+
+
+def manual_mode_hint_default() -> str:
+    return "Введи назву мерчанта/отримувача як у виписці (можна частину)."
+
+
+def autojobs_status_line(*, enabled: bool) -> str:
+    return f"Автозвіти: {'ON' if enabled else 'OFF'}"
+
+
+def taxonomy_invalid_category_name_message() -> str:
+    return "❌ Некоректна назва категорії. Спробуй ще раз (1–60 символів)."
+
+
+def uncat_category_created_and_applied_message(*, category_name: str, description: str) -> str:
+    return f"✅ Категорію створено і застосовано: {category_name} → {description}"
+
+
+def nlq_coverage_warning(d1: str, d2: str) -> str:
+    return f"⚠️ Дані неповні для запитаного періоду. Coverage: {d1} — {d2}."
+
+
+def nlq_currency_convert_result(*, amt: float, from_alpha: str, out: float, to_alpha: str) -> str:
+    return f"{format_decimal_2(amt)} {from_alpha} ≈ {format_decimal_2(out)} {to_alpha}"
+
+
+def nlq_top_merchants_title() -> str:
+    return "Топ мерчанти"
+
+
+def nlq_top_categories_title() -> str:
+    return "Топ категорії"
+
+
+def nlq_paging_option_show_more() -> str:
+    return "Показати ще"
+
+
+def nlq_compare_to_baseline_line(
+    *,
+    prefix: str,
+    current: str,
+    baseline: str,
+    delta_grn: str,
+    sign: str,
+) -> str:
+    return f"{prefix}: {current}. Зазвичай (медіана): {baseline}. Різниця: {sign}{delta_grn} грн."
+
+
+def token_paste_hint_new_token() -> str:
+    return "Встав сюди новий Monobank Personal API token."
+
+
+def token_paste_prompt_new_token() -> str:
+    return "🔑 Встав новий токен одним повідомленням."
+
+
+def token_paste_hint_connect() -> str:
+    return "Встав сюди Monobank Personal API token."
+
+
+def ai_insights_progress_message() -> str:
+    return "🤖 Генерую AI інсайти…"
+
+
+def refresh_usage_message() -> str:
+    return "Використання: `/refresh today|week|month|all`"
+
+
+def ai_disabled_missing_key_message() -> str:
+    return "OPENAI_API_KEY не задано в .env — AI недоступний."
+
+
+def need_connect_with_hint_message() -> str:
+    return "Спочатку підключи Monobank: `/connect <token>`"
+
+
+def need_connect_and_accounts_message() -> str:
+    return "Спочатку підключи Monobank і вибери картки"

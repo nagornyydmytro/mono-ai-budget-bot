@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
+
+# from mono_ai_budget_bot.bot.formatting import md_escape
 from mono_ai_budget_bot.bot.ui import build_accounts_picker_keyboard, build_currency_screen_keyboard
 from mono_ai_budget_bot.core.time_ranges import range_today
 from mono_ai_budget_bot.currency import MonobankPublicClient, normalize_records_to_uah
@@ -244,18 +246,18 @@ def build_ai_block(summary: str, changes: list[str], recs: list[str], next_step:
 
     if changes:
         lines.append("")
-        lines.append("*Що змінилось:*")
+        lines.append(templates.ai_block_title_changes())
         for s in changes[:5]:
             lines.append(f"• {md_escape(s)}")
 
     if recs:
         lines.append("")
-        lines.append("*Рекомендації:*")
+        lines.append(templates.ai_block_title_recommendations())
         for s in recs[:7]:
             lines.append(f"• {md_escape(s)}")
 
     lines.append("")
-    lines.append("*Наступний крок (7 днів):*")
+    lines.append(templates.ai_block_title_next_step())
     lines.append(f"• {md_escape(next_step)}")
     return "\n".join(lines)
 

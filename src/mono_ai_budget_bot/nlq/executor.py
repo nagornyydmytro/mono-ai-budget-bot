@@ -6,10 +6,11 @@ from typing import Any
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
 from mono_ai_budget_bot.analytics.refunds import detect_refund_pairs, refund_ignore_ids
+from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.bot.formatting import (
     format_decimal_2,
     format_money_grn,
-    format_money_symbol_uah,
+    format_money_uah,
     format_ts_local,
 )
 from mono_ai_budget_bot.config import load_settings
@@ -65,36 +66,34 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             return execute_intent(telegram_user_id, pending)
 
     if intent == "unsupported":
-        return "Я можу відповідати лише на питання про твої витрати."
+        return templates.nlq_unsupported_message()
 
     if intent == "currency_convert":
         amount = intent_payload.get("amount")
         try:
             amt = float(amount)
         except Exception:
-            return "Не бачу суму для конвертації. Наприклад: 1500 грн в USD."
+            return templates.nlq_currency_missing_amount()
         if amt <= 0:
-            return "Сума має бути більшою за нуль."
+            return templates.nlq_currency_amount_nonpositive()
 
         from_alpha = str(intent_payload.get("from") or "").strip().upper()
         to_alpha = str(intent_payload.get("to") or "").strip().upper()
         if not from_alpha or not to_alpha:
-            return "Не бачу валюту. Наприклад: 1500 грн в USD."
+            return templates.nlq_currency_missing_currency()
 
         from_num = alpha_to_numeric(from_alpha)
         to_num = alpha_to_numeric(to_alpha)
         if from_num is None or to_num is None:
-            return (
-                f"Не знаю таку валюту: {from_alpha if from_num is None else to_alpha}. "
-                "Спробуй ISO-код (наприклад USD, EUR, UAH)."
-            )
+            bad = from_alpha if from_num is None else to_alpha
+            return templates.nlq_currency_unknown_currency(bad)
 
         pub = None
         try:
             pub = MonobankPublicClient()
             rates = pub.currency()
         except Exception as e:
-            return f"Не вдалося отримати курси валют: {e}"
+            return templates.nlq_currency_rates_fetch_failed(str(e))
         finally:
             try:
                 if pub is not None:
@@ -104,18 +103,22 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
         out = convert_amount(amt, from_num=from_num, to_num=to_num, rates=rates)
         if out is None:
-            return f"Немає даних по парі {from_alpha}→{to_alpha} у /bank/currency."
+            return templates.nlq_currency_pair_missing(from_alpha, to_alpha)
 
-        return f"{format_decimal_2(amt)} {from_alpha} ≈ {format_decimal_2(out)} {to_alpha}"
-
+        return templates.nlq_currency_convert_result(
+            amt=amt,
+            from_alpha=from_alpha,
+            out=out,
+            to_alpha=to_alpha,
+        )
     user_store = UserStore()
     cfg = user_store.load(telegram_user_id)
     if cfg is None or not cfg.mono_token:
-        return "Спочатку підключи Monobank через /connect."
+        return templates.nlq_need_connect()
 
     account_ids = cfg.selected_account_ids or []
     if not account_ids:
-        return "Обери картки для аналізу через /accounts."
+        return templates.nlq_need_accounts()
 
     ts_to = int(intent_payload.get("end_ts") or time.time())
 
@@ -147,7 +150,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if spec.window.start_ts < cov_from or spec.window.end_ts > cov_to:
             d1 = format_ts_local(int(cov_from))[:10]
             d2 = format_ts_local(int(cov_to))[:10]
-            coverage_warning = f"⚠️ Дані неповні для запитаного періоду. Coverage: {d1} — {d2}."
+            coverage_warning = templates.nlq_coverage_warning(d1, d2)
 
     rows = tx_store.load_range(
         telegram_user_id=telegram_user_id,
@@ -174,7 +177,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         rows = [r for r in rows if str(getattr(r, "id", "")) not in ignore_ids]
 
     if intent == "profile_refresh":
-        return "Профіль оновлено."
+        return templates.nlq_profile_refreshed()
 
     if intent == "compare_to_baseline":
         merchant_filter = (
@@ -220,19 +223,21 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         else:
             label = str(intent_payload.get("period_label") or "").strip().lower()
             if label == "сьогодні":
-                prefix = "Сьогодні"
+                prefix = templates.nlq_prefix_today()
             elif label == "вчора":
-                prefix = "Вчора"
+                prefix = templates.nlq_prefix_yesterday()
             elif label:
-                prefix = f"За {label}"
+                prefix = templates.nlq_prefix_for_label(label)
             else:
-                prefix = f"За останні {window_days} днів"
+                prefix = templates.nlq_prefix_last_days(days)
 
         sign = "+" if r.delta_cents >= 0 else ""
-        return (
-            f"{prefix}: {format_money_grn(r.current_cents / 100)}. "
-            f"Зазвичай (медіана): {format_money_grn(r.baseline_median_cents / 100)}. "
-            f"Різниця: {sign}{format_decimal_2(r.delta_cents / 100)} грн."
+        return templates.nlq_compare_to_baseline_line(
+            prefix=prefix,
+            current=format_money_grn(r.current_cents / 100),
+            baseline=format_money_grn(r.baseline_median_cents / 100),
+            delta_grn=format_decimal_2(r.delta_cents / 100),
+            sign=sign,
         )
 
     recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
@@ -245,16 +250,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             set_pending_intent(telegram_user_id, intent_payload, kind="recipient", options=options)
 
             if options:
-                lines = [f"Кого саме маєш на увазі під '{recipient_alias}'?"]
-                lines.append("Вибери номер або напиши точне ім'я як у виписці:")
-                for i, opt in enumerate(options, start=1):
-                    lines.append(f"{i}) {opt}")
-                return "\n".join(lines)
+                return templates.nlq_recipient_ambiguous_with_options(
+                    alias=recipient_alias, options=options
+                )
 
-            return (
-                f"Кого саме маєш на увазі під '{recipient_alias}'? "
-                "Напиши точне ім'я отримувача як у виписці."
-            )
+            return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
 
     merchant_filter = (
         resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains")) or []
@@ -316,7 +316,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        parts: list[str] = [f"{prefix} ти витратив {format_money_grn(total_cents / 100)}."]
+        parts: list[str] = [
+            templates.nlq_spend_sum_line(prefix, format_money_grn(total_cents / 100))
+        ]
 
         page_raw = intent_payload.get("page")
         try:
@@ -326,7 +328,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         page = max(1, page)
 
         if not merchant_filter:
-            t = render_top_merchants(filtered, page=page, page_size=5, title="Топ мерчанти")
+            t = render_top_merchants(
+                filtered,
+                page=page,
+                page_size=5,
+                title=templates.nlq_top_merchants_title(),
+            )
             if t.lines:
                 parts.append(f"\n{t.title} (стор. {page}):\n" + "\n".join(t.lines))
 
@@ -337,42 +344,51 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                     telegram_user_id,
                     next_payload,
                     kind="paging",
-                    options=["Показати ще"],
+                    options=[templates.nlq_paging_option_show_more()],
                 )
-                parts.append("\nНапиши 1 або 'далі', щоб показати ще.")
+                parts.append("\n" + templates.nlq_paging_hint())
 
             if spec is None or spec.category is None:
-                c = render_top_categories(filtered, page=1, page_size=5, title="Топ категорії")
+                c = render_top_categories(
+                    filtered,
+                    page=1,
+                    page_size=5,
+                    title=templates.nlq_top_categories_title(),
+                )
                 if c.lines:
                     parts.append(f"\n{c.title}:\n" + "\n".join(c.lines))
 
         return _with_cov("\n".join(parts))
 
     if intent == "spend_count":
-        return _with_cov(f"{prefix} було {len(filtered)} витрат.")
+        return _with_cov(templates.nlq_spend_count_line(prefix, len(filtered)))
 
     if intent == "income_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return _with_cov(f"{prefix} було поповнень на {format_money_grn(total_cents / 100)}.")
+        return _with_cov(templates.nlq_income_sum_line(prefix, format_money_grn(total_cents / 100)))
 
     if intent == "income_count":
-        return _with_cov(f"{prefix} було {len(filtered)} поповнень.")
+        return _with_cov(templates.nlq_income_count_line(prefix, len(filtered)))
 
     if intent == "transfer_out_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return _with_cov(f"{prefix} ти переказав {format_money_grn(total_cents / 100)}.")
+        return _with_cov(
+            templates.nlq_transfer_out_sum_line(prefix, format_money_grn(total_cents / 100))
+        )
 
     if intent == "transfer_out_count":
-        return _with_cov(f"{prefix} було {len(filtered)} вихідних переказів.")
+        return _with_cov(templates.nlq_transfer_out_count_line(prefix, len(filtered)))
 
     if intent == "transfer_in_sum":
         total_cents = engine.sum_cents(filtered, intent)
-        return _with_cov(f"{prefix} ти отримав {format_money_grn(total_cents / 100)}.")
+        return _with_cov(
+            templates.nlq_transfer_in_sum_line(prefix, format_money_grn(total_cents / 100))
+        )
 
     if intent == "transfer_in_count":
-        return _with_cov(f"{prefix} було {len(filtered)} вхідних переказів.")
+        return _with_cov(templates.nlq_transfer_in_count_line(prefix, len(filtered)))
 
-    return "Поки що цей тип запиту не реалізовано."
+    return templates.nlq_not_implemented_yet()
 
 
 def _has_spend_match(rows, merchant_terms: list[str]) -> bool:
@@ -435,12 +451,21 @@ def _prompt_learn_category_alias(
     set_pending_intent(telegram_user_id, next_payload, kind="category_alias", options=option_names)
 
     lines = [
-        f"Я поки що не знаю, що для тебе означає '{alias_raw}'.",
-        "Вибери мерчанти, які до цього відносяться:",
+        templates.nlq_unknown_alias_prompt_header(alias_raw),
+        templates.nlq_unknown_alias_prompt_choose_merchants(),
     ]
-    for i, (name, cents) in enumerate(candidates, start=1):
-        lines.append(f"{i}) {name}: {format_money_symbol_uah(cents / 100)}")
-    lines.append("Напиши номери через кому (наприклад: 1,3) або 0 щоб скасувати.")
+
+    for i, (name, cents_abs) in enumerate(candidates[:12], start=1):
+        lines.append(
+            templates.nlq_unknown_alias_option_line(
+                idx=i,
+                name=name,
+                amount=format_money_uah(cents_abs / 100),
+            )
+        )
+
+    lines.append(templates.nlq_unknown_alias_prompt_input_hint())
+    return "\n".join(lines)
     return "\n".join(lines)
 
 

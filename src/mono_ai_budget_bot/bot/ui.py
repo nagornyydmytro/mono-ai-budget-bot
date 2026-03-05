@@ -57,6 +57,10 @@ def _build_rows(rows: Sequence[Sequence[tuple[str, str]]]) -> Any:
     return kb.as_markup()
 
 
+def build_rows_keyboard(rows: Sequence[Sequence[tuple[str, str]]]) -> Any:
+    return _build_rows(rows)
+
+
 def build_main_menu_keyboard(*, uncat_enabled: bool = True) -> Any:
     rows = [
         [("📊 Звіти", "menu:reports"), ("⚙️ Дані", "menu:data")],
@@ -139,6 +143,50 @@ def build_vertical_options_keyboard(options: Iterable[tuple[str, str]]) -> Any:
     return _build_rows(rows)
 
 
+def build_nlq_clarify_keyboard(
+    options: Iterable[str],
+    *,
+    pending_id: str | None = None,
+    limit: int = 8,
+    include_other: bool = True,
+    include_cancel: bool = True,
+    pick_prefix_base: str = "nlq_pick",
+    other_base: str = "nlq_other",
+    cancel_base: str = "nlq_cancel",
+) -> Any:
+    opts = [str(x).strip() for x in options if isinstance(x, str) and str(x).strip()]
+    if not opts:
+        return None
+
+    limit = max(1, min(int(limit), 15))
+    opts = opts[:limit]
+
+    pid = (pending_id or "").strip()
+    if pid:
+        pick_prefix = f"{pick_prefix_base}:{pid}:"
+        other_data = f"{other_base}:{pid}"
+        cancel_data = f"{cancel_base}:{pid}"
+    else:
+        pick_prefix = f"{pick_prefix_base}:"
+        other_data = other_base
+        cancel_data = cancel_base
+
+    rows: list[list[tuple[str, str]]] = []
+    for i, opt in enumerate(opts, start=1):
+        text = opt
+        if len(text) > 32:
+            text = text[:29].rstrip() + "…"
+        rows.append([(f"{i}) {text}", f"{pick_prefix}{i}")])
+
+    if include_other:
+        rows.append([(BTN_OTHER, other_data)])
+
+    if include_cancel:
+        rows.append([(BTN_CANCEL, cancel_data)])
+
+    return _build_rows(rows)
+
+
 def build_back_keyboard(callback_data: str, *, text: str = BTN_BACK) -> Any:
     return _build_rows([[(text, callback_data)]])
 
@@ -182,39 +230,14 @@ def build_uncat_leaf_picker_keyboard(
     pending_id: str,
     leaves: Iterable[tuple[str, str]],
 ) -> Any:
-    kb = InlineKeyboardBuilder()
-
+    rows: list[list[tuple[str, str]]] = []
     for name, leaf_id in leaves:
-        kb.row(
-            InlineKeyboardButton(
-                text=name,
-                callback_data=f"uncat_pick:{pending_id}:{leaf_id}",
-            )
-        )
+        rows.append([(name, f"uncat_pick:{pending_id}:{leaf_id}")])
 
-    kb.row(
-        InlineKeyboardButton(
-            text="➕ Створити категорію",
-            callback_data=f"uncat_create:{pending_id}",
-        )
-    )
-    kb.row(
-        InlineKeyboardButton(
-            text=BTN_CANCEL,
-            callback_data=f"uncat_cancel:{pending_id}",
-        )
-    )
+    rows.append([("➕ Створити категорію", f"uncat_create:{pending_id}")])
+    rows.append([(BTN_CANCEL, f"uncat_cancel:{pending_id}")])
 
-    return kb.as_markup()
-
-
-def build_uncat_keyboard() -> InlineKeyboardBuilder:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Створити категорію", callback_data="uncat_create")
-    kb.button(text="➡️ Далі", callback_data="uncat_next")
-    kb.button(text="⬅️ Back", callback_data="menu_root")
-    kb.adjust(1)
-    return kb
+    return _build_rows(rows)
 
 
 def build_paging_keyboard(
