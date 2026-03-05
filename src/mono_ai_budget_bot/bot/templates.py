@@ -52,6 +52,18 @@ def onboarding_finished_message() -> str:
     ).strip()
 
 
+def accounts_picker_screen(*, selected: int, total: int) -> str:
+    return "\n".join(
+        [
+            "💳 Обери рахунки",
+            "",
+            f"Обрано: {selected} з {total}",
+            "",
+            "Натисни на рахунок щоб додати або прибрати.",
+        ]
+    ).strip()
+
+
 def divider() -> str:
     return "──────────────────"
 

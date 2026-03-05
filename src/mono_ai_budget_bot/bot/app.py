@@ -110,7 +110,7 @@ def _ensure_ready(cfg: UserConfig | None) -> str | None:
 def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, Any]:
     lines: list[str] = []
     lines.append(
-        templates.accounts_picker_header(
+        templates.accounts_picker_screen(
             selected=len(selected_ids),
             total=len(accounts),
         )
