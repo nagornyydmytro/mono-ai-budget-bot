@@ -4,23 +4,17 @@ import asyncio
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from mono_ai_budget_bot.analytics.compute import compute_facts
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.analytics.from_ledger import rows_from_ledger
-
-# from mono_ai_budget_bot.bot.formatting import md_escape
-from mono_ai_budget_bot.bot.ui import build_accounts_picker_keyboard, build_currency_screen_keyboard
 from mono_ai_budget_bot.core.time_ranges import range_today
-from mono_ai_budget_bot.currency import MonobankPublicClient, normalize_records_to_uah
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 
-from ..analytics.profile import build_user_profile
 from ..config import load_settings
 from ..logging_setup import setup_logging
 from ..reports.renderer import render_report_for_user as _render_report_for_user_impl
@@ -30,10 +24,9 @@ from ..storage.rules_store import RulesStore
 from ..storage.taxonomy_store import TaxonomyStore
 from ..storage.uncat_store import UncatStore
 from ..storage.user_store import UserConfig, UserStore
-from ..taxonomy.presets import build_taxonomy_preset
 from ..uncat.pending import UncatPendingStore
-from ..uncat.queue import build_uncat_queue
 from . import templates
+from .report_flow_helpers import compute_and_cache_reports_for_user
 
 if TYPE_CHECKING:
     pass
@@ -41,40 +34,6 @@ if TYPE_CHECKING:
 
 store = ReportStore()
 tx_store = TxStore()
-
-_MD_SPECIAL = "\\`*_[]()"
-
-
-def md_escape(text: str) -> str:
-    if text is None:
-        return ""
-    s = str(text)
-    out = []
-    for ch in s:
-        if ch in _MD_SPECIAL:
-            out.append("\\" + ch)
-        else:
-            out.append(ch)
-    return "".join(out)
-
-
-def _map_monobank_error(e: Exception) -> str | None:
-    s = str(e)
-
-    if "Monobank API error: 401" in s or "Monobank API error: 403" in s:
-        return templates.monobank_invalid_token_message()
-
-    if "Monobank API error: 429" in s:
-        return templates.monobank_rate_limit_message()
-
-    if "Monobank API error:" in s:
-        return templates.monobank_generic_error_message()
-
-    return None
-
-
-def _map_llm_error(_: Exception) -> str:
-    return templates.llm_unavailable_message()
 
 
 def _safe_get(d: dict, path: list[str], default=None):
@@ -86,88 +45,12 @@ def _safe_get(d: dict, path: list[str], default=None):
     return cur
 
 
-def _mask_secret(s: str, show: int = 4) -> str:
-    if not s:
-        return "None"
-    if len(s) <= show:
-        return "*" * len(s)
-    return s[:show] + "*" * (len(s) - show)
-
-
-def _save_selected_accounts(users: UserStore, telegram_user_id: int, selected: list[str]) -> None:
-    cfg = users.load(telegram_user_id)
-    if cfg is None:
-        return
-    users.save(telegram_user_id, mono_token=cfg.mono_token, selected_account_ids=selected)
-
-
 def _ensure_ready(cfg: UserConfig | None) -> str | None:
     if cfg is None or not cfg.mono_token:
         return templates.err_not_connected()
     if not cfg.selected_account_ids:
         return templates.err_no_accounts_selected()
     return None
-
-
-def render_accounts_screen(accounts: list[dict], selected_ids: set[str]) -> tuple[str, Any]:
-    lines: list[str] = []
-    lines.append(
-        templates.accounts_picker_screen(
-            selected=len(selected_ids),
-            total=len(accounts),
-        )
-    )
-
-    markup = build_accounts_picker_keyboard(accounts, selected_ids)
-    return "\n".join(lines).strip(), markup
-
-
-def _currency_screen_keyboard():
-    return build_currency_screen_keyboard()
-
-
-def _render_currency_screen_text(rates) -> str:
-    def pick(code_a: int, code_b: int = 980):
-        for r in rates:
-            if int(getattr(r, "currencyCodeA", -1)) == int(code_a) and int(
-                getattr(r, "currencyCodeB", -1)
-            ) == int(code_b):
-                return r
-        return None
-
-    def fmt_rate(r) -> str:
-        rb = getattr(r, "rateBuy", None)
-        rs = getattr(r, "rateSell", None)
-        rc = getattr(r, "rateCross", None)
-        parts = []
-        if rc is not None:
-            parts.append(f"cross {float(rc):.4f}")
-        if rb is not None:
-            parts.append(f"buy {float(rb):.4f}")
-        if rs is not None:
-            parts.append(f"sell {float(rs):.4f}")
-        return ", ".join(parts) if parts else "немає даних"
-
-    updated_ts = 0
-    for r in rates:
-        try:
-            updated_ts = max(updated_ts, int(getattr(r, "date", 0) or 0))
-        except Exception:
-            pass
-
-    updated = "—"
-    if updated_ts > 0:
-        updated = datetime.fromtimestamp(updated_ts).isoformat(timespec="seconds")
-
-    usd = pick(840)
-    eur = pick(978)
-    pln = pick(985)
-
-    usd_s = md_escape(fmt_rate(usd)) if usd else None
-    eur_s = md_escape(fmt_rate(eur)) if eur else None
-    pln_s = md_escape(fmt_rate(pln)) if pln else None
-
-    return templates.currency_screen_text(md_escape(updated), usd_s, eur_s, pln_s)
 
 
 def _render_report_for_user(
@@ -238,79 +121,6 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
         }
 
     store.save(cfg.telegram_user_id, period, current_facts)
-
-
-def build_ai_block(summary: str, changes: list[str], recs: list[str], next_step: str) -> str:
-    lines: list[str] = []
-    lines.append(f"• {md_escape(summary)}")
-
-    if changes:
-        lines.append("")
-        lines.append(templates.ai_block_title_changes())
-        for s in changes[:5]:
-            lines.append(f"• {md_escape(s)}")
-
-    if recs:
-        lines.append("")
-        lines.append(templates.ai_block_title_recommendations())
-        for s in recs[:7]:
-            lines.append(f"• {md_escape(s)}")
-
-    lines.append("")
-    lines.append(templates.ai_block_title_next_step())
-    lines.append(f"• {md_escape(next_step)}")
-    return "\n".join(lines)
-
-
-async def _compute_and_cache_reports_for_user(
-    tg_id: int,
-    account_ids: list[str],
-    profile_store: ProfileStore,
-) -> None:
-    dr = range_today()
-    ts_from, ts_to = dr.to_unix()
-    records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
-    rows = rows_from_ledger(records)
-    facts = compute_facts(rows)
-    store.save(tg_id, "today", facts)
-
-    now_ts = int(time.time())
-    profile_from = now_ts - 90 * 24 * 60 * 60
-    profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
-    profile = build_user_profile(profile_records)
-    try:
-        pub = MonobankPublicClient()
-        rates = pub.currency()
-        profile_records = normalize_records_to_uah(profile_records, rates)
-        pub.close()
-    except Exception:
-        try:
-            pub.close()
-        except Exception:
-            pass
-    profile_store.save(tg_id, profile)
-    taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
-    uncat_store = UncatStore(Path(".cache") / "uncat")
-    rules_store = RulesStore(Path(".cache") / "rules")
-
-    for period, days_back in (("week", 7), ("month", 30)):
-        now_ts = int(time.time())
-        ts_from = now_ts - (2 * days_back + 1) * 24 * 60 * 60
-        ts_to = now_ts
-
-        records = tx_store.load_range(tg_id, account_ids, ts_from, ts_to)
-
-        current_facts = enrich_period_facts(records, days_back=days_back, now_ts=now_ts)
-
-        store.save(tg_id, period, current_facts)
-    tax = taxonomy_store.load(tg_id)
-    if tax is None:
-        tax = build_taxonomy_preset("min")
-
-    rules = rules_store.load(tg_id)
-
-    uncat_items = build_uncat_queue(tax=tax, records=profile_records, rules=rules, limit=200)
-    uncat_store.save(tg_id, uncat_items)
 
 
 async def main() -> None:
@@ -393,7 +203,7 @@ async def main() -> None:
         render_report_text=render_report_for_user,
         logger=logger,
         sync_user_ledger=sync_user_ledger,
-        recompute_reports_for_user=lambda tg_id, account_ids: _compute_and_cache_reports_for_user(
+        recompute_reports_for_user=lambda tg_id, account_ids: compute_and_cache_reports_for_user(
             tg_id, account_ids, profile_store
         ),
         profile_store=profile_store,

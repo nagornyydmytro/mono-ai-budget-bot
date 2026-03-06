@@ -10,14 +10,11 @@ from mono_ai_budget_bot.nlq import memory_store
 
 from ..monobank import MonobankClient
 from . import templates
-from .app import (
-    _compute_and_cache_reports_for_user,
-    _map_monobank_error,
-    _mask_secret,
-    md_escape,
-    render_accounts_screen,
-)
+from .accounts_ui import mask_secret, render_accounts_screen
+from .errors import map_monobank_error
 from .handlers_common import HandlerContext
+from .renderers import md_escape
+from .report_flow_helpers import compute_and_cache_reports_for_user
 from .ui import build_main_menu_keyboard, build_onboarding_resume_keyboard
 
 
@@ -70,7 +67,7 @@ def register_dev_handlers(dp, *, ctx: HandlerContext) -> None:
             finally:
                 mb.close()
         except Exception as e:
-            mapped = _map_monobank_error(e)
+            mapped = map_monobank_error(e)
             await message.answer(mapped or templates.error("Помилка перевірки токена."))
             return
 
@@ -90,9 +87,7 @@ def register_dev_handlers(dp, *, ctx: HandlerContext) -> None:
             await message.answer(templates.status_screen_not_connected())
             return
 
-        masked = (
-            md_escape(_mask_secret(cfg.mono_token)) if getattr(cfg, "mono_token", None) else "—"
-        )
+        masked = md_escape(mask_secret(cfg.mono_token)) if getattr(cfg, "mono_token", None) else "—"
         selected_cnt = len(cfg.selected_account_ids or [])
 
         cache_lines: dict[str, str | None] = {}
@@ -128,7 +123,7 @@ def register_dev_handlers(dp, *, ctx: HandlerContext) -> None:
         try:
             info = mb.client_info()
         except Exception as e:
-            msg = _map_monobank_error(e)
+            msg = map_monobank_error(e)
             await message.answer(msg or templates.error(f"Помилка Monobank: {md_escape(str(e))}"))
             return
         finally:
@@ -200,7 +195,7 @@ def register_dev_handlers(dp, *, ctx: HandlerContext) -> None:
 
                     res = await asyncio.to_thread(_run_sync)
 
-                    await _compute_and_cache_reports_for_user(tg_id, account_ids, ctx.profile_store)
+                    await compute_and_cache_reports_for_user(tg_id, account_ids, ctx.profile_store)
 
                     await ctx.bot.send_message(
                         chat_id,
@@ -211,7 +206,7 @@ def register_dev_handlers(dp, *, ctx: HandlerContext) -> None:
                         ),
                     )
             except Exception as e:
-                msg = _map_monobank_error(e)
+                msg = map_monobank_error(e)
                 await ctx.bot.send_message(
                     chat_id,
                     templates.error(f"Помилка оновлення: {md_escape(msg or str(e))}"),

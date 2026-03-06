@@ -13,15 +13,12 @@ from mono_ai_budget_bot.taxonomy.presets import build_taxonomy_preset
 
 from ..monobank import MonobankClient
 from . import templates
-from .app import (
-    _compute_and_cache_reports_for_user,
-    _map_monobank_error,
-    _save_selected_accounts,
-    md_escape,
-    render_accounts_screen,
-)
+from .accounts_ui import render_accounts_screen, save_selected_accounts
+from .errors import map_monobank_error
 from .handlers_common import HandlerContext
 from .onboarding_flow import begin_manual_token_entry
+from .renderers import md_escape
+from .report_flow_helpers import compute_and_cache_reports_for_user
 from .ui import (
     build_back_keyboard,
     build_bootstrap_picker_keyboard,
@@ -55,14 +52,14 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         else:
             selected.add(acc_id)
 
-        _save_selected_accounts(ctx.users, tg_id, sorted(selected))
+        save_selected_accounts(ctx.users, tg_id, sorted(selected))
         ctx.sync_onboarding_progress(tg_id)
 
         mb = MonobankClient(token=cfg.mono_token)
         try:
             info = mb.client_info()
         except Exception as e:
-            msg = _map_monobank_error(e)
+            msg = map_monobank_error(e)
             await query.answer(msg or "Помилка Monobank", show_alert=True)
             return
         finally:
@@ -96,7 +93,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             await query.answer("Нічого очищати")
             return
 
-        _save_selected_accounts(ctx.users, tg_id, [])
+        save_selected_accounts(ctx.users, tg_id, [])
         ctx.sync_onboarding_progress(tg_id)
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -278,7 +275,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
                     res = await asyncio.to_thread(_run_sync)
 
-                    await _compute_and_cache_reports_for_user(
+                    await compute_and_cache_reports_for_user(
                         tg_id,
                         account_ids,
                         ctx.profile_store,
@@ -301,7 +298,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
             except Exception as e:
                 if chat_id is not None:
-                    msg = _map_monobank_error(e)
+                    msg = map_monobank_error(e)
                     await ctx.bot.send_message(
                         chat_id,
                         templates.error(f"Помилка bootstrap: {md_escape(msg or str(e))}"),

@@ -14,11 +14,8 @@ from mono_ai_budget_bot.taxonomy.presets import build_taxonomy_preset
 from mono_ai_budget_bot.uncat.ui import list_leaf_options
 
 from . import templates
-from .app import (
-    _currency_screen_keyboard,
-    _render_currency_screen_text,
-    render_accounts_screen,
-)
+from .accounts_ui import render_accounts_screen
+from .errors import map_llm_error
 from .formatting import format_money_grn
 from .handlers_common import HandlerContext
 from .handlers_dev import register_dev_handlers
@@ -30,8 +27,11 @@ from .handlers_text import register_text_handlers
 from .handlers_uncat import register_uncat_handlers
 from .menu_flow import gate_menu_dependencies, gate_menu_query_or_resume, gate_refresh_dependencies
 from .onboarding_flow import send_onboarding_next
+from .renderers import render_currency_screen_text
+from .report_flow_helpers import build_ai_block
 from .ui import (
     build_bootstrap_picker_keyboard,
+    build_currency_screen_keyboard,
     build_main_menu_keyboard,
     build_onboarding_resume_keyboard,
     build_start_menu_keyboard,
@@ -261,7 +261,7 @@ def register_handlers(
         try:
             pub = MonobankPublicClient()
             rates = pub.currency(force_refresh=force_refresh)
-            text = _render_currency_screen_text(rates)
+            text = render_currency_screen_text(rates)
         except Exception as e:
             text = templates.error(f"Не вдалося отримати курси валют: {e}")
         finally:
@@ -271,7 +271,7 @@ def register_handlers(
             except Exception:
                 pass
 
-        kb = _currency_screen_keyboard()
+        kb = build_currency_screen_keyboard()
         await message.answer(text, reply_markup=kb)
 
     async def _send_period_report(
@@ -282,8 +282,6 @@ def register_handlers(
     ) -> None:
         from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
         from mono_ai_budget_bot.nlq import memory_store
-
-        from .app import _map_llm_error, build_ai_block
 
         want_ai = " ai" in (" " + (message.text or "").lower() + " ")
 
@@ -398,7 +396,7 @@ def register_handlers(
                     )
                 except Exception as e:
                     logger.warning("LLM unavailable, sending facts-only. err=%s", e)
-                    await message.answer(_map_llm_error(e))
+                    await message.answer(map_llm_error(e))
                     ai_block = None
 
         text = render_report_for_user(tg_id, period, stored.facts, ai_block=ai_block)

@@ -13,8 +13,9 @@ from mono_ai_budget_bot.taxonomy.presets import build_taxonomy_preset
 from mono_ai_budget_bot.taxonomy.rules import Rule
 
 from . import templates
-from .app import _map_monobank_error, render_accounts_screen
+from .accounts_ui import render_accounts_screen
 from .clarify import validate_ok_or_alert
+from .errors import map_monobank_error
 from .handlers_common import HandlerContext
 from .onboarding_flow import submit_manual_token
 from .ui import build_coverage_cta_keyboard, build_nlq_clarify_keyboard
@@ -199,7 +200,7 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                 monobank_client_cls=ctx.monobank_client_factory,
                 sync_onboarding_progress=ctx.sync_onboarding_progress,
                 pop_pending_manual_mode=memory_store.pop_pending_manual_mode,
-                map_monobank_error=_map_monobank_error,
+                map_monobank_error=map_monobank_error,
                 connect_validation_error_text=templates.connect_validation_error(),
                 validation_progress_text=templates.connect_token_validation_progress(),
                 connect_success_confirm_text=templates.connect_success_confirm(),

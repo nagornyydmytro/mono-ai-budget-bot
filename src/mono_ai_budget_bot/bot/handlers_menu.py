@@ -6,7 +6,7 @@ from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
 
 from . import templates
-from .app import render_accounts_screen
+from .accounts_ui import render_accounts_screen
 from .handlers_common import HandlerContext
 from .menu_flow import render_menu_screen, render_placeholder_screen, show_placeholder_alert
 from .onboarding_flow import begin_manual_token_entry, open_accounts_picker, show_data_status
