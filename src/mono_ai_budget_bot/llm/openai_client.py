@@ -169,7 +169,15 @@ class OpenAIClient:
         model = LLMReportV2.model_validate(data)
         return model.clean()
 
-    def plan_nlq(self, system: str, user: str, *, max_tokens: int = 450) -> NLQPlanV1:
+    def plan_nlq(self, *, user_text: str, now_ts: int, max_tokens: int = 450) -> NLQPlanV1:
+        system = (
+            "Ти planner для персональної фінансової аналітики. "
+            "Поверни тільки JSON-об'єкт, який відповідає схемі NLQPlanV1. "
+            "Не вигадуй факти. "
+            "Якщо запит поза межами персональної фінансової аналітики або не можеш надійно "
+            "визначити intent — поверни intent='unsupported'."
+        )
+        user = f"now_ts={int(now_ts)}\n" f"user_text={user_text}"
         payload = {
             "model": self.model,
             "temperature": 0.0,

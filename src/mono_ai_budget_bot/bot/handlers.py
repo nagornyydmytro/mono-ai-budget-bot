@@ -356,9 +356,7 @@ def register_handlers(
         ai_block = None
         if want_ai:
             if not settings.openai_api_key:
-                await message.answer(
-                    await message.answer(templates.ai_disabled_missing_key_message())
-                )
+                await message.answer(templates.ai_disabled_missing_key_message())
             else:
                 period_label = {
                     "today": "Сьогодні",
@@ -376,16 +374,27 @@ def register_handlers(
                     )
                     try:
                         profile = profile_store.load(tg_id) or {}
-                        facts_with_profile = {"period_facts": stored.facts, "user_profile": profile}
-                        res = client.generate_report(facts_with_profile, period_label=period_label)
+                        system = (
+                            "Ти допомагаєш з персональною фінансовою аналітикою. "
+                            "Працюй лише на основі переданих фактів. "
+                            "Не вигадуй дані. "
+                            "Не давай інвестиційних, медичних або юридичних порад. "
+                            "Поверни JSON з полями: summary, changes, recs, next_step."
+                        )
+                        user = (
+                            f"Період: {period_label}\n"
+                            f"Факти: {stored.facts}\n"
+                            f"Профіль: {profile}"
+                        )
+                        res = client.generate_report_v2(system, user)
                     finally:
                         client.close()
 
                     ai_block = build_ai_block(
-                        res.report.summary,
-                        res.report.changes,
-                        res.report.recs,
-                        res.report.next_step,
+                        res.summary,
+                        res.changes,
+                        res.recs,
+                        res.next_step,
                     )
                 except Exception as e:
                     logger.warning("LLM unavailable, sending facts-only. err=%s", e)
