@@ -43,6 +43,7 @@ from .ui import (
     build_back_keyboard,
     build_bootstrap_picker_keyboard,
     build_categories_menu_keyboard,
+    build_coverage_cta_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
     build_nlq_clarify_keyboard,
@@ -1126,6 +1127,99 @@ def register_handlers(
             await query.message.answer("Ок, скасовано.")
         await query.answer("Скасовано")
 
+    @dp.callback_query(lambda c: bool(c.data) and str(c.data).startswith("cov_sync:"))
+    async def cb_cov_sync(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає user id", show_alert=True)
+            return
+
+        raw = (query.data or "").strip()
+        parts = raw.split(":", 1)
+        if len(parts) != 2 or parts[0] != "cov_sync":
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        pid = parts[1].strip()
+        ok = memory_store.validate_and_consume_pending(
+            tg_id, pending_id=pid, now_ts=int(time.time())
+        )
+        if not await validate_ok_or_alert(query, ok):
+            return
+
+        mem = memory_store.load_memory(tg_id)
+        payload = mem.get("pending_intent")
+        days_back_raw = payload.get("days_back") if isinstance(payload, dict) else None
+        nlq_text = payload.get("nlq_text") if isinstance(payload, dict) else None
+
+        try:
+            days_back = int(days_back_raw)
+        except Exception:
+            days_back = 30
+        days_back = max(1, min(days_back, 93))
+
+        cfg = users.load(tg_id)
+        if cfg is None or not cfg.mono_token or not cfg.selected_account_ids:
+            if query.message:
+                await query.message.answer(templates.need_connect_and_accounts_message())
+            memory_store.pop_pending_action(tg_id)
+            await query.answer()
+            return
+
+        if query.message:
+            await query.message.edit_reply_markup(reply_markup=None)
+            await query.message.answer(templates.ledger_refresh_progress_message())
+
+        try:
+            await sync_user_ledger(tg_id, cfg, days_back=days_back)
+        except Exception:
+            memory_store.pop_pending_action(tg_id)
+            if query.message:
+                await query.message.answer(templates.monobank_generic_error_message())
+            await query.answer("Помилка", show_alert=True)
+            return
+
+        memory_store.pop_pending_action(tg_id)
+
+        text = str(nlq_text or "").strip()
+        if text and query.message:
+            resp = handle_nlq(
+                NLQRequest(
+                    telegram_user_id=tg_id,
+                    text=text,
+                    now_ts=int(time.time()),
+                )
+            )
+            if resp.result:
+                await query.message.answer(resp.result.text)
+
+        await query.answer("Ок")
+
+    @dp.callback_query(lambda c: bool(c.data) and str(c.data).startswith("cov_cancel:"))
+    async def cb_cov_cancel(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає user id", show_alert=True)
+            return
+
+        raw = (query.data or "").strip()
+        parts = raw.split(":", 1)
+        if len(parts) != 2 or parts[0] != "cov_cancel":
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        pid = parts[1].strip()
+        ok = memory_store.validate_and_consume_pending(
+            tg_id, pending_id=pid, now_ts=int(time.time())
+        )
+        if not await validate_ok_or_alert(query, ok):
+            return
+
+        memory_store.pop_pending_action(tg_id)
+        if query.message:
+            await query.message.edit_reply_markup(reply_markup=None)
+        await query.answer("Скасовано")
+
     @dp.callback_query(
         lambda c: c.data in ("boot_30", "boot_90", "boot_180", "boot_365", "boot_skip")
     )
@@ -1845,6 +1939,27 @@ def register_handlers(
 
             if resp.result:
                 mem = memory_store.load_memory(user_id)
+                cov_status = mem.get("last_coverage_status")
+                cov_days = mem.get("last_coverage_days_back")
+                if cov_status in {"missing", "partial"} and isinstance(cov_days, int):
+                    memory_store.set_pending_intent(
+                        user_id,
+                        payload={
+                            "action": "coverage_sync",
+                            "days_back": int(cov_days),
+                            "nlq_text": (message.text or "").strip(),
+                        },
+                        kind="coverage_cta",
+                        options=None,
+                    )
+                    mem2 = memory_store.load_memory(user_id)
+                    pid = (
+                        mem2.get("pending_id") if isinstance(mem2.get("pending_id"), str) else None
+                    )
+                    kb = build_coverage_cta_keyboard(pending_id=(pid or ""))
+                    if kb is not None:
+                        await message.answer(resp.result.text, reply_markup=kb)
+                        return
                 kind = mem.get("pending_kind")
                 opts = mem.get("pending_options")
 

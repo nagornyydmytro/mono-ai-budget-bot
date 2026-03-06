@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -152,6 +153,22 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         requested_to_ts=int(ts_to),
         coverage_window=cov,
     )
+
+    if status != CoverageStatus.ok:
+        days_back = int(math.ceil((int(ts_to) - int(ts_from)) / 86400.0))
+        days_back = max(1, min(days_back, 93))
+        mem2 = load_memory(telegram_user_id)
+        mem2["last_coverage_status"] = str(status.value)
+        mem2["last_coverage_requested"] = {"from_ts": int(ts_from), "to_ts": int(ts_to)}
+        mem2["last_coverage_days_back"] = int(days_back)
+        save_memory(telegram_user_id, mem2)
+    else:
+        mem2 = load_memory(telegram_user_id)
+        if mem2.get("last_coverage_status") is not None:
+            mem2["last_coverage_status"] = None
+            mem2["last_coverage_requested"] = None
+            mem2["last_coverage_days_back"] = None
+            save_memory(telegram_user_id, mem2)
 
     if status == CoverageStatus.partial and cov is not None:
         cov_from, cov_to = cov

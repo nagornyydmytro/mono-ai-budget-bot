@@ -187,6 +187,19 @@ def build_nlq_clarify_keyboard(
     return _build_rows(rows)
 
 
+def build_coverage_cta_keyboard(*, pending_id: str) -> Any:
+    pid = (pending_id or "").strip()
+    if not pid:
+        return None
+
+    return _build_rows(
+        [
+            [("⬇️ Завантажити цей період", f"cov_sync:{pid}")],
+            [("❌ Скасувати", f"cov_cancel:{pid}")],
+        ]
+    )
+
+
 def build_back_keyboard(callback_data: str, *, text: str = BTN_BACK) -> Any:
     return _build_rows([[(text, callback_data)]])
 
