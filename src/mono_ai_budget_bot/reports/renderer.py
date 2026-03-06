@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
 from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.bot.formatting import format_money_uah_pretty, format_ts_local
 from mono_ai_budget_bot.reports.config import ReportsConfig
@@ -55,7 +56,12 @@ def _render_coverage_warning(facts: dict) -> str | None:
     except Exception:
         return None
 
-    if req_from >= cov_from and req_to <= cov_to:
+    status = classify_coverage(
+        requested_from_ts=req_from,
+        requested_to_ts=req_to,
+        coverage_window=(cov_from, cov_to),
+    )
+    if status != CoverageStatus.partial:
         return None
 
     d1 = format_ts_local(cov_from)[:10]

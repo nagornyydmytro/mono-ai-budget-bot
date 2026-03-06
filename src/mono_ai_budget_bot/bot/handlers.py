@@ -11,6 +11,7 @@ from aiogram import F
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
+from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
 from mono_ai_budget_bot.currency import MonobankPublicClient
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
@@ -1733,6 +1734,44 @@ def register_handlers(
         if stored is None:
             await message.answer(templates.err_no_ledger(period))
             return
+
+        coverage_status = CoverageStatus.missing
+        facts_cov = stored.facts.get("coverage") if isinstance(stored.facts, dict) else None
+        if isinstance(facts_cov, dict):
+            try:
+                cov_from = int(facts_cov["coverage_from_ts"])
+                cov_to = int(facts_cov["coverage_to_ts"])
+                req_from = int(facts_cov["requested_from_ts"])
+                req_to = int(facts_cov["requested_to_ts"])
+                coverage_status = classify_coverage(
+                    requested_from_ts=req_from,
+                    requested_to_ts=req_to,
+                    coverage_window=(cov_from, cov_to),
+                )
+            except Exception:
+                coverage_status = CoverageStatus.missing
+
+        if coverage_status == CoverageStatus.missing:
+            days_back = {"today": 1, "week": 7, "month": 30}.get(period)
+            if isinstance(days_back, int):
+                memory_store.set_pending_intent(
+                    tg_id,
+                    payload={
+                        "action": "coverage_sync",
+                        "days_back": int(days_back),
+                    },
+                    kind="coverage_cta",
+                    options=None,
+                )
+                mem = memory_store.load_memory(tg_id)
+                pid = mem.get("pending_id") if isinstance(mem.get("pending_id"), str) else None
+                kb = build_coverage_cta_keyboard(pending_id=(pid or ""))
+                if kb is not None:
+                    await message.answer(
+                        templates.warning("Немає даних для запитаного періоду."),
+                        reply_markup=kb,
+                    )
+                    return
 
         ai_block = None
         if want_ai:
