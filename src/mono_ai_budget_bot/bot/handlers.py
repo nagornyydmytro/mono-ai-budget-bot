@@ -156,6 +156,24 @@ def register_handlers(
             reply_markup=kb,
         )
 
+    async def _gate_menu_query_or_resume(query: CallbackQuery) -> bool:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer()
+            return False
+
+        _sync_onboarding_progress(tg_id)
+        if _onboarding_done(tg_id):
+            return True
+
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_finish_onboarding_message(),
+                reply_markup=build_onboarding_resume_keyboard(),
+            )
+        await query.answer()
+        return False
+
     async def _send_onboarding_next(chat: Message | CallbackQuery) -> None:
         if isinstance(chat, CallbackQuery):
             tg_id = chat.from_user.id if chat.from_user else None
@@ -294,7 +312,7 @@ def register_handlers(
         onboarding_done = _onboarding_done(tg_id)
 
         if not onboarding_done:
-            kb = build_main_menu_keyboard(uncat_enabled=True)
+            kb = build_onboarding_resume_keyboard()
             await message.answer(
                 templates.menu_finish_onboarding_message(),
                 reply_markup=kb,
@@ -339,7 +357,7 @@ def register_handlers(
         users.save(tg_id, mono_token=mono_token, selected_account_ids=[])
         _sync_onboarding_progress(tg_id)
 
-        kb = build_main_menu_keyboard(uncat_enabled=True)
+        kb = build_onboarding_resume_keyboard()
         await message.answer(templates.connect_success_confirm())
         await message.answer(templates.connect_success_next_steps(), reply_markup=kb)
 
@@ -541,6 +559,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:root")
     async def cb_menu_root(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message:
             await query.message.edit_text(
                 templates.menu_root_message(),
@@ -550,6 +570,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:reports")
     async def cb_menu_reports(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message:
             await query.message.edit_text(
                 templates.menu_reports_message(),
@@ -559,6 +581,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data")
     async def cb_menu_data(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message:
             await query.message.edit_text(
                 templates.menu_data_message(),
@@ -568,6 +592,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:new_token")
     async def cb_data_new_token(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer("Немає tg id", show_alert=True)
@@ -590,6 +616,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:accounts")
     async def cb_data_accounts(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer("Немає tg id", show_alert=True)
@@ -625,6 +653,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:refresh")
     async def cb_data_refresh(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer("Немає tg id", show_alert=True)
@@ -643,6 +673,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:status")
     async def cb_data_status(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer("Немає tg id", show_alert=True)
@@ -665,6 +697,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories")
     async def cb_menu_categories(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message:
             await query.message.edit_text(
                 templates.menu_categories_message(),
@@ -674,6 +708,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:"))
     async def cb_menu_categories_placeholders(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         await query.answer(templates.coming_soon_message(), show_alert=True)
 
     @dp.callback_query(lambda c: c.data == "onb_token")
@@ -730,6 +766,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu:uncat")
     async def cb_menu_uncat(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         await query.answer()
 
         if query.message:
@@ -881,6 +919,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu:currency")
     async def cb_menu_currency(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message:
             await _send_currency_screen(query.message, force_refresh=False)
         await query.answer()
@@ -898,19 +938,16 @@ def register_handlers(
             await query.answer()
             return
 
-        cfg = users.load(tg_id)
-        prof = profile_store.load(tg_id) or {}
-        onboarding_done = (
-            cfg is not None
-            and bool(cfg.mono_token)
-            and bool(cfg.selected_account_ids)
-            and bool(prof.get("persona"))
-        )
+        _sync_onboarding_progress(tg_id)
+        onboarding_done = _onboarding_done(tg_id)
 
         if query.message:
             if not onboarding_done:
-                kb = build_start_menu_keyboard()
-                await query.message.answer(templates.start_message(), reply_markup=kb)
+                kb = build_onboarding_resume_keyboard()
+                await query.message.answer(
+                    templates.menu_finish_onboarding_message(),
+                    reply_markup=kb,
+                )
             else:
                 kb = build_main_menu_keyboard(uncat_enabled=True)
                 await query.message.answer(templates.menu_root_message(), reply_markup=kb)
@@ -919,6 +956,8 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu:help")
     async def cb_menu_help(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer()
@@ -940,18 +979,24 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu_week")
     async def cb_menu_week(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message and query.from_user:
             await _send_period_report(query.message, "week", tg_id_override=query.from_user.id)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_month")
     async def cb_menu_month(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message and query.from_user:
             await _send_period_report(query.message, "month", tg_id_override=query.from_user.id)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "menu_status")
     async def cb_menu_status(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
         if query.message:
             await cmd_status(query.message)
         await query.answer()
