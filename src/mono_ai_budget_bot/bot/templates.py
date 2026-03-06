@@ -1032,3 +1032,36 @@ def need_connect_with_hint_message() -> str:
 
 def need_connect_and_accounts_message() -> str:
     return "Спочатку підключи Monobank і вибери картки"
+
+
+def menu_missing_token_message() -> str:
+    return warning(
+        "\n".join(
+            [
+                "Для цього розділу ще не підключено Monobank.",
+                "Натисни 🔐 Connect і встав токен.",
+            ]
+        )
+    )
+
+
+def menu_missing_accounts_message() -> str:
+    return warning(
+        "\n".join(
+            [
+                "Для цього розділу не вибрано картки.",
+                "Відкрий ⚙️ Мої дані → 💳 Change accounts.",
+            ]
+        )
+    )
+
+
+def menu_missing_ledger_message() -> str:
+    return warning(
+        "\n".join(
+            [
+                "Для цього розділу ще немає локальних даних.",
+                "Зроби ⚙️ Мої дані → 🔄 Refresh latest.",
+            ]
+        )
+    )
