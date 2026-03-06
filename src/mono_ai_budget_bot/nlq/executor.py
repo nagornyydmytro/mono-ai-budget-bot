@@ -5,6 +5,7 @@ from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
+from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
 from mono_ai_budget_bot.analytics.refunds import detect_refund_pairs, refund_ignore_ids
 from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.bot.formatting import (
@@ -145,12 +146,30 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     cov = tx_store.aggregated_coverage_window(telegram_user_id, account_ids)
     coverage_warning: str | None = None
-    if cov is not None:
+
+    status = classify_coverage(
+        requested_from_ts=int(ts_from),
+        requested_to_ts=int(ts_to),
+        coverage_window=cov,
+    )
+
+    if status == CoverageStatus.partial and cov is not None:
         cov_from, cov_to = cov
-        if spec.window.start_ts < cov_from or spec.window.end_ts > cov_to:
+        d1 = format_ts_local(int(cov_from))[:10]
+        d2 = format_ts_local(int(cov_to))[:10]
+        coverage_warning = templates.nlq_coverage_warning(d1, d2)
+    elif status == CoverageStatus.missing:
+        if cov is None:
+            coverage_warning = templates.warning(
+                "Немає даних для запитаного періоду. Схоже, історія ще не завантажена."
+            )
+        else:
+            cov_from, cov_to = cov
             d1 = format_ts_local(int(cov_from))[:10]
             d2 = format_ts_local(int(cov_to))[:10]
-            coverage_warning = templates.nlq_coverage_warning(d1, d2)
+            coverage_warning = templates.warning(
+                f"Немає даних для запитаного періоду. Coverage: {d1} — {d2}."
+            )
 
     rows = tx_store.load_range(
         telegram_user_id=telegram_user_id,
