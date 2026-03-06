@@ -48,6 +48,14 @@ from .menu_flow import (
     render_placeholder_screen,
     show_placeholder_alert,
 )
+from .onboarding_flow import (
+    begin_manual_token_entry,
+    open_accounts_picker,
+    send_onboarding_next,
+    send_start_screen,
+    show_data_status,
+    submit_manual_token,
+)
 from .ui import (
     build_back_keyboard,
     build_bootstrap_picker_keyboard,
@@ -223,100 +231,31 @@ def register_handlers(
         return ok, cfg
 
     async def _send_onboarding_next(chat: Message | CallbackQuery) -> None:
-        if isinstance(chat, CallbackQuery):
-            tg_id = chat.from_user.id if chat.from_user else None
-            msg = chat.message
-        else:
-            tg_id = chat.from_user.id if chat.from_user else None
-            msg = chat
-
-        if tg_id is None or msg is None:
-            return
-
-        cfg = users.load(tg_id)
-        prof = profile_store.load(tg_id) or {}
-
-        if cfg is None or not cfg.mono_token:
-            kb = build_start_menu_keyboard()
-            await msg.answer(templates.start_message(), reply_markup=kb)
-            return
-
-        if not cfg.selected_account_ids:
-            mb = MonobankClient(token=cfg.mono_token)
-            try:
-                info = mb.client_info()
-            finally:
-                mb.close()
-
-            accounts = [
-                {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
-                for a in info.accounts
-            ]
-            selected_ids = set(cfg.selected_account_ids or [])
-            text, kb = render_accounts_screen(accounts, selected_ids)
-            await msg.answer(f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb)
-            return
-
-        if taxonomy_store.load(tg_id) is None:
-            count = len(cfg.selected_account_ids)
-            kb = build_bootstrap_picker_keyboard(include_skip=False)
-            await msg.answer(
-                templates.accounts_after_done_with_count(count),
-                reply_markup=kb,
-            )
-            return
-
-        if reports_store.load(tg_id) is None:
-            l1, l2, l3 = templates.reports_preset_labels()
-            kb = build_vertical_options_keyboard(
-                [
-                    (l1, "rep_preset_min"),
-                    (l2, "rep_preset_max"),
-                    (l3, "rep_preset_custom"),
-                ]
-            )
-            await msg.answer(templates.reports_preset_prompt(), reply_markup=kb)
-            return
-
-        if not prof.get("activity_mode"):
-            l1, l2, l3 = templates.activity_mode_labels()
-            kb = build_vertical_options_keyboard(
-                [
-                    (l1, "act_loud"),
-                    (l2, "act_quiet"),
-                    (l3, "act_custom"),
-                ]
-            )
-            await msg.answer(templates.activity_mode_prompt(), reply_markup=kb)
-            return
-
-        if not prof.get("uncategorized_prompt_frequency"):
-            l1, l2, l3, l4 = templates.uncat_frequency_labels()
-            kb = build_vertical_options_keyboard(
-                [
-                    (l1, "uncat_immediate"),
-                    (l2, "uncat_daily"),
-                    (l3, "uncat_weekly"),
-                    (l4, "uncat_before_report"),
-                ]
-            )
-            await msg.answer(templates.uncat_frequency_prompt(), reply_markup=kb)
-            return
-
-        if not prof.get("persona"):
-            l1, l2, l3 = templates.persona_labels()
-            kb = build_vertical_options_keyboard(
-                [
-                    (l1, "persona_supportive"),
-                    (l2, "persona_rational"),
-                    (l3, "persona_motivator"),
-                ]
-            )
-            await msg.answer(templates.persona_prompt(), reply_markup=kb)
-            return
-
-        kb = build_main_menu_keyboard(uncat_enabled=True)
-        await msg.answer(templates.menu_root_message(), reply_markup=kb)
+        await send_onboarding_next(
+            chat,
+            users=users,
+            profile_store=profile_store,
+            taxonomy_store=taxonomy_store,
+            reports_store=reports_store,
+            monobank_client_cls=MonobankClient,
+            render_accounts_screen=render_accounts_screen,
+            start_message_text=templates.start_message(),
+            connect_success_confirm_text=templates.connect_success_confirm(),
+            accounts_after_done_with_count_text=templates.accounts_after_done_with_count,
+            reports_preset_labels=templates.reports_preset_labels,
+            reports_preset_prompt_text=templates.reports_preset_prompt(),
+            activity_mode_labels=templates.activity_mode_labels,
+            activity_mode_prompt_text=templates.activity_mode_prompt(),
+            uncat_frequency_labels=templates.uncat_frequency_labels,
+            uncat_frequency_prompt_text=templates.uncat_frequency_prompt(),
+            persona_labels=templates.persona_labels,
+            persona_prompt_text=templates.persona_prompt(),
+            menu_root_message_text=templates.menu_root_message(),
+            build_start_menu_keyboard=build_start_menu_keyboard,
+            build_bootstrap_picker_keyboard=build_bootstrap_picker_keyboard,
+            build_vertical_options_keyboard=build_vertical_options_keyboard,
+            build_main_menu_keyboard=build_main_menu_keyboard,
+        )
 
     @dp.message(Command("start"))
     async def cmd_start(message: Message) -> None:
@@ -690,20 +629,15 @@ def register_handlers(
             await query.answer("Немає tg id", show_alert=True)
             return
 
-        memory_store.set_pending_manual_mode(
-            tg_id,
-            expected="mono_token",
+        await begin_manual_token_entry(
+            query,
+            tg_id=tg_id,
+            set_pending_manual_mode=memory_store.set_pending_manual_mode,
             hint=templates.token_paste_hint_new_token(),
             source="data_menu",
-            ttl_sec=900,
+            prompt_text=templates.token_paste_prompt_new_token(),
+            reply_markup=build_back_keyboard("menu:data"),
         )
-
-        if query.message:
-            await query.message.answer(
-                templates.token_paste_prompt_new_token(),
-                reply_markup=build_back_keyboard("menu:data"),
-            )
-        await query.answer()
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:accounts")
     async def cb_data_accounts(query: CallbackQuery) -> None:
@@ -714,33 +648,15 @@ def register_handlers(
             await query.answer("Немає tg id", show_alert=True)
             return
 
-        cfg = users.load(tg_id)
-        if cfg is None or not cfg.mono_token:
-            await query.answer("Monobank не підключено", show_alert=True)
-            return
-
-        mb = MonobankClient(token=cfg.mono_token)
-        try:
-            info = mb.client_info()
-        finally:
-            mb.close()
-
-        accounts = [
-            {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
-            for a in info.accounts
-        ]
-        selected_ids = set(cfg.selected_account_ids or [])
-        mem = memory_store.load_memory(tg_id)
-        mem["accounts_picker"] = {
-            "source": "data_menu",
-            "prev_selected": sorted(selected_ids),
-        }
-        memory_store.save_memory(tg_id, mem)
-        text, kb = render_accounts_screen(accounts, selected_ids)
-
-        if query.message:
-            await query.message.edit_text(text, reply_markup=kb)
-        await query.answer()
+        await open_accounts_picker(
+            query,
+            tg_id=tg_id,
+            users=users,
+            monobank_client_cls=MonobankClient,
+            render_accounts_screen=render_accounts_screen,
+            load_memory=memory_store.load_memory,
+            save_memory=memory_store.save_memory,
+        )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:refresh")
     async def cb_data_refresh(query: CallbackQuery) -> None:
@@ -768,20 +684,14 @@ def register_handlers(
             await query.answer("Немає tg id", show_alert=True)
             return
 
-        cfg = users.load(tg_id)
-        if cfg is None or not cfg.mono_token:
-            await query.answer("Monobank не підключено", show_alert=True)
-            return
-
-        acc_n = len(cfg.selected_account_ids or [])
-        _sync_onboarding_progress(tg_id)
-        onboarding_done = _onboarding_done(tg_id)
-
-        text = templates.status_message(accounts_selected=acc_n, onboarding_done=onboarding_done)
-
-        if query.message:
-            await query.message.answer(text)
-        await query.answer()
+        await show_data_status(
+            query,
+            tg_id=tg_id,
+            users=users,
+            sync_onboarding_progress=_sync_onboarding_progress,
+            onboarding_done=_onboarding_done,
+            status_message_builder=templates.status_message,
+        )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories")
     async def cb_menu_categories(query: CallbackQuery) -> None:
@@ -810,20 +720,16 @@ def register_handlers(
             await query.answer("Немає tg id", show_alert=True)
             return
 
-        memory_store.set_pending_manual_mode(
-            tg_id,
-            expected="mono_token",
+        await begin_manual_token_entry(
+            query,
+            tg_id=tg_id,
+            set_pending_manual_mode=memory_store.set_pending_manual_mode,
             hint=templates.token_paste_hint_connect(),
             source="onboarding",
-            ttl_sec=900,
+            prompt_text=templates.onboarding_token_paste_prompt(),
+            reply_markup=build_back_keyboard("onb_back_main"),
+            answer_text="Ок",
         )
-
-        if query.message:
-            await query.message.answer(
-                templates.onboarding_token_paste_prompt(),
-                reply_markup=build_back_keyboard("onb_back_main"),
-            )
-        await query.answer("Ок")
 
     async def _send_next_uncat(message: Message, tg_id: int) -> None:
         tax = taxonomy_store.load(tg_id)
@@ -988,12 +894,14 @@ def register_handlers(
         tg_id = query.from_user.id if query.from_user else None
         if query.message and tg_id is not None:
             memory_store.pop_pending_manual_mode(tg_id)
-            kb = build_start_menu_keyboard()
-            text = templates.start_message()
-            cfg = users.load(tg_id)
-            if cfg is not None and cfg.mono_token:
-                text = templates.start_message_connected()
-            await query.message.answer(text, reply_markup=kb)
+            await send_start_screen(
+                query.message,
+                users=users,
+                tg_id=tg_id,
+                start_text=templates.start_message(),
+                connected_text=templates.start_message_connected(),
+                reply_markup=build_start_menu_keyboard(),
+            )
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "onb_resume")
@@ -2006,44 +1914,24 @@ def register_handlers(
 
         manual = memory_store.get_pending_manual_mode(user_id, now_ts=now_ts)
         if manual is not None and str(manual.get("expected") or "") == "mono_token":
-            if text_lower == "cancel":
-                memory_store.pop_pending_manual_mode(user_id)
-                await message.answer("Ок, скасовано.")
-                return
-
-            mono_token = text_raw
-            if len(mono_token) < 20:
-                await message.answer(templates.connect_validation_error())
-                return
-
-            await message.answer(templates.connect_token_validation_progress())
-
-            try:
-                mb = MonobankClient(token=mono_token)
-                try:
-                    info = mb.client_info()
-                finally:
-                    mb.close()
-            except Exception as e:
-                mapped = _map_monobank_error(e)
-                await message.answer(mapped or templates.error("Помилка перевірки токена."))
-                return
-
-            users.save(user_id, mono_token=mono_token, selected_account_ids=[])
-            _sync_onboarding_progress(user_id)
-            memory_store.pop_pending_manual_mode(user_id)
-
-            accounts = [
-                {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}
-                for a in info.accounts
-            ]
-            selected_ids: set[str] = set()
-            text, kb = render_accounts_screen(accounts, selected_ids)
-
-            await message.answer(
-                f"{templates.connect_success_confirm()}\n\n{text}", reply_markup=kb
+            handled = await submit_manual_token(
+                message,
+                user_id=user_id,
+                text_raw=text_raw,
+                text_lower=text_lower,
+                users=users,
+                monobank_client_cls=MonobankClient,
+                sync_onboarding_progress=_sync_onboarding_progress,
+                pop_pending_manual_mode=memory_store.pop_pending_manual_mode,
+                map_monobank_error=_map_monobank_error,
+                connect_validation_error_text=templates.connect_validation_error(),
+                validation_progress_text=templates.connect_token_validation_progress(),
+                connect_success_confirm_text=templates.connect_success_confirm(),
+                render_accounts_screen=render_accounts_screen,
+                error_text_factory=templates.error,
             )
-            return
+            if handled:
+                return
 
         if text_lower == "cancel":
             memory_store.pop_pending_intent(user_id)
