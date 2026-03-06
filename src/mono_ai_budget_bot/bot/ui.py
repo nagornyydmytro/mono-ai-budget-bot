@@ -100,8 +100,8 @@ def build_onboarding_resume_keyboard() -> Any:
 def build_start_menu_keyboard() -> Any:
     return _build_rows(
         [
-            [(MENU_CONNECT, "menu_connect"), (MENU_HELP, "menu_help")],
-            [(MENU_CURRENCY, "menu_currency")],
+            [(MENU_CONNECT, "menu_connect"), (MENU_HELP, "menu:help")],
+            [(MENU_CURRENCY, "menu:currency")],
         ]
     )
 

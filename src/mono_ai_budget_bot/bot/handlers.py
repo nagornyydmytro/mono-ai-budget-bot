@@ -281,10 +281,13 @@ def register_handlers(
         users.save(tg_id, chat_id=message.chat.id)
         cfg = users.load(tg_id)
 
+        _sync_onboarding_progress(tg_id)
+        onboarding_done = _onboarding_done(tg_id)
+
         kb = build_start_menu_keyboard()
 
         text = templates.start_message()
-        if cfg is not None and cfg.mono_token:
+        if cfg is not None and cfg.mono_token and not onboarding_done:
             text = templates.start_message_connected()
 
         await message.answer(text, reply_markup=kb)
@@ -552,6 +555,20 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu_connect")
     async def cb_menu_connect(query: CallbackQuery) -> None:
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer()
+            return
+
+        _sync_onboarding_progress(tg_id)
+        cfg = users.load(tg_id)
+        onboarding_done = _onboarding_done(tg_id)
+
+        if cfg is not None and cfg.mono_token and not onboarding_done:
+            await query.answer()
+            await _send_onboarding_next(query)
+            return
+
         if query.message:
             kb = build_vertical_options_keyboard(
                 [("✅ Ввести токен", "onb_token"), ("⬅️ Назад", "onb_back_main")]
@@ -921,8 +938,6 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu:currency")
     async def cb_menu_currency(query: CallbackQuery) -> None:
-        if not await _gate_menu_query_or_resume(query):
-            return
         if query.message:
             await _send_currency_screen(query.message, force_refresh=False)
         await query.answer()
@@ -945,11 +960,12 @@ def register_handlers(
 
         if query.message:
             if not onboarding_done:
-                kb = build_onboarding_resume_keyboard()
-                await query.message.answer(
-                    templates.menu_finish_onboarding_message(),
-                    reply_markup=kb,
-                )
+                kb = build_start_menu_keyboard()
+                text = templates.start_message()
+                cfg = users.load(tg_id)
+                if cfg is not None and cfg.mono_token:
+                    text = templates.start_message_connected()
+                await query.message.answer(text, reply_markup=kb)
             else:
                 kb = build_main_menu_keyboard(uncat_enabled=True)
                 await query.message.answer(templates.menu_root_message(), reply_markup=kb)
@@ -958,8 +974,6 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "menu:help")
     async def cb_menu_help(query: CallbackQuery) -> None:
-        if not await _gate_menu_query_or_resume(query):
-            return
         tg_id = query.from_user.id if query.from_user else None
         if tg_id is None:
             await query.answer()
