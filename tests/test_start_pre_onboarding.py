@@ -325,6 +325,26 @@ def test_menu_help_is_available_before_onboarding_completion():
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_help_back_returns_to_start_before_onboarding():
+    dp = _build_dispatcher(cfg=None)
+
+    cb_menu_help = dp.callback_query.handlers["cb_menu_help"]
+    cb_onb_back_main = dp.callback_query.handlers["cb_onb_back_main"]
+
+    message = DummyMessage(user_id=1)
+    help_query = DummyCallbackQuery(user_id=1, data="menu:help", message=message)
+    asyncio.run(cb_menu_help(help_query))
+
+    back_query = DummyCallbackQuery(user_id=1, data="onb_back_main", message=message)
+    asyncio.run(cb_onb_back_main(back_query))
+
+    assert len(message.answers) == 2
+    back_text, back_kb = message.answers[-1]
+    assert back_text == templates.start_message()
+    assert _kb_dump(back_kb) == _kb_dump(build_start_menu_keyboard())
+    assert back_query.answer_calls[-1] == (None, False, None)
+
+
 def test_onb_back_main_returns_to_connected_start_when_token_exists():
     dp = _build_dispatcher(
         cfg=UserConfig(
