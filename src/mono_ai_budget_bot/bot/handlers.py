@@ -576,17 +576,6 @@ def register_handlers(
             await query.message.answer(templates.connect_instructions(), reply_markup=kb)
         await query.answer()
 
-    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:root")
-    async def cb_menu_root(query: CallbackQuery) -> None:
-        if not await _gate_menu_query_or_resume(query):
-            return
-        if query.message:
-            await query.message.edit_text(
-                templates.menu_root_message(),
-                reply_markup=build_main_menu_keyboard(uncat_enabled=True),
-            )
-        await query.answer()
-
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:reports")
     async def cb_menu_reports(query: CallbackQuery) -> None:
         if not await _gate_menu_query_or_resume(query):
@@ -598,7 +587,32 @@ def register_handlers(
             )
         await query.answer()
 
-    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data")
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:root")
+    async def cb_menu_root(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
+        if query.message:
+            await query.message.edit_text(
+                templates.main_menu_message(),
+                reply_markup=build_main_menu_keyboard(),
+            )
+        await query.answer()
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data in {"menu:ask", "menu:insights", "menu:personalization"}
+    )
+    async def cb_menu_placeholder_sections(query: CallbackQuery) -> None:
+        if not await _gate_menu_query_or_resume(query):
+            return
+        if query.message:
+            await query.message.edit_text(
+                templates.coming_soon_message(),
+                reply_markup=build_back_keyboard("menu:root"),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data in {"menu:data", "menu:mydata"})
     async def cb_menu_data(query: CallbackQuery) -> None:
         if not await _gate_menu_query_or_resume(query):
             return
