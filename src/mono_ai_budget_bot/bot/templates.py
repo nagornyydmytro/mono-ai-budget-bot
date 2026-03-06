@@ -933,6 +933,10 @@ def ledger_refresh_progress_message() -> str:
     return "🔄 Оновлюю останні транзакції…\nЦе може зайняти кілька секунд."
 
 
+def coverage_sync_done_message() -> str:
+    return "✅ Дані за цей період завантажено.\nПовторюю відповідь на запит."
+
+
 def uncat_saved_mapping_message(*, description: str, leaf_name: str) -> str:
     return f"✅ Збережено: {description} → {leaf_name}"
 

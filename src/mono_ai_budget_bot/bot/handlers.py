@@ -1181,6 +1181,9 @@ def register_handlers(
 
         memory_store.pop_pending_action(tg_id)
 
+        if query.message:
+            await query.message.answer(templates.coverage_sync_done_message())
+
         text = str(nlq_text or "").strip()
         if text and query.message:
             resp = handle_nlq(
