@@ -23,11 +23,8 @@ BTN_DONE = "✅ Done"
 
 
 MENU_CONNECT = "🔐 Connect"
-MENU_ACCOUNTS = "🧾 Accounts"
 MENU_WEEK = "📊 Week"
 MENU_MONTH = "📅 Month"
-MENU_REFRESH_WEEK = "🔄 Refresh week"
-MENU_STATUS = "🔎 Status"
 MENU_HELP = "📘 Help"
 MENU_UNCAT = "🧩 Uncat"
 MENU_CURRENCY = "💱 Курси"

@@ -1000,28 +1000,6 @@ def register_handlers(
             await _send_period_report(query.message, "month", tg_id_override=query.from_user.id)
         await query.answer()
 
-    @dp.callback_query(lambda c: c.data == "menu_status")
-    async def cb_menu_status(query: CallbackQuery) -> None:
-        if not await _gate_menu_query_or_resume(query):
-            return
-        if query.message:
-            await cmd_status(query.message)
-        await query.answer()
-
-    @dp.callback_query(lambda c: c.data == "menu_accounts")
-    async def cb_menu_accounts(query: CallbackQuery) -> None:
-        if query.message:
-            await cmd_accounts(query.message)
-        await query.answer()
-
-    @dp.callback_query(lambda c: c.data == "menu_refresh_week")
-    async def cb_menu_refresh_week(query: CallbackQuery) -> None:
-        if query.message:
-            fake_msg = query.message
-            fake_msg.text = "/refresh week"
-            await cmd_refresh(fake_msg)
-        await query.answer()
-
     @dp.callback_query(lambda c: bool(c.data) and c.data.startswith("nlq_pick:"))
     async def cb_nlq_pick(query: CallbackQuery) -> None:
         tg_id = query.from_user.id if query.from_user else None
