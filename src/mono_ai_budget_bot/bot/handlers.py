@@ -40,6 +40,14 @@ from .app import (
 )
 from .clarify import validate_ok_or_alert, validate_uncat_pending_or_alert
 from .formatting import format_money_grn
+from .menu_flow import (
+    gate_menu_dependencies,
+    gate_menu_query_or_resume,
+    gate_refresh_dependencies,
+    render_menu_screen,
+    render_placeholder_screen,
+    show_placeholder_alert,
+)
 from .ui import (
     build_back_keyboard,
     build_bootstrap_picker_keyboard,
@@ -159,22 +167,13 @@ def register_handlers(
         )
 
     async def _gate_menu_query_or_resume(query: CallbackQuery) -> bool:
-        tg_id = query.from_user.id if query.from_user else None
-        if tg_id is None:
-            await query.answer()
-            return False
-
-        _sync_onboarding_progress(tg_id)
-        if _onboarding_done(tg_id):
-            return True
-
-        if query.message:
-            await query.message.edit_text(
-                templates.menu_finish_onboarding_message(),
-                reply_markup=build_onboarding_resume_keyboard(),
-            )
-        await query.answer()
-        return False
+        return await gate_menu_query_or_resume(
+            query,
+            sync_onboarding_progress=_sync_onboarding_progress,
+            onboarding_done=_onboarding_done,
+            finish_onboarding_text=templates.menu_finish_onboarding_message(),
+            finish_onboarding_keyboard=build_onboarding_resume_keyboard(),
+        )
 
     async def _gate_menu_dependencies(
         query: CallbackQuery,
@@ -183,94 +182,45 @@ def register_handlers(
         require_accounts: bool = False,
         require_ledger: bool = False,
     ) -> bool:
-        tg_id = query.from_user.id if query.from_user else None
-        if tg_id is None:
-            await query.answer()
-            return False
-
-        _sync_onboarding_progress(tg_id)
-        cfg = users.load(tg_id)
-
-        if require_token and (cfg is None or not cfg.mono_token):
-            if query.message:
-                await query.message.edit_text(
-                    templates.menu_missing_token_message(),
-                    reply_markup=build_vertical_options_keyboard(
-                        [("🔐 Connect", "menu_connect"), ("⬅️ Назад", "menu:root")]
-                    ),
-                )
-            await query.answer()
-            return False
-
-        if require_accounts and (cfg is None or not cfg.selected_account_ids):
-            if query.message:
-                await query.message.edit_text(
-                    templates.menu_missing_accounts_message(),
-                    reply_markup=build_vertical_options_keyboard(
-                        [("⚙️ Мої дані", "menu:mydata"), ("⬅️ Назад", "menu:root")]
-                    ),
-                )
-            await query.answer()
-            return False
-
-        if require_ledger:
-            account_ids = list(cfg.selected_account_ids or []) if cfg is not None else []
-            has_ledger = bool(account_ids) and (
-                tx_store.aggregated_coverage_window(tg_id, account_ids) is not None
-            )
-            if not has_ledger:
-                if query.message:
-                    await query.message.edit_text(
-                        templates.menu_missing_ledger_message(),
-                        reply_markup=build_vertical_options_keyboard(
-                            [("🔄 Refresh latest", "menu:data:refresh"), ("⬅️ Назад", "menu:root")]
-                        ),
-                    )
-                await query.answer()
-                return False
-
-        if not _onboarding_done(tg_id):
-            if query.message:
-                await query.message.edit_text(
-                    templates.menu_finish_onboarding_message(),
-                    reply_markup=build_onboarding_resume_keyboard(),
-                )
-            await query.answer()
-            return False
-
-        return True
+        return await gate_menu_dependencies(
+            query,
+            users=users,
+            tx_store=tx_store,
+            sync_onboarding_progress=_sync_onboarding_progress,
+            onboarding_done=_onboarding_done,
+            require_token=require_token,
+            require_accounts=require_accounts,
+            require_ledger=require_ledger,
+            missing_token_text=templates.menu_missing_token_message(),
+            missing_token_keyboard=build_vertical_options_keyboard(
+                [("🔐 Connect", "menu_connect"), ("⬅️ Назад", "menu:root")]
+            ),
+            missing_accounts_text=templates.menu_missing_accounts_message(),
+            missing_accounts_keyboard=build_vertical_options_keyboard(
+                [("⚙️ Мої дані", "menu:mydata"), ("⬅️ Назад", "menu:root")]
+            ),
+            missing_ledger_text=templates.menu_missing_ledger_message(),
+            missing_ledger_keyboard=build_vertical_options_keyboard(
+                [("🔄 Refresh latest", "menu:data:refresh"), ("⬅️ Назад", "menu:root")]
+            ),
+            finish_onboarding_text=templates.menu_finish_onboarding_message(),
+            finish_onboarding_keyboard=build_onboarding_resume_keyboard(),
+        )
 
     async def _gate_refresh_dependencies(query: CallbackQuery) -> tuple[bool, UserConfig | None]:
-        tg_id = query.from_user.id if query.from_user else None
-        if tg_id is None:
-            await query.answer()
-            return False, None
-
-        cfg = users.load(tg_id)
-
-        if cfg is None or not cfg.mono_token:
-            if query.message:
-                await query.message.edit_text(
-                    templates.menu_missing_token_message(),
-                    reply_markup=build_vertical_options_keyboard(
-                        [("🔐 Connect", "menu_connect"), ("⬅️ Назад", "menu:root")]
-                    ),
-                )
-            await query.answer()
-            return False, None
-
-        if not cfg.selected_account_ids:
-            if query.message:
-                await query.message.edit_text(
-                    templates.menu_missing_accounts_message(),
-                    reply_markup=build_vertical_options_keyboard(
-                        [("⚙️ Мої дані", "menu:mydata"), ("⬅️ Назад", "menu:root")]
-                    ),
-                )
-            await query.answer()
-            return False, None
-
-        return True, cfg
+        ok, cfg = await gate_refresh_dependencies(
+            query,
+            users=users,
+            missing_token_text=templates.menu_missing_token_message(),
+            missing_token_keyboard=build_vertical_options_keyboard(
+                [("🔐 Connect", "menu_connect"), ("⬅️ Назад", "menu:root")]
+            ),
+            missing_accounts_text=templates.menu_missing_accounts_message(),
+            missing_accounts_keyboard=build_vertical_options_keyboard(
+                [("⚙️ Мої дані", "menu:mydata"), ("⬅️ Назад", "menu:root")]
+            ),
+        )
+        return ok, cfg
 
     async def _send_onboarding_next(chat: Message | CallbackQuery) -> None:
         if isinstance(chat, CallbackQuery):
@@ -681,23 +631,21 @@ def register_handlers(
             require_ledger=True,
         ):
             return
-        if query.message:
-            await query.message.edit_text(
-                templates.menu_reports_message(),
-                reply_markup=build_reports_menu_keyboard(),
-            )
-        await query.answer()
+        await render_menu_screen(
+            query,
+            text=templates.menu_reports_message(),
+            reply_markup=build_reports_menu_keyboard(),
+        )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:root")
     async def cb_menu_root(query: CallbackQuery) -> None:
         if not await _gate_menu_query_or_resume(query):
             return
-        if query.message:
-            await query.message.edit_text(
-                templates.main_menu_message(),
-                reply_markup=build_main_menu_keyboard(),
-            )
-        await query.answer()
+        await render_menu_screen(
+            query,
+            text=templates.main_menu_message(),
+            reply_markup=build_main_menu_keyboard(),
+        )
 
     @dp.callback_query(
         lambda c: isinstance(c.data, str)
@@ -717,23 +665,21 @@ def register_handlers(
             if not await _gate_menu_query_or_resume(query):
                 return
 
-        if query.message:
-            await query.message.edit_text(
-                templates.coming_soon_message(),
-                reply_markup=build_back_keyboard("menu:root"),
-            )
-        await query.answer()
+        await render_placeholder_screen(
+            query,
+            text=templates.coming_soon_message(),
+            reply_markup=build_back_keyboard("menu:root"),
+        )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data in {"menu:data", "menu:mydata"})
     async def cb_menu_data(query: CallbackQuery) -> None:
         if not await _gate_menu_query_or_resume(query):
             return
-        if query.message:
-            await query.message.edit_text(
-                templates.menu_data_message(),
-                reply_markup=build_data_menu_keyboard(),
-            )
-        await query.answer()
+        await render_menu_screen(
+            query,
+            text=templates.menu_data_message(),
+            reply_markup=build_data_menu_keyboard(),
+        )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:new_token")
     async def cb_data_new_token(query: CallbackQuery) -> None:
@@ -845,18 +791,17 @@ def register_handlers(
             require_accounts=True,
         ):
             return
-        if query.message:
-            await query.message.edit_text(
-                templates.menu_categories_message(),
-                reply_markup=build_categories_menu_keyboard(),
-            )
-        await query.answer()
+        await render_menu_screen(
+            query,
+            text=templates.menu_categories_message(),
+            reply_markup=build_categories_menu_keyboard(),
+        )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:"))
     async def cb_menu_categories_placeholders(query: CallbackQuery) -> None:
         if not await _gate_menu_query_or_resume(query):
             return
-        await query.answer(templates.coming_soon_message(), show_alert=True)
+        await show_placeholder_alert(query, text=templates.coming_soon_message())
 
     @dp.callback_query(lambda c: c.data == "onb_token")
     async def cb_onb_token(query: CallbackQuery) -> None:
