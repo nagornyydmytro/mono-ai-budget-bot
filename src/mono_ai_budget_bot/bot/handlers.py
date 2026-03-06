@@ -908,10 +908,15 @@ def register_handlers(
 
     @dp.callback_query(lambda c: c.data == "onb_back_main")
     async def cb_onb_back_main(query: CallbackQuery) -> None:
-        if query.message:
-            memory_store.pop_pending_manual_mode(query.from_user.id)
+        tg_id = query.from_user.id if query.from_user else None
+        if query.message and tg_id is not None:
+            memory_store.pop_pending_manual_mode(tg_id)
             kb = build_start_menu_keyboard()
-            await query.message.answer(templates.start_message(), reply_markup=kb)
+            text = templates.start_message()
+            cfg = users.load(tg_id)
+            if cfg is not None and cfg.mono_token:
+                text = templates.start_message_connected()
+            await query.message.answer(text, reply_markup=kb)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "onb_resume")
@@ -945,6 +950,7 @@ def register_handlers(
     @dp.callback_query(lambda c: c.data == "currency_refresh")
     async def cb_currency_refresh(query: CallbackQuery) -> None:
         if query.message:
+            await query.message.answer(templates.currency_refresh_progress_message())
             await _send_currency_screen(query.message, force_refresh=True)
         await query.answer("Оновлено")
 

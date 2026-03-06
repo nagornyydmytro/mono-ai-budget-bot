@@ -163,6 +163,37 @@ class DummyMonobankClient:
         return None
 
 
+class DummyRate:
+    def __init__(
+        self,
+        *,
+        code_a: int,
+        code_b: int,
+        rate_buy: float | None = None,
+        rate_sell: float | None = None,
+        rate_cross: float | None = None,
+        date: int = 1700000000,
+    ):
+        self.currencyCodeA = code_a
+        self.currencyCodeB = code_b
+        self.rateBuy = rate_buy
+        self.rateSell = rate_sell
+        self.rateCross = rate_cross
+        self.date = date
+
+
+class DummyMonobankPublicClient:
+    def currency(self, *, force_refresh: bool = False):
+        return [
+            DummyRate(code_a=840, code_b=980, rate_buy=39.1, rate_sell=39.7),
+            DummyRate(code_a=978, code_b=980, rate_buy=42.2, rate_sell=42.9),
+            DummyRate(code_a=985, code_b=980, rate_cross=9.8),
+        ]
+
+    def close(self):
+        return None
+
+
 def _kb_dump(kb) -> list[list[tuple[str, str]]]:
     return [[(b.text, b.callback_data) for b in row] for row in kb.inline_keyboard]
 
@@ -292,3 +323,78 @@ def test_menu_help_is_available_before_onboarding_completion():
     assert text == templates.help_message()
     assert _kb_dump(kb) == [[("⬅️ Назад", "onb_back_main")]]
     assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_onb_back_main_returns_to_connected_start_when_token_exists():
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=[],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={},
+        taxonomy=None,
+        reports=None,
+    )
+
+    cb_onb_back_main = dp.callback_query.handlers["cb_onb_back_main"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="onb_back_main", message=message)
+
+    asyncio.run(cb_onb_back_main(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.start_message_connected()
+    assert _kb_dump(kb) == _kb_dump(build_start_menu_keyboard())
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_currency_back_returns_to_start_before_onboarding(monkeypatch):
+    monkeypatch.setattr(handlers, "MonobankPublicClient", DummyMonobankPublicClient)
+
+    dp = _build_dispatcher(cfg=None)
+
+    cb_menu_currency = dp.callback_query.handlers["cb_menu_currency"]
+    cb_currency_back = dp.callback_query.handlers["cb_currency_back"]
+
+    message = DummyMessage(user_id=1)
+    open_query = DummyCallbackQuery(user_id=1, data="menu:currency", message=message)
+    asyncio.run(cb_menu_currency(open_query))
+
+    back_query = DummyCallbackQuery(user_id=1, data="currency_back", message=message)
+    asyncio.run(cb_currency_back(back_query))
+
+    assert len(message.answers) == 2
+    back_text, back_kb = message.answers[-1]
+    assert back_text == templates.start_message()
+    assert _kb_dump(back_kb) == _kb_dump(build_start_menu_keyboard())
+    assert back_query.answer_calls[-1] == (None, False, None)
+
+
+def test_currency_refresh_has_progress_and_no_dead_end_before_onboarding(monkeypatch):
+    monkeypatch.setattr(handlers, "MonobankPublicClient", DummyMonobankPublicClient)
+
+    dp = _build_dispatcher(cfg=None)
+
+    cb_menu_currency = dp.callback_query.handlers["cb_menu_currency"]
+    cb_currency_refresh = dp.callback_query.handlers["cb_currency_refresh"]
+
+    message = DummyMessage(user_id=1)
+    open_query = DummyCallbackQuery(user_id=1, data="menu:currency", message=message)
+    asyncio.run(cb_menu_currency(open_query))
+
+    refresh_query = DummyCallbackQuery(user_id=1, data="currency_refresh", message=message)
+    asyncio.run(cb_currency_refresh(refresh_query))
+
+    assert len(message.answers) == 3
+    assert message.answers[1][0] == templates.currency_refresh_progress_message()
+    refreshed_text, refreshed_kb = message.answers[2]
+    assert "USD" in refreshed_text
+    assert _kb_dump(refreshed_kb) == [
+        [("🔄 Оновити", "currency_refresh"), ("⬅️ Назад", "currency_back")]
+    ]
+    assert refresh_query.answer_calls[-1] == ("Оновлено", False, None)

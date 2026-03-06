@@ -933,6 +933,10 @@ def ledger_refresh_progress_message() -> str:
     return "🔄 Оновлюю останні транзакції…\nЦе може зайняти кілька секунд."
 
 
+def currency_refresh_progress_message() -> str:
+    return "🔄 Оновлюю курси валют…"
+
+
 def coverage_sync_done_message() -> str:
     return "✅ Дані за цей період завантажено.\nПовторюю відповідь на запит."
 
