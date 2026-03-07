@@ -157,6 +157,57 @@ def build_personalization_menu_keyboard() -> Any:
     )
 
 
+def build_reports_preset_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("⚡ Min", "menu:personalization:reports:min")],
+            [("🧠 Max", "menu:personalization:reports:max")],
+            [("🛠️ Custom", "menu:personalization:reports:custom")],
+            [(BTN_BACK, "menu:personalization")],
+        ]
+    )
+
+
+def build_reports_custom_period_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("🗓️ Daily", "menu:personalization:reports:period:daily")],
+            [("📅 Weekly", "menu:personalization:reports:period:weekly")],
+            [("🗓️ Monthly", "menu:personalization:reports:period:monthly")],
+            [(BTN_BACK, "menu:personalization:reports")],
+        ]
+    )
+
+
+def build_reports_custom_blocks_menu_keyboard(period: str, enabled: dict[str, bool]) -> Any:
+    order = ["totals", "breakdowns", "compare_baseline", "trends", "anomalies", "what_if"]
+    titles = {
+        "totals": "Факти (суми/оборот)",
+        "breakdowns": "Розбивки (категорії/мерчанти)",
+        "compare_baseline": "Порівняння (baseline)",
+        "trends": "Тренди",
+        "anomalies": "Аномалії",
+        "what_if": "What-if",
+    }
+
+    rows: list[list[tuple[str, str]]] = []
+    for key in order:
+        if key not in enabled:
+            continue
+        mark = "✅" if enabled.get(key) else "❌"
+        rows.append(
+            [
+                (
+                    f"{mark} {titles.get(key, key)}",
+                    f"menu:personalization:reports:toggle:{period}:{key}",
+                )
+            ]
+        )
+
+    rows.append([(BTN_BACK, "menu:personalization:reports:custom")])
+    return _build_rows(rows)
+
+
 def build_categories_menu_keyboard() -> Any:
     return _build_rows(
         [

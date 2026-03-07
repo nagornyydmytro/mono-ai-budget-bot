@@ -745,6 +745,39 @@ def menu_personalization_item_message(*, title: str, current_value: str) -> str:
     ).strip()
 
 
+def menu_reports_preset_message(current_preset_label: str) -> str:
+    return "\n".join(
+        [
+            "🧩 *Report blocks*",
+            "",
+            f"Поточний preset: {current_preset_label}",
+            "",
+            "Обери preset для рендерингу звітів:",
+        ]
+    ).strip()
+
+
+def menu_reports_custom_period_message() -> str:
+    return "\n".join(
+        [
+            "🛠️ *Custom report blocks*",
+            "",
+            "Обери період і налаштуй блоки для цього period.",
+        ]
+    ).strip()
+
+
+def menu_reports_custom_blocks_message(period: str) -> str:
+    title = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}.get(period, period)
+    return "\n".join(
+        [
+            f"🧩 *Report blocks: {title}*",
+            "",
+            "Тисни на блок, щоб перемкнути ✅/❌.",
+        ]
+    ).strip()
+
+
 def menu_data_message() -> str:
     return "\n".join(
         [

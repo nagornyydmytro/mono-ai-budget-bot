@@ -6,7 +6,10 @@ from mono_ai_budget_bot.bot.ui import (
     build_main_menu_keyboard,
     build_personalization_menu_keyboard,
     build_report_mode_keyboard,
+    build_reports_custom_blocks_menu_keyboard,
+    build_reports_custom_period_menu_keyboard,
     build_reports_menu_keyboard,
+    build_reports_preset_keyboard,
     build_rows_keyboard,
 )
 
@@ -85,6 +88,52 @@ def test_personalization_menu_keyboard_snapshot():
         [("🧾 Uncategorized prompts", "menu:personalization:uncat")],
         [("🤖 AI features", "menu:personalization:ai")],
         [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_reports_preset_keyboard_snapshot():
+    kb = build_reports_preset_keyboard()
+    assert _kb_dump(kb) == [
+        [("⚡ Min", "menu:personalization:reports:min")],
+        [("🧠 Max", "menu:personalization:reports:max")],
+        [("🛠️ Custom", "menu:personalization:reports:custom")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+
+
+def test_reports_custom_period_menu_keyboard_snapshot():
+    kb = build_reports_custom_period_menu_keyboard()
+    assert _kb_dump(kb) == [
+        [("🗓️ Daily", "menu:personalization:reports:period:daily")],
+        [("📅 Weekly", "menu:personalization:reports:period:weekly")],
+        [("🗓️ Monthly", "menu:personalization:reports:period:monthly")],
+        [("⬅️ Назад", "menu:personalization:reports")],
+    ]
+
+
+def test_reports_custom_blocks_menu_keyboard_snapshot():
+    kb = build_reports_custom_blocks_menu_keyboard(
+        "monthly",
+        {
+            "totals": True,
+            "breakdowns": True,
+            "trends": True,
+            "anomalies": False,
+            "what_if": True,
+        },
+    )
+    assert _kb_dump(kb) == [
+        [("✅ Факти (суми/оборот)", "menu:personalization:reports:toggle:monthly:totals")],
+        [
+            (
+                "✅ Розбивки (категорії/мерчанти)",
+                "menu:personalization:reports:toggle:monthly:breakdowns",
+            )
+        ],
+        [("✅ Тренди", "menu:personalization:reports:toggle:monthly:trends")],
+        [("❌ Аномалії", "menu:personalization:reports:toggle:monthly:anomalies")],
+        [("✅ What-if", "menu:personalization:reports:toggle:monthly:what_if")],
+        [("⬅️ Назад", "menu:personalization:reports:custom")],
     ]
 
 

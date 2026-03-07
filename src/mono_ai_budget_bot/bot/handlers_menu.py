@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery
 
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
+from mono_ai_budget_bot.reports.config import ReportsConfig, build_reports_preset
 from mono_ai_budget_bot.settings.activity import normalize_activity_settings
 from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
 
@@ -19,7 +20,10 @@ from .ui import (
     build_data_menu_keyboard,
     build_main_menu_keyboard,
     build_personalization_menu_keyboard,
+    build_reports_custom_blocks_menu_keyboard,
+    build_reports_custom_period_menu_keyboard,
     build_reports_menu_keyboard,
+    build_reports_preset_keyboard,
     build_rows_keyboard,
 )
 
@@ -83,6 +87,11 @@ def _ai_features_label(prof: dict) -> str:
     ai_features = prof.get("ai_features")
     enabled = bool(isinstance(ai_features, dict) and ai_features.get("report_explanations", True))
     return "AI explanations ON" if enabled else "AI explanations OFF"
+
+
+def _save_reports_preset_profile(ctx: HandlerContext, tg_id: int, prof: dict, preset: str) -> None:
+    prof["reports_preset"] = preset
+    ctx.profile_store.save(tg_id, prof)
 
 
 def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
@@ -201,8 +210,12 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             title = "⚡ *Activity mode*"
             current_value = _activity_label(str(prof.get("activity_mode") or ""))
         elif data == "menu:personalization:reports":
-            title = "🧩 *Report blocks*"
-            current_value = reports_label
+            await render_menu_screen(
+                query,
+                text=templates.menu_reports_preset_message(reports_label),
+                reply_markup=build_reports_preset_keyboard(),
+            )
+            return
         elif data == "menu:personalization:uncat":
             title = "🧾 *Uncategorized prompts*"
             current_value = _uncat_label(str(prof.get("uncategorized_prompt_frequency") or ""))
@@ -217,6 +230,137 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
                 current_value=current_value,
             ),
             reply_markup=build_back_keyboard("menu:personalization"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data
+        in {
+            "menu:personalization:reports:min",
+            "menu:personalization:reports:max",
+            "menu:personalization:reports:custom",
+        }
+    )
+    async def cb_menu_personalization_reports_preset(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        data = str(query.data or "")
+        preset = data.rsplit(":", 1)[1]
+
+        if preset in {"min", "max"}:
+            cfg = build_reports_preset(preset)
+            ctx.reports_store.save(tg_id, cfg)
+            _save_reports_preset_profile(ctx, tg_id, prof, preset)
+
+            await render_menu_screen(
+                query,
+                text=templates.menu_reports_preset_message(
+                    {"min": "Min", "max": "Max"}.get(preset, "Min")
+                ),
+                reply_markup=build_reports_preset_keyboard(),
+            )
+            return
+
+        cfg_existing = ctx.reports_store.load(tg_id)
+        if getattr(cfg_existing, "preset", None) != "custom":
+            cfg_base = build_reports_preset("max")
+            cfg_custom = ReportsConfig(
+                preset="custom",
+                daily=dict(cfg_base.daily),
+                weekly=dict(cfg_base.weekly),
+                monthly=dict(cfg_base.monthly),
+            )
+            ctx.reports_store.save(tg_id, cfg_custom)
+
+        _save_reports_preset_profile(ctx, tg_id, prof, "custom")
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_reports_custom_period_message(),
+            reply_markup=build_reports_custom_period_menu_keyboard(),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data
+        in {
+            "menu:personalization:reports:period:daily",
+            "menu:personalization:reports:period:weekly",
+            "menu:personalization:reports:period:monthly",
+        }
+    )
+    async def cb_menu_personalization_reports_period(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        cfg = ctx.reports_store.load(tg_id)
+        period = str(query.data or "").rsplit(":", 1)[1]
+        enabled_map = {"daily": cfg.daily, "weekly": cfg.weekly, "monthly": cfg.monthly}.get(
+            period, {}
+        )
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_reports_custom_blocks_message(period),
+            reply_markup=build_reports_custom_blocks_menu_keyboard(period, enabled_map),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data.startswith("menu:personalization:reports:toggle:")
+    )
+    async def cb_menu_personalization_reports_toggle(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        parts = str(query.data or "").split(":")
+        if len(parts) != 6:
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        period = parts[4]
+        key = parts[5]
+
+        cfg = ctx.reports_store.load(tg_id)
+        daily = dict(cfg.daily)
+        weekly = dict(cfg.weekly)
+        monthly = dict(cfg.monthly)
+
+        target = {"daily": daily, "weekly": weekly, "monthly": monthly}.get(period)
+        if target is None or key not in target:
+            await query.answer("Невідомий блок", show_alert=True)
+            return
+
+        target[key] = not bool(target[key])
+
+        cfg2 = ReportsConfig(preset="custom", daily=daily, weekly=weekly, monthly=monthly)
+        ctx.reports_store.save(tg_id, cfg2)
+
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        _save_reports_preset_profile(ctx, tg_id, prof, "custom")
+
+        enabled_map = {"daily": daily, "weekly": weekly, "monthly": monthly}.get(period, {})
+        await render_menu_screen(
+            query,
+            text=templates.menu_reports_custom_blocks_message(period),
+            reply_markup=build_reports_custom_blocks_menu_keyboard(period, enabled_map),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:new_token")

@@ -225,6 +225,47 @@ def test_templates_menu_personalization_item_message_snapshot():
     )
 
 
+def test_templates_menu_reports_preset_message_snapshot():
+    assert (
+        templates.menu_reports_preset_message("Custom")
+        == "\n".join(
+            [
+                "🧩 *Report blocks*",
+                "",
+                "Поточний preset: Custom",
+                "",
+                "Обери preset для рендерингу звітів:",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_reports_custom_period_message_snapshot():
+    assert (
+        templates.menu_reports_custom_period_message()
+        == "\n".join(
+            [
+                "🛠️ *Custom report blocks*",
+                "",
+                "Обери період і налаштуй блоки для цього period.",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_reports_custom_blocks_message_snapshot():
+    assert (
+        templates.menu_reports_custom_blocks_message("weekly")
+        == "\n".join(
+            [
+                "🧩 *Report blocks: Weekly*",
+                "",
+                "Тисни на блок, щоб перемкнути ✅/❌.",
+            ]
+        ).strip()
+    )
+
+
 def test_templates_menu_reports_custom_start_prompt_snapshot():
     assert (
         templates.menu_reports_custom_start_prompt()

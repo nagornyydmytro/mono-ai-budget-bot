@@ -8,7 +8,9 @@ import mono_ai_budget_bot.bot.templates as templates
 import mono_ai_budget_bot.llm.openai_client as openai_client_module
 import mono_ai_budget_bot.nlq.memory_store as ms
 from mono_ai_budget_bot.bot.onboarding_flow import show_data_status
+from mono_ai_budget_bot.reports.config import build_reports_preset
 from mono_ai_budget_bot.storage.report_store import ReportStore
+from mono_ai_budget_bot.storage.reports_store import ReportsStore
 from mono_ai_budget_bot.storage.rules_store import RulesStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.uncat_store import UncatStore
@@ -87,8 +89,14 @@ class DummyTaxonomyStore:
 
 
 class DummyReportsStore:
+    def __init__(self):
+        self.cfg = build_reports_preset("min")
+
     def load(self, telegram_user_id: int):
-        return SimpleNamespace(preset="min")
+        return self.cfg
+
+    def save(self, telegram_user_id: int, cfg):
+        self.cfg = cfg
 
 
 class DummyReportStore:
@@ -136,6 +144,8 @@ def _build_dispatcher(
     uncat_pending_store=None,
     settings=None,
     render_report_for_user=None,
+    profile_store=None,
+    reports_store=None,
 ):
     dp = DummyDispatcher()
     handlers.register_handlers(
@@ -145,9 +155,9 @@ def _build_dispatcher(
         users=DummyUserStore(cfg),
         store=store or DummyReportStore(),
         tx_store=tx_store,
-        profile_store=DummyProfileStore(profile),
+        profile_store=profile_store or DummyProfileStore(profile),
         taxonomy_store=DummyTaxonomyStore(),
-        reports_store=DummyReportsStore(),
+        reports_store=reports_store or DummyReportsStore(),
         uncat_store=uncat_store or DummyUncatStore(),
         rules_store=rules_store or DummyRulesStore(),
         uncat_pending_store=uncat_pending_store or DummyUncatPendingStore(),
@@ -1569,3 +1579,210 @@ def test_menu_personalization_item_reads_from_profile_store(tmp_path: Path):
     )
     assert _kb_dump(kb) == [[("⬅️ Назад", "menu:personalization")]]
     assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_personalization_reports_opens_preset_screen(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    reports_store = ReportsStore(base_dir=tmp_path / "reports_cfg")
+    reports_store.save(1, build_reports_preset("max"))
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+        },
+        tx_store=tx_store,
+        reports_store=reports_store,
+    )
+
+    cb_menu_personalization_items = dp.callback_query.handlers["cb_menu_personalization_items"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:reports",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_items(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_preset_message("Max")
+    assert _kb_dump(kb) == [
+        [("⚡ Min", "menu:personalization:reports:min")],
+        [("🧠 Max", "menu:personalization:reports:max")],
+        [("🛠️ Custom", "menu:personalization:reports:custom")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_personalization_reports_max_updates_store_and_profile(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    reports_store = ReportsStore(base_dir=tmp_path / "reports_cfg")
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "reports_preset": "min",
+        }
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        reports_store=reports_store,
+        profile_store=profile_store,
+    )
+
+    cb_menu_personalization_reports_preset = dp.callback_query.handlers[
+        "cb_menu_personalization_reports_preset"
+    ]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:reports:max",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_reports_preset(query))
+
+    cfg = reports_store.load(1)
+
+    assert cfg.preset == "max"
+    assert profile_store.profile["reports_preset"] == "max"
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_preset_message("Max")
+    assert _kb_dump(kb) == [
+        [("⚡ Min", "menu:personalization:reports:min")],
+        [("🧠 Max", "menu:personalization:reports:max")],
+        [("🛠️ Custom", "menu:personalization:reports:custom")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_personalization_reports_custom_opens_block_toggles(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    reports_store = ReportsStore(base_dir=tmp_path / "reports_cfg")
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "reports_preset": "min",
+        }
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        reports_store=reports_store,
+        profile_store=profile_store,
+    )
+
+    cb_menu_personalization_reports_preset = dp.callback_query.handlers[
+        "cb_menu_personalization_reports_preset"
+    ]
+    cb_menu_personalization_reports_period = dp.callback_query.handlers[
+        "cb_menu_personalization_reports_period"
+    ]
+    cb_menu_personalization_reports_toggle = dp.callback_query.handlers[
+        "cb_menu_personalization_reports_toggle"
+    ]
+    message = DummyMessage(user_id=1)
+
+    query_custom = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:reports:custom",
+        message=message,
+    )
+    asyncio.run(cb_menu_personalization_reports_preset(query_custom))
+
+    cfg1 = reports_store.load(1)
+    assert cfg1.preset == "custom"
+    assert profile_store.profile["reports_preset"] == "custom"
+    assert len(message.answers) == 1
+    assert message.answers[0][0] == templates.menu_reports_custom_period_message()
+
+    query_period = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:reports:period:monthly",
+        message=message,
+    )
+    asyncio.run(cb_menu_personalization_reports_period(query_period))
+
+    assert len(message.answers) == 2
+    text2, kb2 = message.answers[1]
+    assert text2 == templates.menu_reports_custom_blocks_message("monthly")
+    assert _kb_dump(kb2) == [
+        [("✅ Факти (суми/оборот)", "menu:personalization:reports:toggle:monthly:totals")],
+        [
+            (
+                "✅ Розбивки (категорії/мерчанти)",
+                "menu:personalization:reports:toggle:monthly:breakdowns",
+            )
+        ],
+        [("✅ Тренди", "menu:personalization:reports:toggle:monthly:trends")],
+        [("✅ Аномалії", "menu:personalization:reports:toggle:monthly:anomalies")],
+        [("✅ What-if", "menu:personalization:reports:toggle:monthly:what_if")],
+        [("⬅️ Назад", "menu:personalization:reports:custom")],
+    ]
+
+    query_toggle = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:reports:toggle:monthly:anomalies",
+        message=message,
+    )
+    asyncio.run(cb_menu_personalization_reports_toggle(query_toggle))
+
+    cfg2 = reports_store.load(1)
+    assert cfg2.preset == "custom"
+    assert cfg2.monthly["anomalies"] is False
+    assert profile_store.profile["reports_preset"] == "custom"
+    assert len(message.answers) == 3
+    text3, kb3 = message.answers[2]
+    assert text3 == templates.menu_reports_custom_blocks_message("monthly")
+    assert _kb_dump(kb3) == [
+        [("✅ Факти (суми/оборот)", "menu:personalization:reports:toggle:monthly:totals")],
+        [
+            (
+                "✅ Розбивки (категорії/мерчанти)",
+                "menu:personalization:reports:toggle:monthly:breakdowns",
+            )
+        ],
+        [("✅ Тренди", "menu:personalization:reports:toggle:monthly:trends")],
+        [("❌ Аномалії", "menu:personalization:reports:toggle:monthly:anomalies")],
+        [("✅ What-if", "menu:personalization:reports:toggle:monthly:what_if")],
+        [("⬅️ Назад", "menu:personalization:reports:custom")],
+    ]
