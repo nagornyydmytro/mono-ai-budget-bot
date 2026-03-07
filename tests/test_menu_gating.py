@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import mono_ai_budget_bot.bot.handlers as handlers
+import mono_ai_budget_bot.bot.handlers_menu as handlers_menu
 import mono_ai_budget_bot.bot.templates as templates
 from mono_ai_budget_bot.bot.onboarding_flow import show_data_status
 from mono_ai_budget_bot.storage.report_store import ReportStore
@@ -415,6 +416,152 @@ def test_menu_ask_guides_to_refresh_when_ledger_missing(tmp_path: Path):
     assert _kb_dump(kb) == [
         [("🔄 Refresh latest", "menu:data:refresh")],
         [("⬅️ Назад", "menu:root")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_data_new_token_starts_manual_entry_with_mydata_back(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    captured: dict[str, object] = {}
+    original_set_pending_manual_mode = handlers_menu.memory_store.set_pending_manual_mode
+
+    def fake_set_pending_manual_mode(
+        tg_id: int,
+        *,
+        expected: str,
+        hint: str,
+        source: str,
+        ttl_sec: int,
+    ) -> None:
+        captured["tg_id"] = tg_id
+        captured["expected"] = expected
+        captured["hint"] = hint
+        captured["source"] = source
+        captured["ttl_sec"] = ttl_sec
+
+    handlers_menu.memory_store.set_pending_manual_mode = fake_set_pending_manual_mode
+    try:
+        cb_data_new_token = dp.callback_query.handlers["cb_data_new_token"]
+        message = DummyMessage(user_id=1)
+        query = DummyCallbackQuery(user_id=1, data="menu:data:new_token", message=message)
+
+        asyncio.run(cb_data_new_token(query))
+    finally:
+        handlers_menu.memory_store.set_pending_manual_mode = original_set_pending_manual_mode
+
+    assert captured == {
+        "tg_id": 1,
+        "expected": "mono_token",
+        "hint": templates.token_paste_hint_new_token(),
+        "source": "data_menu",
+        "ttl_sec": 900,
+    }
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.token_paste_prompt_new_token()
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:mydata")]]
+    assert query.answer_calls[-1] == ("", False, None)
+
+
+def test_menu_data_accounts_opens_picker_and_marks_data_menu_source(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    memory_state: dict[int, dict] = {}
+
+    def fake_load_memory(tg_id: int) -> dict:
+        return dict(memory_state.get(tg_id, {}))
+
+    def fake_save_memory(tg_id: int, data: dict) -> None:
+        memory_state[tg_id] = dict(data)
+
+    class FakeAccount:
+        def __init__(self, acc_id: str, currency_code: int, masked_pan: list[str]):
+            self.id = acc_id
+            self.currencyCode = currency_code
+            self.maskedPan = masked_pan
+
+    class FakeInfo:
+        def __init__(self):
+            self.accounts = [
+                FakeAccount("acc1", 980, ["1111"]),
+                FakeAccount("acc2", 840, ["2222"]),
+            ]
+
+    class FakeMonobankClient:
+        def __init__(self, token: str):
+            self.token = token
+
+        def client_info(self):
+            return FakeInfo()
+
+        def close(self):
+            return None
+
+    original_load_memory = handlers_menu.memory_store.load_memory
+    original_save_memory = handlers_menu.memory_store.save_memory
+    original_monobank_client = handlers_menu.MonobankClient
+
+    handlers_menu.memory_store.load_memory = fake_load_memory
+    handlers_menu.memory_store.save_memory = fake_save_memory
+    handlers_menu.MonobankClient = FakeMonobankClient
+    try:
+        cb_data_accounts = dp.callback_query.handlers["cb_data_accounts"]
+        message = DummyMessage(user_id=1)
+        query = DummyCallbackQuery(user_id=1, data="menu:data:accounts", message=message)
+
+        asyncio.run(cb_data_accounts(query))
+    finally:
+        handlers_menu.memory_store.load_memory = original_load_memory
+        handlers_menu.memory_store.save_memory = original_save_memory
+        handlers_menu.MonobankClient = original_monobank_client
+
+    assert memory_state[1]["accounts_picker"] == {
+        "source": "data_menu",
+        "prev_selected": ["acc1"],
+    }
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "💳 Обери рахунки" in text
+    assert "Обрано: 1 з 2" in text
+    assert _kb_dump(kb) == [
+        [("✅ 1111 (980)", "acc_toggle:acc1")],
+        [("⬜️ 2222 (840)", "acc_toggle:acc2")],
+        [("🧹 Clear", "acc_clear"), ("✅ Done", "acc_done")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
 
