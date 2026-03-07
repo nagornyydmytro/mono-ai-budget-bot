@@ -12,6 +12,7 @@ from .menu_flow import render_menu_screen, render_placeholder_screen
 from .onboarding_flow import begin_manual_token_entry, open_accounts_picker, show_data_status
 from .ui import (
     build_back_keyboard,
+    build_bootstrap_history_keyboard,
     build_categories_menu_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
@@ -161,13 +162,27 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:bootstrap")
-    async def cb_data_bootstrap_placeholder(query: CallbackQuery) -> None:
-        if not await ctx.gate_menu_query_or_resume(query):
-            return
-        await render_placeholder_screen(
+    async def cb_data_bootstrap(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(
             query,
-            text=templates.menu_data_bootstrap_placeholder_message(),
-            reply_markup=build_back_keyboard("menu:mydata"),
+            require_token=True,
+            require_accounts=True,
+        ):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        mem = memory_store.load_memory(tg_id) or {}
+        mem["bootstrap_flow"] = {"source": "data_menu"}
+        memory_store.save_memory(tg_id, mem)
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_data_bootstrap_message(),
+            reply_markup=build_bootstrap_history_keyboard(),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:wipe")

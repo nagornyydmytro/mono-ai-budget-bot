@@ -1,5 +1,5 @@
 from mono_ai_budget_bot.bot.ui import (
-    build_bootstrap_picker_keyboard,
+    build_bootstrap_history_keyboard,
     build_coverage_cta_keyboard,
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
@@ -29,14 +29,14 @@ def test_currency_screen_keyboard_snapshot():
     ]
 
 
-def test_bootstrap_picker_keyboard_snapshot():
-    kb = build_bootstrap_picker_keyboard()
+def test_bootstrap_history_keyboard_snapshot():
+    kb = build_bootstrap_history_keyboard()
     assert _kb_dump(kb) == [
         [("📥 Bootstrap 1 місяць", "boot_30")],
         [("📥 Bootstrap 3 місяці", "boot_90")],
         [("📥 Bootstrap 6 місяців", "boot_180")],
         [("📥 Bootstrap 12 місяців", "boot_365")],
-        [("➡️ Skip", "boot_skip")],
+        [("⬅️ Назад", "menu:mydata")],
     ]
 
 

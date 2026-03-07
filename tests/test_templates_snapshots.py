@@ -89,6 +89,52 @@ def test_templates_bootstrap_started_message_snapshot():
     )
 
 
+def test_templates_menu_data_bootstrap_message_snapshot():
+    assert (
+        templates.menu_data_bootstrap_message()
+        == "\n".join(
+            [
+                "📥 *Bootstrap history*",
+                "",
+                "Обери, за який період завантажити історію транзакцій.",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_data_bootstrap_started_message_snapshot():
+    assert (
+        templates.menu_data_bootstrap_started_message("3 місяці")
+        == "\n".join(
+            [
+                "📥 Запустив bootstrap history за *3 місяці* у фоні…",
+                "Це може зайняти час через ліміти Monobank API.",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_data_bootstrap_done_message_snapshot():
+    assert (
+        templates.menu_data_bootstrap_done_message(
+            months_label="6 місяців",
+            accounts=2,
+            fetched_requests=7,
+            appended=123,
+        )
+        == "\n".join(
+            [
+                "✅ Bootstrap history завершено.",
+                "",
+                "Період: 6 місяців",
+                "Карток: 2",
+                "Запитів до API: 7",
+                "Додано транзакцій: 123",
+            ]
+        ).strip()
+    )
+
+
 def test_templates_refresh_done_message_snapshot():
     assert (
         templates.refresh_done_message(accounts=2, fetched_requests=7, appended=123)

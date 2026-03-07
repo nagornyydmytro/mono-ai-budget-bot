@@ -271,6 +271,11 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             await query.answer("Спочатку вибери картки.", show_alert=True)
             return
 
+        mem = memory_store.load_memory(tg_id) if tg_id is not None else {}
+        bootstrap_flow = mem.get("bootstrap_flow") if isinstance(mem, dict) else None
+        flow_source = bootstrap_flow.get("source") if isinstance(bootstrap_flow, dict) else None
+        from_data_menu = flow_source == "data_menu"
+
         if query.data == "boot_skip":
             ctx.sync_onboarding_progress(tg_id)
             onboarding_done = ctx.onboarding_done(tg_id)
@@ -285,34 +290,52 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             return
 
         days_map = {"boot_30": 30, "boot_90": 90, "boot_180": 180, "boot_365": 365}
+        months_map = {
+            "boot_30": "1 місяць",
+            "boot_90": "3 місяці",
+            "boot_180": "6 місяців",
+            "boot_365": "12 місяців",
+        }
         days = int(days_map[str(query.data)])
+        months_label = months_map[str(query.data)]
 
-        prof = ctx.profile_store.load(tg_id) or {}
-        onb = prof.get("onboarding")
-        if not isinstance(onb, dict):
-            onb = {}
-        onb["bootstrap_requested"] = True
-        onb["bootstrap_days"] = days
-        prof["onboarding"] = onb
-        ctx.profile_store.save(tg_id, prof)
+        if not from_data_menu:
+            prof = ctx.profile_store.load(tg_id) or {}
+            onb = prof.get("onboarding")
+            if not isinstance(onb, dict):
+                onb = {}
+            onb["bootstrap_requested"] = True
+            onb["bootstrap_days"] = days
+            prof["onboarding"] = onb
+            ctx.profile_store.save(tg_id, prof)
+
+        if isinstance(mem, dict):
+            mem.pop("bootstrap_flow", None)
+            memory_store.save_memory(tg_id, mem)
 
         if query.message:
-            await query.message.edit_text(templates.bootstrap_started_message(days))
+            if from_data_menu:
+                await query.message.edit_text(
+                    templates.menu_data_bootstrap_started_message(months_label)
+                )
+            else:
+                await query.message.edit_text(templates.bootstrap_started_message(days))
         await query.answer("Старт")
 
-        kb2 = build_vertical_options_keyboard(
-            [
-                ("⚡ Мінімальний", "tax_preset_min"),
-                ("🧠 Максимальний (детально)", "tax_preset_max"),
-                ("🛠️ Custom — налаштую потім", "tax_preset_custom"),
-            ]
-        )
-
-        if query.message:
-            await query.message.answer(
-                templates.taxonomy_preset_prompt(),
-                reply_markup=kb2,
+        if not from_data_menu:
+            kb2 = build_vertical_options_keyboard(
+                [
+                    ("⚡ Мінімальний", "tax_preset_min"),
+                    ("🧠 Максимальний (детально)", "tax_preset_max"),
+                    ("🛠️ Custom — налаштую потім", "tax_preset_custom"),
+                ]
             )
+
+            if query.message:
+                await query.message.answer(
+                    templates.taxonomy_preset_prompt(),
+                    reply_markup=kb2,
+                )
 
         chat_id = query.message.chat.id if query.message else None
         token = cfg.mono_token
@@ -344,17 +367,25 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
                     )
 
                     if chat_id is not None:
-                        ctx.sync_onboarding_progress(tg_id)
-                        onboarding_done = ctx.onboarding_done(tg_id)
-
-                        if onboarding_done:
-                            text = templates.bootstrap_done_message(
+                        if from_data_menu:
+                            text = templates.menu_data_bootstrap_done_message(
+                                months_label=months_label,
                                 accounts=res.accounts,
                                 fetched_requests=res.fetched_requests,
                                 appended=res.appended,
                             )
                         else:
-                            text = templates.bootstrap_done_onboarding_message()
+                            ctx.sync_onboarding_progress(tg_id)
+                            onboarding_done = ctx.onboarding_done(tg_id)
+
+                            if onboarding_done:
+                                text = templates.bootstrap_done_message(
+                                    accounts=res.accounts,
+                                    fetched_requests=res.fetched_requests,
+                                    appended=res.appended,
+                                )
+                            else:
+                                text = templates.bootstrap_done_onboarding_message()
 
                         await ctx.bot.send_message(chat_id, text)
 

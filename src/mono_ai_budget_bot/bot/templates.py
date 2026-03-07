@@ -682,8 +682,38 @@ def menu_categories_action_placeholder_message() -> str:
     return "🗂️ *Категорії*\n\n🚧 Ця дія ще в розробці."
 
 
-def menu_data_bootstrap_placeholder_message() -> str:
-    return "📥 *Bootstrap history*\n\n🚧 Окремий screen для bootstrap history буде додано в наступному коміті."
+def menu_data_bootstrap_message() -> str:
+    return "\n".join(
+        [
+            "📥 *Bootstrap history*",
+            "",
+            "Обери, за який період завантажити історію транзакцій.",
+        ]
+    ).strip()
+
+
+def menu_data_bootstrap_started_message(months_label: str) -> str:
+    return "\n".join(
+        [
+            f"📥 Запустив bootstrap history за *{months_label}* у фоні…",
+            "Це може зайняти час через ліміти Monobank API.",
+        ]
+    ).strip()
+
+
+def menu_data_bootstrap_done_message(
+    *, months_label: str, accounts: int, fetched_requests: int, appended: int
+) -> str:
+    return "\n".join(
+        [
+            success("Bootstrap history завершено."),
+            "",
+            f"Період: {months_label}",
+            f"Карток: {accounts}",
+            f"Запитів до API: {fetched_requests}",
+            f"Додано транзакцій: {appended}",
+        ]
+    ).strip()
 
 
 def menu_data_wipe_placeholder_message() -> str:

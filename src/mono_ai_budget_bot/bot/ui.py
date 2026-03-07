@@ -242,6 +242,18 @@ def build_bootstrap_picker_keyboard(*, include_skip: bool = True) -> Any:
     return _build_rows(rows)
 
 
+def build_bootstrap_history_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("📥 Bootstrap 1 місяць", "boot_30")],
+            [("📥 Bootstrap 3 місяці", "boot_90")],
+            [("📥 Bootstrap 6 місяців", "boot_180")],
+            [("📥 Bootstrap 12 місяців", "boot_365")],
+            [(BTN_BACK, "menu:mydata")],
+        ]
+    )
+
+
 def build_uncat_leaf_picker_keyboard(
     *,
     pending_id: str,
