@@ -33,14 +33,21 @@ def stale_button_message() -> str:
     return "Ця кнопка вже неактуальна. Запитай ще раз 🙂"
 
 
-def status_message(*, accounts_selected: int, onboarding_done: bool) -> str:
+def status_message(
+    *,
+    connected: bool,
+    accounts_selected: int,
+    coverage_summary: str,
+    last_sync_summary: str,
+) -> str:
     return "\n".join(
         [
-            "📊 Статус даних",
+            "📊 *Статус даних*",
             "",
-            "Monobank: ✅",
+            f"Monobank: {'✅ connected' if connected else '❌ not connected'}",
             f"Карток вибрано: {accounts_selected}",
-            f"Стан налаштування: {'✅ Готово' if onboarding_done else '⏳ Потрібно завершити'}",
+            f"Coverage: {coverage_summary}",
+            f"Last sync: {last_sync_summary}",
         ]
     ).strip()
 
@@ -716,8 +723,32 @@ def menu_data_bootstrap_done_message(
     ).strip()
 
 
-def menu_data_wipe_placeholder_message() -> str:
-    return "🧹 *Wipe cache*\n\n🚧 Confirm/cancel flow для очищення кешу буде додано в наступному коміті."
+def menu_data_wipe_confirm_message() -> str:
+    return "\n".join(
+        [
+            "🧹 *Wipe cache*",
+            "",
+            "Це очистить локальний фінансовий кеш користувача:",
+            "• транзакції",
+            "• coverage / last sync metadata",
+            "• збережені facts/reports",
+            "• rules / uncat / pending",
+            "",
+            "Підключення Monobank і вибрані картки не будуть видалені.",
+            "",
+            "Підтвердити очищення?",
+        ]
+    ).strip()
+
+
+def menu_data_wipe_done_message() -> str:
+    return "\n".join(
+        [
+            "✅ Кеш очищено.",
+            "",
+            "Фінансові дані видалено локально. Monobank token і вибрані картки збережені.",
+        ]
+    ).strip()
 
 
 def data_accounts_picker_intro() -> str:

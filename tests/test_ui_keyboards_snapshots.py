@@ -4,6 +4,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_rows_keyboard,
 )
 
 
@@ -58,4 +59,17 @@ def test_data_menu_keyboard_snapshot():
         [("📊 Status", "menu:data:status")],
         [("🧹 Wipe cache", "menu:data:wipe")],
         [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_data_wipe_confirm_keyboard_snapshot():
+    kb = build_rows_keyboard(
+        [
+            [("✅ Підтвердити", "menu:data:wipe:confirm")],
+            [("❌ Скасувати", "menu:data:wipe:cancel")],
+        ]
+    )
+    assert _kb_dump(kb) == [
+        [("✅ Підтвердити", "menu:data:wipe:confirm")],
+        [("❌ Скасувати", "menu:data:wipe:cancel")],
     ]

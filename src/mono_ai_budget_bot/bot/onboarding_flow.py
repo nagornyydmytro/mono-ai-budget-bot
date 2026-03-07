@@ -95,22 +95,44 @@ async def show_data_status(
     *,
     tg_id: int,
     users,
-    sync_onboarding_progress,
-    onboarding_done,
+    tx_store,
     status_message_builder,
+    reply_markup,
 ) -> None:
-    cfg = users.load(tg_id)
-    if cfg is None or not cfg.mono_token:
-        await query.answer("Monobank не підключено", show_alert=True)
-        return
+    from datetime import UTC, datetime
 
-    acc_n = len(cfg.selected_account_ids or [])
-    sync_onboarding_progress(tg_id)
-    done = onboarding_done(tg_id)
-    text = status_message_builder(accounts_selected=acc_n, onboarding_done=done)
+    cfg = users.load(tg_id)
+    connected = bool(cfg is not None and cfg.mono_token)
+    account_ids = list(cfg.selected_account_ids or []) if cfg is not None else []
+    acc_n = len(account_ids)
+
+    coverage_summary = "немає даних"
+    cov = tx_store.aggregated_coverage_window(tg_id, account_ids)
+    if cov is not None:
+        d1 = datetime.fromtimestamp(int(cov[0]), UTC).strftime("%Y-%m-%d")
+        d2 = datetime.fromtimestamp(int(cov[1]), UTC).strftime("%Y-%m-%d")
+        coverage_summary = f"{d1} → {d2}"
+
+    last_sync_summary = "—"
+    last_sync_values: list[float] = []
+    for account_id in account_ids:
+        meta = tx_store._meta.get(tg_id, account_id)
+        if meta.last_sync_at is not None:
+            last_sync_values.append(float(meta.last_sync_at))
+    if last_sync_values:
+        last_sync_summary = datetime.fromtimestamp(max(last_sync_values), UTC).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+
+    text = status_message_builder(
+        connected=connected,
+        accounts_selected=acc_n,
+        coverage_summary=coverage_summary,
+        last_sync_summary=last_sync_summary,
+    )
 
     if query.message:
-        await query.message.answer(text)
+        await query.message.edit_text(text, reply_markup=reply_markup)
     await query.answer()
 
 

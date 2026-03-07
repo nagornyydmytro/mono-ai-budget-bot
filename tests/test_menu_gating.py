@@ -4,8 +4,13 @@ from types import SimpleNamespace
 
 import mono_ai_budget_bot.bot.handlers as handlers
 import mono_ai_budget_bot.bot.templates as templates
+from mono_ai_budget_bot.bot.onboarding_flow import show_data_status
+from mono_ai_budget_bot.storage.report_store import ReportStore
+from mono_ai_budget_bot.storage.rules_store import RulesStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
+from mono_ai_budget_bot.storage.uncat_store import UncatStore
 from mono_ai_budget_bot.storage.user_store import UserConfig
+from mono_ai_budget_bot.uncat.pending import UncatPendingStore
 
 
 class DummyRegistry:
@@ -84,21 +89,32 @@ class DummyReportsStore:
 
 
 class DummyReportStore:
+    def __init__(self, root_dir: Path | None = None):
+        self.root_dir = root_dir or Path(".")
+
     def load(self, telegram_user_id: int, period_key: str):
         return object()
 
 
 class DummyUncatPendingStore:
+    def __init__(self, base_dir: Path | None = None):
+        self.base_dir = base_dir or Path(".")
+
     def load(self, telegram_user_id: int):
         return None
 
 
 class DummyUncatStore:
-    pass
+    def __init__(self, base_dir: Path | None = None):
+        self.base_dir = base_dir or Path(".")
 
 
 class DummyRulesStore:
-    pass
+    def __init__(self, base_dir: Path | None = None):
+        self.base_dir = base_dir or Path(".")
+
+    def load(self, telegram_user_id: int):
+        return None
 
 
 def _kb_dump(kb) -> list[list[tuple[str, str]]]:
@@ -111,6 +127,10 @@ def _build_dispatcher(
     profile: dict | None,
     tx_store: TxStore,
     sync_user_ledger=None,
+    store=None,
+    rules_store=None,
+    uncat_store=None,
+    uncat_pending_store=None,
 ):
     dp = DummyDispatcher()
     handlers.register_handlers(
@@ -118,14 +138,14 @@ def _build_dispatcher(
         bot=object(),
         settings=SimpleNamespace(openai_api_key=None, openai_model="gpt"),
         users=DummyUserStore(cfg),
-        store=DummyReportStore(),
+        store=store or DummyReportStore(),
         tx_store=tx_store,
         profile_store=DummyProfileStore(profile),
         taxonomy_store=DummyTaxonomyStore(),
         reports_store=DummyReportsStore(),
-        uncat_store=DummyUncatStore(),
-        rules_store=DummyRulesStore(),
-        uncat_pending_store=DummyUncatPendingStore(),
+        uncat_store=uncat_store or DummyUncatStore(),
+        rules_store=rules_store or DummyRulesStore(),
+        uncat_pending_store=uncat_pending_store or DummyUncatPendingStore(),
         user_locks={},
         logger=SimpleNamespace(info=lambda *a, **k: None),
         sync_user_ledger=sync_user_ledger or (lambda *a, **k: None),
@@ -440,6 +460,76 @@ def test_menu_mydata_always_available_after_onboarding(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_data_status_shows_minimum_summary(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1704067200,
+        coverage_to_ts=1706659200,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_data_status = dp.callback_query.handlers["cb_data_status"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:data:status", message=message)
+
+    asyncio.run(cb_data_status(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "Monobank: ✅ connected" in text
+    assert "Карток вибрано: 1" in text
+    assert "Coverage: 2024-01-01 → 2024-01-31" in text
+    assert "Last sync: " in text
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:mydata")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_data_status_shows_not_connected_state(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    users = DummyUserStore(None)
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:data:status", message=message)
+
+    asyncio.run(
+        show_data_status(
+            query,
+            tg_id=1,
+            users=users,
+            tx_store=tx_store,
+            status_message_builder=templates.status_message,
+            reply_markup=None,
+        )
+    )
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "Monobank: ❌ not connected" in text
+    assert "Карток вибрано: 0" in text
+    assert "Coverage: немає даних" in text
+    assert "Last sync: —" in text
+    assert kb is None
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_data_bootstrap_opens_standalone_picker(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(
@@ -475,6 +565,144 @@ def test_menu_data_bootstrap_opens_standalone_picker(tmp_path: Path):
         [("📥 Bootstrap 6 місяців", "boot_180")],
         [("📥 Bootstrap 12 місяців", "boot_365")],
         [("⬅️ Назад", "menu:mydata")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_data_wipe_confirm_screen_renders(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_data_wipe = dp.callback_query.handlers["cb_data_wipe"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:data:wipe", message=message)
+
+    asyncio.run(cb_data_wipe(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_data_wipe_confirm_message()
+    assert _kb_dump(kb) == [
+        [("✅ Підтвердити", "menu:data:wipe:confirm")],
+        [("❌ Скасувати", "menu:data:wipe:cancel")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_data_wipe_confirm_removes_only_financial_cache(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    report_store = ReportStore(root_dir=tmp_path / "reports")
+    rules_store = RulesStore(base_dir=tmp_path / "rules")
+    uncat_store = UncatStore(base_dir=tmp_path / "uncat")
+    uncat_pending_store = UncatPendingStore(base_dir=tmp_path / "uncat_pending")
+
+    (tx_store.root_dir / "1").mkdir(parents=True, exist_ok=True)
+    (tx_store.root_dir / "1" / "acc1.jsonl").write_text("{}", encoding="utf-8")
+    (tx_store.root_dir / "1" / "_meta.json").write_text("{}", encoding="utf-8")
+    (report_store.root_dir / "1").mkdir(parents=True, exist_ok=True)
+    (report_store.root_dir / "1" / "facts_week.json").write_text("{}", encoding="utf-8")
+    (rules_store.base_dir / "1.json").write_text("{}", encoding="utf-8")
+    (uncat_store.base_dir / "1.json").write_text("{}", encoding="utf-8")
+    (uncat_pending_store.base_dir / "1.json").write_text("{}", encoding="utf-8")
+
+    cfg = UserConfig(
+        telegram_user_id=1,
+        mono_token="token",
+        selected_account_ids=["acc1"],
+        chat_id=None,
+        autojobs_enabled=False,
+        updated_at=0.0,
+    )
+
+    dp = _build_dispatcher(
+        cfg=cfg,
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=report_store,
+        rules_store=rules_store,
+        uncat_store=uncat_store,
+        uncat_pending_store=uncat_pending_store,
+    )
+
+    cb_data_wipe_confirm = dp.callback_query.handlers["cb_data_wipe_confirm"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:data:wipe:confirm", message=message)
+
+    asyncio.run(cb_data_wipe_confirm(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_data_wipe_done_message()
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:mydata")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+    assert not (tx_store.root_dir / "1").exists()
+    assert not (report_store.root_dir / "1").exists()
+    assert not (rules_store.base_dir / "1.json").exists()
+    assert not (uncat_store.base_dir / "1.json").exists()
+    assert not (uncat_pending_store.base_dir / "1.json").exists()
+    assert cfg.mono_token == "token"
+    assert cfg.selected_account_ids == ["acc1"]
+
+
+def test_menu_data_wipe_cancel_returns_to_mydata(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_data_wipe_cancel = dp.callback_query.handlers["cb_data_wipe_cancel"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:data:wipe:cancel", message=message)
+
+    asyncio.run(cb_data_wipe_cancel(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_data_message()
+    assert _kb_dump(kb) == [
+        [("🔑 Change token", "menu:data:new_token")],
+        [("💳 Change accounts", "menu:data:accounts")],
+        [("🔄 Refresh latest", "menu:data:refresh")],
+        [("📥 Bootstrap history", "menu:data:bootstrap")],
+        [("📊 Status", "menu:data:status")],
+        [("🧹 Wipe cache", "menu:data:wipe")],
+        [("⬅️ Назад", "menu:root")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
 

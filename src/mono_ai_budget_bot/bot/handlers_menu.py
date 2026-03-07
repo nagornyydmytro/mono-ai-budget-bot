@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery
 
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
+from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
 
 from . import templates
 from .accounts_ui import render_accounts_screen
@@ -17,6 +18,7 @@ from .ui import (
     build_data_menu_keyboard,
     build_main_menu_keyboard,
     build_reports_menu_keyboard,
+    build_rows_keyboard,
 )
 
 
@@ -156,9 +158,9 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             query,
             tg_id=tg_id,
             users=ctx.users,
-            sync_onboarding_progress=ctx.sync_onboarding_progress,
-            onboarding_done=ctx.onboarding_done,
+            tx_store=ctx.tx_store,
             status_message_builder=templates.status_message,
+            reply_markup=build_back_keyboard("menu:mydata"),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:bootstrap")
@@ -186,13 +188,52 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:wipe")
-    async def cb_data_wipe_placeholder(query: CallbackQuery) -> None:
+    async def cb_data_wipe(query: CallbackQuery) -> None:
         if not await ctx.gate_menu_query_or_resume(query):
             return
-        await render_placeholder_screen(
+        await render_menu_screen(
             query,
-            text=templates.menu_data_wipe_placeholder_message(),
+            text=templates.menu_data_wipe_confirm_message(),
+            reply_markup=build_rows_keyboard(
+                [
+                    [("✅ Підтвердити", "menu:data:wipe:confirm")],
+                    [("❌ Скасувати", "menu:data:wipe:cancel")],
+                ]
+            ),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:wipe:confirm")
+    async def cb_data_wipe_confirm(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        wipe_user_financial_cache(
+            tg_id,
+            tx_store=ctx.tx_store,
+            report_store=ctx.store,
+            rules_store=ctx.rules_store,
+            uncat_store=ctx.uncat_store,
+            uncat_pending_store=ctx.uncat_pending_store,
+        )
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_data_wipe_done_message(),
             reply_markup=build_back_keyboard("menu:mydata"),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:wipe:cancel")
+    async def cb_data_wipe_cancel(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+        await render_menu_screen(
+            query,
+            text=templates.menu_data_message(),
+            reply_markup=build_data_menu_keyboard(),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories")

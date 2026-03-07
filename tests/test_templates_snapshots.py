@@ -135,6 +135,40 @@ def test_templates_menu_data_bootstrap_done_message_snapshot():
     )
 
 
+def test_templates_menu_data_wipe_confirm_message_snapshot():
+    assert (
+        templates.menu_data_wipe_confirm_message()
+        == "\n".join(
+            [
+                "🧹 *Wipe cache*",
+                "",
+                "Це очистить локальний фінансовий кеш користувача:",
+                "• транзакції",
+                "• coverage / last sync metadata",
+                "• збережені facts/reports",
+                "• rules / uncat / pending",
+                "",
+                "Підключення Monobank і вибрані картки не будуть видалені.",
+                "",
+                "Підтвердити очищення?",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_data_wipe_done_message_snapshot():
+    assert (
+        templates.menu_data_wipe_done_message()
+        == "\n".join(
+            [
+                "✅ Кеш очищено.",
+                "",
+                "Фінансові дані видалено локально. Monobank token і вибрані картки збережені.",
+            ]
+        ).strip()
+    )
+
+
 def test_templates_refresh_done_message_snapshot():
     assert (
         templates.refresh_done_message(accounts=2, fetched_requests=7, appended=123)
