@@ -36,3 +36,14 @@ def test_ensure_leaf_target_rejects_roots():
         ensure_leaf_target(tax, node_id="income")
     with pytest.raises(ValueError):
         ensure_leaf_target(tax, node_id="expense")
+
+
+def test_ensure_leaf_target_rejects_parent_category_after_subcategory_added():
+    tax = new_taxonomy()
+    food = add_category(tax, root_kind="expense", name="Їжа")
+    cafe = add_subcategory(tax, parent_id=food, name="Кафе")
+
+    ensure_leaf_target(tax, node_id=cafe)
+
+    with pytest.raises(ValueError):
+        ensure_leaf_target(tax, node_id=food)
