@@ -16,6 +16,25 @@ class TaxNode:
     children: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class TaxonomyMigrationPrompt:
+    parent_id: str
+    parent_name: str
+    new_subcategory_id: str
+    new_subcategory_name: str
+    migration_required: bool
+    suggested_target_leaf_id: str | None
+    suggested_target_leaf_name: str | None
+
+
+@dataclass(frozen=True)
+class TaxonomyMigrationDecision:
+    source_leaf_id: str
+    source_leaf_name: str
+    target_leaf_id: str
+    target_leaf_name: str
+
+
 def _norm_name(name: str) -> str:
     s = (name or "").strip()
     s = " ".join(s.split())
@@ -89,6 +108,52 @@ def is_leaf(tax: dict[str, Any], node_id: str) -> bool:
     return len(ch) == 0
 
 
+def _prepare_subcategory_candidate(
+    tax: dict[str, Any], *, parent_id: str, name: str
+) -> tuple[str, dict[str, Any], str, TaxKind, str]:
+    pid = (parent_id or "").strip()
+    if not pid:
+        raise ValueError("missing parent_id")
+
+    p = _node(tax, pid)
+    if bool(p.get("is_root")):
+        parent_depth = 0
+    else:
+        parent_depth = depth_of(tax, pid)
+
+    if parent_depth != 1:
+        raise ValueError("subcategories allowed only under level-1 categories")
+
+    nm = _norm_name(name)
+    if not nm or len(nm) > 60:
+        raise ValueError("invalid subcategory name")
+
+    kind = p.get("kind")
+    if kind not in ("income", "expense"):
+        raise ValueError("invalid parent kind")
+
+    sid = _make_id(pid, nm)
+    return pid, p, nm, kind, sid
+
+
+def build_subcategory_migration_prompt(
+    tax: dict[str, Any], *, parent_id: str, name: str
+) -> TaxonomyMigrationPrompt:
+    pid, p, nm, _, sid = _prepare_subcategory_candidate(tax, parent_id=parent_id, name=name)
+    parent_name = str(p.get("name") or "").strip()
+    migration_required = is_leaf(tax, pid)
+
+    return TaxonomyMigrationPrompt(
+        parent_id=pid,
+        parent_name=parent_name,
+        new_subcategory_id=sid,
+        new_subcategory_name=nm,
+        migration_required=migration_required,
+        suggested_target_leaf_id=sid if migration_required else None,
+        suggested_target_leaf_name=nm if migration_required else None,
+    )
+
+
 def add_category(tax: dict[str, Any], *, root_kind: TaxKind, name: str) -> str:
     roots = tax.get("roots")
     if not isinstance(roots, dict):
@@ -133,27 +198,7 @@ def add_category(tax: dict[str, Any], *, root_kind: TaxKind, name: str) -> str:
 
 
 def add_subcategory(tax: dict[str, Any], *, parent_id: str, name: str) -> str:
-    pid = (parent_id or "").strip()
-    if not pid:
-        raise ValueError("missing parent_id")
-
-    p = _node(tax, pid)
-    if bool(p.get("is_root")):
-        parent_depth = 0
-    else:
-        parent_depth = depth_of(tax, pid)
-
-    if parent_depth != 1:
-        raise ValueError("subcategories allowed only under level-1 categories")
-
-    nm = _norm_name(name)
-    if not nm or len(nm) > 60:
-        raise ValueError("invalid subcategory name")
-
-    kind = p.get("kind")
-    if kind not in ("income", "expense"):
-        raise ValueError("invalid parent kind")
-
+    pid, p, nm, kind, sid = _prepare_subcategory_candidate(tax, parent_id=parent_id, name=name)
     sid = _make_id(pid, nm)
 
     nodes = tax.get("nodes")
@@ -186,13 +231,41 @@ def add_subcategory(tax: dict[str, Any], *, parent_id: str, name: str) -> str:
 def add_subcategory_with_migration(
     tax: dict[str, Any], *, parent_id: str, name: str
 ) -> tuple[str, bool]:
-    pid = (parent_id or "").strip()
-    if not pid:
-        raise ValueError("missing parent_id")
+    prompt = build_subcategory_migration_prompt(tax, parent_id=parent_id, name=name)
+    if prompt.migration_required:
+        return prompt.new_subcategory_id, True
 
-    was_leaf = is_leaf(tax, pid)
-    sid = add_subcategory(tax, parent_id=pid, name=name)
-    return sid, bool(was_leaf)
+    sid = add_subcategory(tax, parent_id=prompt.parent_id, name=prompt.new_subcategory_name)
+    return sid, False
+
+
+def apply_subcategory_migration_choice(
+    tax: dict[str, Any],
+    *,
+    parent_id: str,
+    name: str,
+    migrate_to_leaf_id: str,
+) -> tuple[str, TaxonomyMigrationDecision | None]:
+    prompt = build_subcategory_migration_prompt(tax, parent_id=parent_id, name=name)
+
+    if prompt.migration_required:
+        target_id = str(migrate_to_leaf_id or "").strip()
+        if target_id != prompt.new_subcategory_id:
+            raise ValueError("explicit migration target required before converting leaf to parent")
+
+        sid = add_subcategory(tax, parent_id=prompt.parent_id, name=prompt.new_subcategory_name)
+        return (
+            sid,
+            TaxonomyMigrationDecision(
+                source_leaf_id=prompt.parent_id,
+                source_leaf_name=prompt.parent_name,
+                target_leaf_id=sid,
+                target_leaf_name=prompt.new_subcategory_name,
+            ),
+        )
+
+    sid = add_subcategory(tax, parent_id=prompt.parent_id, name=prompt.new_subcategory_name)
+    return sid, None
 
 
 def validate_taxonomy(tax: dict[str, Any]) -> None:

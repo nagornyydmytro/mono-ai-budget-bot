@@ -304,6 +304,20 @@ def build_categories_menu_keyboard() -> Any:
     )
 
 
+def build_taxonomy_migration_keyboard(
+    *,
+    target_label: str,
+    apply_callback: str,
+    cancel_callback: str,
+) -> Any:
+    return _build_rows(
+        [
+            [(f"➡️ Перенести в {target_label}", apply_callback)],
+            [(BTN_CANCEL, cancel_callback)],
+        ]
+    )
+
+
 def build_vertical_options_keyboard(options: Iterable[tuple[str, str]]) -> Any:
     rows: list[list[tuple[str, str]]] = [[(t, cb)] for t, cb in options]
     return _build_rows(rows)

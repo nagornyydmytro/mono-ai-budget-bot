@@ -14,6 +14,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_reports_menu_keyboard,
     build_reports_preset_keyboard,
     build_rows_keyboard,
+    build_taxonomy_migration_keyboard,
     build_uncat_frequency_keyboard,
 )
 
@@ -147,6 +148,18 @@ def test_categories_menu_keyboard_snapshot():
         [("🗑️ Видалити", "menu:categories:delete")],
         [("🧠 Rules / aliases", "menu:categories:rules")],
         [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_taxonomy_migration_keyboard_snapshot():
+    kb = build_taxonomy_migration_keyboard(
+        target_label="Кафе",
+        apply_callback="tax:migrate:apply",
+        cancel_callback="tax:migrate:cancel",
+    )
+    assert _kb_dump(kb) == [
+        [("➡️ Перенести в Кафе", "tax:migrate:apply")],
+        [("❌ Скасувати", "tax:migrate:cancel")],
     ]
 
 

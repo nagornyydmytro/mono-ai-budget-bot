@@ -1217,6 +1217,23 @@ def taxonomy_invalid_category_name_message() -> str:
     return "❌ Некоректна назва категорії. Спробуй ще раз (1–60 символів)."
 
 
+def taxonomy_migration_prompt_message(*, parent_name: str, new_subcategory_name: str) -> str:
+    return "\n".join(
+        [
+            "⚠️ *Потрібна міграція категорії*",
+            "",
+            f"Категорія *{parent_name}* зараз є leaf.",
+            f"Якщо додати підкатегорію *{new_subcategory_name}*, вона стане parent і більше не зможе напряму тримати транзакції.",
+            "",
+            f"Можна безпечно перенести існуючі транзакції в *{new_subcategory_name}* або скасувати дію.",
+        ]
+    ).strip()
+
+
+def taxonomy_migration_applied_message(*, source_name: str, target_name: str) -> str:
+    return f"✅ Міграцію підтверджено: {source_name} → {target_name}"
+
+
 def uncat_category_created_and_applied_message(*, category_name: str, description: str) -> str:
     return f"✅ Категорію створено і застосовано: {category_name} → {description}"
 

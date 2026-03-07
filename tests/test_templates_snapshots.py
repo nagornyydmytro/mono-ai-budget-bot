@@ -296,6 +296,35 @@ def test_templates_menu_categories_action_placeholder_message_snapshot():
     )
 
 
+def test_templates_taxonomy_migration_prompt_message_snapshot():
+    assert (
+        templates.taxonomy_migration_prompt_message(
+            parent_name="Їжа",
+            new_subcategory_name="Кафе",
+        )
+        == "\n".join(
+            [
+                "⚠️ *Потрібна міграція категорії*",
+                "",
+                "Категорія *Їжа* зараз є leaf.",
+                "Якщо додати підкатегорію *Кафе*, вона стане parent і більше не зможе напряму тримати транзакції.",
+                "",
+                "Можна безпечно перенести існуючі транзакції в *Кафе* або скасувати дію.",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_taxonomy_migration_applied_message_snapshot():
+    assert (
+        templates.taxonomy_migration_applied_message(
+            source_name="Їжа",
+            target_name="Кафе",
+        )
+        == "✅ Міграцію підтверджено: Їжа → Кафе"
+    )
+
+
 def test_templates_menu_reports_preset_message_snapshot():
     assert (
         templates.menu_reports_preset_message("Custom")
