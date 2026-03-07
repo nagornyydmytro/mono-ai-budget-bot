@@ -180,6 +180,51 @@ def test_templates_menu_reports_mode_message_snapshot():
     )
 
 
+def test_templates_menu_personalization_message_snapshot():
+    assert (
+        templates.menu_personalization_message(
+            persona_label="Rational",
+            activity_label="Quiet",
+            reports_label="Min",
+            uncat_label="Перед звітом",
+            ai_label="AI explanations ON",
+        )
+        == "\n".join(
+            [
+                "🎛️ *Персоналізація*",
+                "",
+                "Усі ці налаштування зберігаються в єдиному профілі користувача.",
+                "",
+                "Persona: Rational",
+                "Activity mode: Quiet",
+                "Report blocks: Min",
+                "Uncategorized prompts: Перед звітом",
+                "AI features: AI explanations ON",
+                "",
+                "Обери розділ:",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_personalization_item_message_snapshot():
+    assert (
+        templates.menu_personalization_item_message(
+            title="🧑 *Persona*",
+            current_value="Rational",
+        )
+        == "\n".join(
+            [
+                "🧑 *Persona*",
+                "",
+                "Поточне значення: Rational",
+                "",
+                "Повне редагування цього пункту буде додано в наступних комітах.",
+            ]
+        ).strip()
+    )
+
+
 def test_templates_menu_reports_custom_start_prompt_snapshot():
     assert (
         templates.menu_reports_custom_start_prompt()

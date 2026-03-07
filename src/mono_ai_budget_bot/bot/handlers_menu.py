@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery
 
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
+from mono_ai_budget_bot.settings.activity import normalize_activity_settings
 from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
 
 from . import templates
@@ -17,9 +18,71 @@ from .ui import (
     build_categories_menu_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_personalization_menu_keyboard,
     build_reports_menu_keyboard,
     build_rows_keyboard,
 )
+
+
+def _reports_preset_label_from_profile_or_store(ctx: HandlerContext, tg_id: int, prof: dict) -> str:
+    preset = str(prof.get("reports_preset") or "").strip()
+    if preset not in {"min", "max", "custom"}:
+        cfg = ctx.reports_store.load(tg_id)
+        preset = getattr(cfg, "preset", None) or (
+            cfg.get("preset") if isinstance(cfg, dict) else None
+        )
+        if preset not in {"min", "max", "custom"}:
+            preset = "min"
+        prof["reports_preset"] = preset
+    return {"min": "Min", "max": "Max", "custom": "Custom"}.get(preset, "Min")
+
+
+def _ensure_personalization_profile(ctx: HandlerContext, tg_id: int) -> dict:
+    prof = ctx.profile_store.load(tg_id) or {}
+    prof = normalize_activity_settings(prof)
+
+    ai_features = prof.get("ai_features")
+    if not isinstance(ai_features, dict):
+        ai_features = {}
+    if "report_explanations" not in ai_features:
+        ai_features["report_explanations"] = True
+    prof["ai_features"] = ai_features
+
+    _reports_preset_label_from_profile_or_store(ctx, tg_id, prof)
+
+    ctx.profile_store.save(tg_id, prof)
+    return prof
+
+
+def _persona_label(value: str) -> str:
+    return {
+        "supportive": "Supportive",
+        "rational": "Rational",
+        "motivator": "Motivator",
+    }.get(value, "—")
+
+
+def _activity_label(value: str) -> str:
+    return {
+        "loud": "Loud",
+        "quiet": "Quiet",
+        "custom": "Custom",
+    }.get(value, "—")
+
+
+def _uncat_label(value: str) -> str:
+    return {
+        "immediate": "Одразу",
+        "daily": "Раз на день",
+        "weekly": "Раз на тиждень",
+        "before_report": "Перед звітом",
+    }.get(value, "—")
+
+
+def _ai_features_label(prof: dict) -> str:
+    ai_features = prof.get("ai_features")
+    enabled = bool(isinstance(ai_features, dict) and ai_features.get("report_explanations", True))
+    return "AI explanations ON" if enabled else "AI explanations OFF"
 
 
 def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
@@ -49,27 +112,21 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         )
 
     @dp.callback_query(
-        lambda c: isinstance(c.data, str)
-        and c.data in {"menu:ask", "menu:insights", "menu:personalization"}
+        lambda c: isinstance(c.data, str) and c.data in {"menu:ask", "menu:insights"}
     )
     async def cb_menu_placeholder_sections(query: CallbackQuery) -> None:
         data = str(query.data or "")
-        if data in {"menu:ask", "menu:insights"}:
-            if not await ctx.gate_menu_dependencies(
-                query,
-                require_token=True,
-                require_accounts=True,
-                require_ledger=True,
-            ):
-                return
-        else:
-            if not await ctx.gate_menu_query_or_resume(query):
-                return
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
+            return
 
         title_map = {
             "menu:ask": "💬 *Ask*",
             "menu:insights": "✨ *Insights*",
-            "menu:personalization": "🎛️ *Персоналізація*",
         }
 
         await render_placeholder_screen(
@@ -86,6 +143,80 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             query,
             text=templates.menu_data_message(),
             reply_markup=build_data_menu_keyboard(),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:personalization")
+    async def cb_menu_personalization(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        reports_label = _reports_preset_label_from_profile_or_store(ctx, tg_id, prof)
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_personalization_message(
+                persona_label=_persona_label(str(prof.get("persona") or "")),
+                activity_label=_activity_label(str(prof.get("activity_mode") or "")),
+                reports_label=reports_label,
+                uncat_label=_uncat_label(str(prof.get("uncategorized_prompt_frequency") or "")),
+                ai_label=_ai_features_label(prof),
+            ),
+            reply_markup=build_personalization_menu_keyboard(),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data
+        in {
+            "menu:personalization:persona",
+            "menu:personalization:activity",
+            "menu:personalization:reports",
+            "menu:personalization:uncat",
+            "menu:personalization:ai",
+        }
+    )
+    async def cb_menu_personalization_items(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        reports_label = _reports_preset_label_from_profile_or_store(ctx, tg_id, prof)
+
+        data = str(query.data or "")
+        if data == "menu:personalization:persona":
+            title = "🧑 *Persona*"
+            current_value = _persona_label(str(prof.get("persona") or ""))
+        elif data == "menu:personalization:activity":
+            title = "⚡ *Activity mode*"
+            current_value = _activity_label(str(prof.get("activity_mode") or ""))
+        elif data == "menu:personalization:reports":
+            title = "🧩 *Report blocks*"
+            current_value = reports_label
+        elif data == "menu:personalization:uncat":
+            title = "🧾 *Uncategorized prompts*"
+            current_value = _uncat_label(str(prof.get("uncategorized_prompt_frequency") or ""))
+        else:
+            title = "🤖 *AI features*"
+            current_value = _ai_features_label(prof)
+
+        await render_placeholder_screen(
+            query,
+            text=templates.menu_personalization_item_message(
+                title=title,
+                current_value=current_value,
+            ),
+            reply_markup=build_back_keyboard("menu:personalization"),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:new_token")

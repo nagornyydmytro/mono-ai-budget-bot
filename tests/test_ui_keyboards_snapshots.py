@@ -4,6 +4,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_personalization_menu_keyboard,
     build_report_mode_keyboard,
     build_reports_menu_keyboard,
     build_rows_keyboard,
@@ -71,6 +72,18 @@ def test_reports_menu_keyboard_snapshot():
         [("📊 Last 7 days", "menu:reports:week")],
         [("🗓️ Last 30 days", "menu:reports:month")],
         [("🛠️ Custom", "menu:reports:custom")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_personalization_menu_keyboard_snapshot():
+    kb = build_personalization_menu_keyboard()
+    assert _kb_dump(kb) == [
+        [("🧑 Persona", "menu:personalization:persona")],
+        [("⚡ Activity mode", "menu:personalization:activity")],
+        [("🧩 Report blocks", "menu:personalization:reports")],
+        [("🧾 Uncategorized prompts", "menu:personalization:uncat")],
+        [("🤖 AI features", "menu:personalization:ai")],
         [("⬅️ Назад", "menu:root")],
     ]
 

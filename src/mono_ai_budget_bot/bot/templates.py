@@ -708,6 +708,43 @@ def menu_reports_custom_building_message(start_date: str, end_date: str) -> str:
     return "📊 Будую custom report…\n\n" f"Період: `{start_date}` → `{end_date}`"
 
 
+def menu_personalization_message(
+    *,
+    persona_label: str,
+    activity_label: str,
+    reports_label: str,
+    uncat_label: str,
+    ai_label: str,
+) -> str:
+    return "\n".join(
+        [
+            "🎛️ *Персоналізація*",
+            "",
+            "Усі ці налаштування зберігаються в єдиному профілі користувача.",
+            "",
+            f"Persona: {persona_label}",
+            f"Activity mode: {activity_label}",
+            f"Report blocks: {reports_label}",
+            f"Uncategorized prompts: {uncat_label}",
+            f"AI features: {ai_label}",
+            "",
+            "Обери розділ:",
+        ]
+    ).strip()
+
+
+def menu_personalization_item_message(*, title: str, current_value: str) -> str:
+    return "\n".join(
+        [
+            title,
+            "",
+            f"Поточне значення: {current_value}",
+            "",
+            "Повне редагування цього пункту буде додано в наступних комітах.",
+        ]
+    ).strip()
+
+
 def menu_data_message() -> str:
     return "\n".join(
         [

@@ -144,6 +144,19 @@ def build_data_menu_keyboard() -> Any:
     )
 
 
+def build_personalization_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("🧑 Persona", "menu:personalization:persona")],
+            [("⚡ Activity mode", "menu:personalization:activity")],
+            [("🧩 Report blocks", "menu:personalization:reports")],
+            [("🧾 Uncategorized prompts", "menu:personalization:uncat")],
+            [("🤖 AI features", "menu:personalization:ai")],
+            [(BTN_BACK, "menu:root")],
+        ]
+    )
+
+
 def build_categories_menu_keyboard() -> Any:
     return _build_rows(
         [

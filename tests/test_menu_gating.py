@@ -88,7 +88,7 @@ class DummyTaxonomyStore:
 
 class DummyReportsStore:
     def load(self, telegram_user_id: int):
-        return {"preset": "min"}
+        return SimpleNamespace(preset="min")
 
 
 class DummyReportStore:
@@ -1483,7 +1483,7 @@ def test_menu_categories_action_placeholder_renders_consistent_screen(tmp_path: 
     assert query.answer_calls[-1] == (None, False, None)
 
 
-def test_menu_personalization_placeholder_guides_back_to_root(tmp_path: Path):
+def test_menu_personalization_opens_canonical_submenu(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(
         cfg=UserConfig(
@@ -1496,21 +1496,76 @@ def test_menu_personalization_placeholder_guides_back_to_root(tmp_path: Path):
         ),
         profile={
             "onboarding_completed": True,
-            "activity_mode": "balanced",
-            "uncategorized_prompt_frequency": "always",
-            "persona": "neutral",
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
         },
         tx_store=tx_store,
     )
 
-    cb_menu_placeholder_sections = dp.callback_query.handlers["cb_menu_placeholder_sections"]
+    cb_menu_personalization = dp.callback_query.handlers["cb_menu_personalization"]
     message = DummyMessage(user_id=1)
     query = DummyCallbackQuery(user_id=1, data="menu:personalization", message=message)
 
-    asyncio.run(cb_menu_placeholder_sections(query))
+    asyncio.run(cb_menu_personalization(query))
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert text == templates.menu_section_placeholder_message("🎛️ *Персоналізація*")
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:root")]]
+    assert text == templates.menu_personalization_message(
+        persona_label="Rational",
+        activity_label="Quiet",
+        reports_label="Min",
+        uncat_label="Перед звітом",
+        ai_label="AI explanations ON",
+    )
+    assert _kb_dump(kb) == [
+        [("🧑 Persona", "menu:personalization:persona")],
+        [("⚡ Activity mode", "menu:personalization:activity")],
+        [("🧩 Report blocks", "menu:personalization:reports")],
+        [("🧾 Uncategorized prompts", "menu:personalization:uncat")],
+        [("🤖 AI features", "menu:personalization:ai")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_personalization_item_reads_from_profile_store(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "ai_features": {"report_explanations": False},
+            "reports_preset": "custom",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_personalization_items = dp.callback_query.handlers["cb_menu_personalization_items"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:ai",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_items(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_personalization_item_message(
+        title="🤖 *AI features*",
+        current_value="AI explanations OFF",
+    )
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:personalization")]]
     assert query.answer_calls[-1] == (None, False, None)
