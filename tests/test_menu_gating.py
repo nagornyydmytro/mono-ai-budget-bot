@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import mono_ai_budget_bot.bot.handlers as handlers
 import mono_ai_budget_bot.bot.handlers_menu as handlers_menu
 import mono_ai_budget_bot.bot.templates as templates
+import mono_ai_budget_bot.llm.openai_client as openai_client_module
 import mono_ai_budget_bot.nlq.memory_store as ms
 from mono_ai_budget_bot.bot.onboarding_flow import show_data_status
 from mono_ai_budget_bot.storage.report_store import ReportStore
@@ -133,12 +134,14 @@ def _build_dispatcher(
     rules_store=None,
     uncat_store=None,
     uncat_pending_store=None,
+    settings=None,
+    render_report_for_user=None,
 ):
     dp = DummyDispatcher()
     handlers.register_handlers(
         dp,
         bot=object(),
-        settings=SimpleNamespace(openai_api_key=None, openai_model="gpt"),
+        settings=settings or SimpleNamespace(openai_api_key=None, openai_model="gpt"),
         users=DummyUserStore(cfg),
         store=store or DummyReportStore(),
         tx_store=tx_store,
@@ -151,7 +154,7 @@ def _build_dispatcher(
         user_locks={},
         logger=SimpleNamespace(info=lambda *a, **k: None),
         sync_user_ledger=sync_user_ledger or (lambda *a, **k: None),
-        render_report_for_user=lambda *a, **k: "REPORT",
+        render_report_for_user=render_report_for_user or (lambda *a, **k: "REPORT"),
     )
     return dp
 
@@ -359,6 +362,50 @@ def test_menu_root_opens_after_onboarding(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_reports_today_opens_mode_picker(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_today = dp.callback_query.handlers["cb_menu_today"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:today", message=message)
+
+    asyncio.run(cb_menu_today(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_mode_message("Today")
+    assert _kb_dump(kb) == [
+        [("📄 Лише звіт", "menu:reports:run:today:det")],
+        [("🤖 З AI-поясненням", "menu:reports:run:today:ai")],
+        [("⬅️ Назад", "menu:reports")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_reports_opens_canonical_period_picker_after_onboarding(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     tx_store.update_coverage_window(
@@ -405,7 +452,7 @@ def test_menu_reports_opens_canonical_period_picker_after_onboarding(tmp_path: P
     assert query.answer_calls[-1] == (None, False, None)
 
 
-def test_menu_reports_custom_starts_manual_flow(monkeypatch, tmp_path: Path):
+def test_menu_reports_custom_opens_mode_picker(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
 
     tx_store = TxStore(tmp_path / "tx")
@@ -440,6 +487,52 @@ def test_menu_reports_custom_starts_manual_flow(monkeypatch, tmp_path: Path):
 
     asyncio.run(cb_menu_reports_custom(query))
 
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_mode_message("Custom")
+    assert _kb_dump(kb) == [
+        [("📄 Лише звіт", "menu:reports:custom:det")],
+        [("🤖 З AI-поясненням", "menu:reports:custom:ai")],
+        [("⬅️ Назад", "menu:reports")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_reports_custom_ai_starts_manual_flow(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_reports_custom_mode = dp.callback_query.handlers["cb_menu_reports_custom_mode"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:custom:ai", message=message)
+
+    asyncio.run(cb_menu_reports_custom_mode(query))
+
     mem = ms.load_memory(1)
 
     assert len(message.answers) == 1
@@ -451,7 +544,7 @@ def test_menu_reports_custom_starts_manual_flow(monkeypatch, tmp_path: Path):
         "hint": "YYYY-MM-DD",
         "source": "reports_custom",
     }
-    assert mem["reports_custom"] == {}
+    assert mem["reports_custom"] == {"want_ai": True}
     assert query.answer_calls[-1] == (None, False, None)
 
 
@@ -514,6 +607,97 @@ def test_menu_ask_guides_to_refresh_when_ledger_missing(tmp_path: Path):
         [("🔄 Refresh latest", "menu:data:refresh")],
         [("⬅️ Назад", "menu:root")],
     ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_reports_run_ai_uses_aggregated_facts_only(monkeypatch, tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    class StoreWithFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {"real_spend_total_uah": 123.0},
+                    "coverage": {
+                        "coverage_from_ts": 1_700_000_000,
+                        "coverage_to_ts": 1_700_086_400,
+                        "requested_from_ts": 1_700_000_000,
+                        "requested_to_ts": 1_700_086_400,
+                    },
+                }
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str, model: str):
+            captured["api_key"] = api_key
+            captured["model"] = model
+
+        def generate_report_v2(self, system: str, user: str, *, max_tokens: int = 700):
+            captured["system"] = system
+            captured["user"] = user
+            return SimpleNamespace(
+                summary="ok",
+                changes=["c1"],
+                recs=["r1"],
+                next_step="n1",
+            )
+
+        def close(self):
+            return None
+
+    def fake_render_report_for_user(tg_id, period, facts, *, ai_block=None):
+        captured["render_period"] = period
+        captured["render_facts"] = facts
+        captured["ai_block"] = ai_block
+        return "REPORT"
+
+    monkeypatch.setattr(openai_client_module, "OpenAIClient", FakeOpenAIClient)
+
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithFacts(),
+        settings=SimpleNamespace(openai_api_key="key", openai_model="gpt"),
+        render_report_for_user=fake_render_report_for_user,
+    )
+
+    cb_menu_run_report_mode = dp.callback_query.handlers["cb_menu_run_report_mode"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:run:today:ai", message=message)
+
+    asyncio.run(cb_menu_run_report_mode(query))
+
+    assert len(message.answers) == 2
+    assert message.answers[0][0] == templates.ai_insights_progress_message()
+    assert message.answers[1][0] == "REPORT"
+    assert captured["render_period"] == "today"
+    assert captured["render_facts"] == {
+        "totals": {"real_spend_total_uah": 123.0},
+        "coverage": {
+            "coverage_from_ts": 1_700_000_000,
+            "coverage_to_ts": 1_700_086_400,
+            "requested_from_ts": 1_700_000_000,
+            "requested_to_ts": 1_700_086_400,
+        },
+    }
+    assert isinstance(captured["ai_block"], str)
+    assert "Факти:" in str(captured["user"])
+    assert "raw transactions" not in str(captured["user"])
+    assert "description" not in str(captured["user"])
     assert query.answer_calls[-1] == (None, False, None)
 
 

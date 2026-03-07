@@ -4,6 +4,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_report_mode_keyboard,
     build_reports_menu_keyboard,
     build_rows_keyboard,
 )
@@ -71,6 +72,19 @@ def test_reports_menu_keyboard_snapshot():
         [("🗓️ Last 30 days", "menu:reports:month")],
         [("🛠️ Custom", "menu:reports:custom")],
         [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_report_mode_keyboard_snapshot():
+    kb = build_report_mode_keyboard(
+        det_callback="menu:reports:run:week:det",
+        ai_callback="menu:reports:run:week:ai",
+        back_callback="menu:reports",
+    )
+    assert _kb_dump(kb) == [
+        [("📄 Лише звіт", "menu:reports:run:week:det")],
+        [("🤖 З AI-поясненням", "menu:reports:run:week:ai")],
+        [("⬅️ Назад", "menu:reports")],
     ]
 
 

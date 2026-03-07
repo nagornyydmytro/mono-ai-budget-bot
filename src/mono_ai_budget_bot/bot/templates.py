@@ -667,6 +667,10 @@ def menu_reports_message() -> str:
     return "📊 *Звіти*\n\nОбери період:"
 
 
+def menu_reports_mode_message(period_label: str) -> str:
+    return f"📊 *Звіти*\n\nПеріод: *{period_label}*\nОбери режим побудови:"
+
+
 def menu_reports_custom_start_prompt() -> str:
     return "🛠️ *Custom report*\n\nВведи *start date* у форматі `YYYY-MM-DD`."
 

@@ -11,8 +11,10 @@ from mono_ai_budget_bot.nlq.types import NLQRequest
 
 from . import templates
 from .clarify import validate_ok_or_alert
+from .errors import map_llm_error
 from .handlers_common import HandlerContext
-from .ui import build_back_keyboard
+from .report_flow_helpers import build_ai_block
+from .ui import build_back_keyboard, build_report_mode_keyboard
 
 
 def _parse_iso_day_utc(raw: str) -> tuple[str, int] | None:
@@ -30,6 +32,50 @@ def _custom_period_kind(day_count: int) -> str:
     if day_count <= 7:
         return "weekly"
     return "monthly"
+
+
+def _period_label(period: str) -> str:
+    return {
+        "today": "Today",
+        "week": "Last 7 days",
+        "month": "Last 30 days",
+        "custom": "Custom",
+    }.get(period, period)
+
+
+async def _build_ai_block_from_facts(
+    *,
+    ctx: HandlerContext,
+    tg_id: int,
+    period_label: str,
+    facts: dict,
+) -> str | None:
+    if not ctx.settings.openai_api_key:
+        return None
+
+    from ..llm.openai_client import OpenAIClient
+
+    client = OpenAIClient(api_key=ctx.settings.openai_api_key, model=ctx.settings.openai_model)
+    try:
+        profile = ctx.profile_store.load(tg_id) or {}
+        system = (
+            "Ти допомагаєш з персональною фінансовою аналітикою. "
+            "Працюй лише на основі переданих фактів. "
+            "Не вигадуй дані. "
+            "Не давай інвестиційних, медичних або юридичних порад. "
+            "Поверни JSON з полями: summary, changes, recs, next_step."
+        )
+        user = f"Період: {period_label}\nФакти: {facts}\nПрофіль: {profile}"
+        res = client.generate_report_v2(system, user)
+    finally:
+        client.close()
+
+    return build_ai_block(
+        res.summary,
+        res.changes,
+        res.recs,
+        res.next_step,
+    )
 
 
 async def handle_reports_custom_manual_input(
@@ -158,6 +204,7 @@ async def handle_reports_custom_manual_input(
 
     kind = _custom_period_kind(day_count)
     period_key = f"custom:{kind}"
+    want_ai = bool(reports_custom.get("want_ai"))
 
     memory_store.pop_pending_manual_mode(user_id)
     mem.pop("pending_manual_mode", None)
@@ -165,33 +212,131 @@ async def handle_reports_custom_manual_input(
     memory_store.save_memory(user_id, mem)
 
     await message.answer(templates.menu_reports_custom_building_message(start_date, date_label))
-    text = ctx.render_report_for_user(user_id, period_key, facts)
+
+    ai_block = None
+    if want_ai:
+        if not ctx.settings.openai_api_key:
+            await message.answer(templates.ai_disabled_missing_key_message())
+        else:
+            await message.answer(templates.ai_insights_progress_message())
+            try:
+                ai_block = await _build_ai_block_from_facts(
+                    ctx=ctx,
+                    tg_id=user_id,
+                    period_label=f"{start_date} → {date_label}",
+                    facts=facts,
+                )
+            except Exception as e:
+                ctx.logger.warning("LLM unavailable, sending facts-only. err=%s", e)
+                await message.answer(map_llm_error(e))
+                ai_block = None
+
+    text = ctx.render_report_for_user(user_id, period_key, facts, ai_block=ai_block)
     await message.answer(text)
     return True
 
 
 def register_report_handlers(dp, *, ctx: HandlerContext) -> None:
-    async def _send_report_from_menu(query: CallbackQuery, period: str) -> None:
+    async def _send_report_from_menu(
+        query: CallbackQuery,
+        period: str,
+        *,
+        want_ai: bool,
+    ) -> None:
         if not await ctx.gate_menu_query_or_resume(query):
             return
         if query.message and query.from_user:
-            await ctx.send_period_report(query.message, period, tg_id_override=query.from_user.id)
+            await ctx.send_period_report(
+                query.message,
+                period,
+                tg_id_override=query.from_user.id,
+                want_ai_override=want_ai,
+            )
         await query.answer()
 
-    @dp.callback_query(lambda c: c.data in {"menu:reports:today", "menu_today"})
+    async def _open_report_mode_picker(query: CallbackQuery, *, period: str) -> None:
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
+            return
+
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_reports_mode_message(_period_label(period)),
+                reply_markup=build_report_mode_keyboard(
+                    det_callback=f"menu:reports:run:{period}:det",
+                    ai_callback=f"menu:reports:run:{period}:ai",
+                    back_callback="menu:reports",
+                ),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data == "menu:reports:today")
     async def cb_menu_today(query: CallbackQuery) -> None:
-        await _send_report_from_menu(query, "today")
+        await _open_report_mode_picker(query, period="today")
 
-    @dp.callback_query(lambda c: c.data in {"menu:reports:week", "menu_week"})
+    @dp.callback_query(lambda c: c.data == "menu:reports:week")
+    async def cb_menu_reports_week(query: CallbackQuery) -> None:
+        await _open_report_mode_picker(query, period="week")
+
+    @dp.callback_query(lambda c: c.data == "menu:reports:month")
+    async def cb_menu_reports_month(query: CallbackQuery) -> None:
+        await _open_report_mode_picker(query, period="month")
+
+    @dp.callback_query(lambda c: c.data == "menu_week")
     async def cb_menu_week(query: CallbackQuery) -> None:
-        await _send_report_from_menu(query, "week")
+        await _send_report_from_menu(query, "week", want_ai=False)
 
-    @dp.callback_query(lambda c: c.data in {"menu:reports:month", "menu_month"})
+    @dp.callback_query(lambda c: c.data == "menu_month")
     async def cb_menu_month(query: CallbackQuery) -> None:
-        await _send_report_from_menu(query, "month")
+        await _send_report_from_menu(query, "month", want_ai=False)
+
+    @dp.callback_query(lambda c: c.data == "menu_today")
+    async def cb_menu_legacy_today(query: CallbackQuery) -> None:
+        await _send_report_from_menu(query, "today", want_ai=False)
+
+    @dp.callback_query(lambda c: bool(c.data) and str(c.data).startswith("menu:reports:run:"))
+    async def cb_menu_run_report_mode(query: CallbackQuery) -> None:
+        raw = str(query.data or "")
+        parts = raw.split(":")
+        if len(parts) != 5:
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        period = parts[3]
+        mode = parts[4]
+        if period not in {"today", "week", "month"} or mode not in {"det", "ai"}:
+            await query.answer("Некоректно", show_alert=True)
+            return
+
+        await _send_report_from_menu(query, period, want_ai=(mode == "ai"))
 
     @dp.callback_query(lambda c: c.data == "menu:reports:custom")
     async def cb_menu_reports_custom(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
+            return
+
+        if query.message:
+            await query.message.edit_text(
+                templates.menu_reports_mode_message(_period_label("custom")),
+                reply_markup=build_report_mode_keyboard(
+                    det_callback="menu:reports:custom:det",
+                    ai_callback="menu:reports:custom:ai",
+                    back_callback="menu:reports",
+                ),
+            )
+        await query.answer()
+
+    @dp.callback_query(lambda c: c.data in {"menu:reports:custom:det", "menu:reports:custom:ai"})
+    async def cb_menu_reports_custom_mode(query: CallbackQuery) -> None:
         if not await ctx.gate_menu_dependencies(
             query,
             require_token=True,
@@ -205,8 +350,9 @@ def register_report_handlers(dp, *, ctx: HandlerContext) -> None:
             await query.answer("Немає user id", show_alert=True)
             return
 
+        want_ai = str(query.data or "").endswith(":ai")
         mem = memory_store.load_memory(tg_id)
-        mem["reports_custom"] = {}
+        mem["reports_custom"] = {"want_ai": want_ai}
         memory_store.save_memory(tg_id, mem)
         memory_store.set_pending_manual_mode(
             tg_id,

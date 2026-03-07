@@ -120,6 +120,16 @@ def build_reports_menu_keyboard() -> Any:
     )
 
 
+def build_report_mode_keyboard(*, det_callback: str, ai_callback: str, back_callback: str) -> Any:
+    return _build_rows(
+        [
+            [("📄 Лише звіт", det_callback)],
+            [("🤖 З AI-поясненням", ai_callback)],
+            [(BTN_BACK, back_callback)],
+        ]
+    )
+
+
 def build_data_menu_keyboard() -> Any:
     return _build_rows(
         [

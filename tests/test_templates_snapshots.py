@@ -173,6 +173,13 @@ def test_templates_menu_reports_message_snapshot():
     assert templates.menu_reports_message() == "📊 *Звіти*\n\nОбери період:"
 
 
+def test_templates_menu_reports_mode_message_snapshot():
+    assert (
+        templates.menu_reports_mode_message("Last 7 days")
+        == "📊 *Звіти*\n\nПеріод: *Last 7 days*\nОбери режим побудови:"
+    )
+
+
 def test_templates_menu_reports_custom_start_prompt_snapshot():
     assert (
         templates.menu_reports_custom_start_prompt()

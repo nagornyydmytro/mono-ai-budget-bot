@@ -280,11 +280,16 @@ def register_handlers(
         period: str,
         *,
         tg_id_override: int | None = None,
+        want_ai_override: bool | None = None,
     ) -> None:
         from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
         from mono_ai_budget_bot.nlq import memory_store
 
-        want_ai = " ai" in (" " + (message.text or "").lower() + " ")
+        want_ai = (
+            bool(want_ai_override)
+            if want_ai_override is not None
+            else (" ai" in (" " + (message.text or "").lower() + " "))
+        )
 
         tg_id = (
             tg_id_override
