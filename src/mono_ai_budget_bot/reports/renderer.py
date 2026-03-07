@@ -40,6 +40,12 @@ def _period_to_cfg_period(period: str) -> str:
         return "weekly"
     if period == "month":
         return "monthly"
+    if period == "custom:daily":
+        return "daily"
+    if period == "custom:weekly":
+        return "weekly"
+    if period == "custom:monthly":
+        return "monthly"
     return period
 
 
@@ -401,6 +407,14 @@ def render_report_for_user(
 
     title_map = {"today": "Сьогодні", "week": "Останні 7 днів", "month": "Останні 30 днів"}
     title = title_map.get(period, period)
+
+    requested_label = facts.get("requested_period_label")
+    if (
+        isinstance(requested_label, str)
+        and requested_label.strip()
+        and str(period).startswith("custom:")
+    ):
+        title = requested_label.strip()
 
     header = f"📊 {md_escape(title)}"
 

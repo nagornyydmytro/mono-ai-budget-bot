@@ -173,10 +173,45 @@ def test_templates_menu_reports_message_snapshot():
     assert templates.menu_reports_message() == "📊 *Звіти*\n\nОбери період:"
 
 
-def test_templates_menu_reports_custom_placeholder_message_snapshot():
+def test_templates_menu_reports_custom_start_prompt_snapshot():
     assert (
-        templates.menu_reports_custom_placeholder_message()
-        == "🛠️ *Custom report*\n\n🚧 Custom period picker буде додано в наступному коміті."
+        templates.menu_reports_custom_start_prompt()
+        == "🛠️ *Custom report*\n\nВведи *start date* у форматі `YYYY-MM-DD`."
+    )
+
+
+def test_templates_menu_reports_custom_end_prompt_snapshot():
+    assert (
+        templates.menu_reports_custom_end_prompt("2026-03-01")
+        == "🛠️ *Custom report*\n\nStart date: `2026-03-01`\nТепер введи *end date* у форматі `YYYY-MM-DD`."
+    )
+
+
+def test_templates_menu_reports_custom_invalid_date_message_snapshot():
+    assert (
+        templates.menu_reports_custom_invalid_date_message()
+        == "⚠️ Некоректна дата.\n\nВикористай формат `YYYY-MM-DD`, наприклад `2026-03-07`."
+    )
+
+
+def test_templates_menu_reports_custom_invalid_order_message_snapshot():
+    assert (
+        templates.menu_reports_custom_invalid_order_message("2026-03-10", "2026-03-01")
+        == "⚠️ Некоректний діапазон.\n\nStart date: `2026-03-10`\nEnd date: `2026-03-01`\n\nEnd date не може бути раніше за start date. Введи end date ще раз."
+    )
+
+
+def test_templates_menu_reports_custom_invalid_range_message_snapshot():
+    assert (
+        templates.menu_reports_custom_invalid_range_message(366)
+        == "⚠️ Занадто великий діапазон.\n\nЗараз дозволено не більше *366* днів. Введи коротший період."
+    )
+
+
+def test_templates_menu_reports_custom_building_message_snapshot():
+    assert (
+        templates.menu_reports_custom_building_message("2026-03-01", "2026-03-07")
+        == "📊 Будую custom report…\n\nПеріод: `2026-03-01` → `2026-03-07`"
     )
 
 

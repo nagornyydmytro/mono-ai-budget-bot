@@ -667,8 +667,41 @@ def menu_reports_message() -> str:
     return "📊 *Звіти*\n\nОбери період:"
 
 
-def menu_reports_custom_placeholder_message() -> str:
-    return "🛠️ *Custom report*\n\n🚧 Custom period picker буде додано в наступному коміті."
+def menu_reports_custom_start_prompt() -> str:
+    return "🛠️ *Custom report*\n\nВведи *start date* у форматі `YYYY-MM-DD`."
+
+
+def menu_reports_custom_end_prompt(start_date: str) -> str:
+    return (
+        "🛠️ *Custom report*\n\n"
+        f"Start date: `{start_date}`\n"
+        "Тепер введи *end date* у форматі `YYYY-MM-DD`."
+    )
+
+
+def menu_reports_custom_invalid_date_message() -> str:
+    return "⚠️ Некоректна дата.\n\n" "Використай формат `YYYY-MM-DD`, наприклад `2026-03-07`."
+
+
+def menu_reports_custom_invalid_order_message(start_date: str, end_date: str) -> str:
+    return (
+        "⚠️ Некоректний діапазон.\n\n"
+        f"Start date: `{start_date}`\n"
+        f"End date: `{end_date}`\n\n"
+        "End date не може бути раніше за start date. Введи end date ще раз."
+    )
+
+
+def menu_reports_custom_invalid_range_message(max_days: int) -> str:
+    return (
+        "⚠️ Занадто великий діапазон.\n\n"
+        f"Зараз дозволено не більше *{max_days}* днів. "
+        "Введи коротший період."
+    )
+
+
+def menu_reports_custom_building_message(start_date: str, end_date: str) -> str:
+    return "📊 Будую custom report…\n\n" f"Період: `{start_date}` → `{end_date}`"
 
 
 def menu_data_message() -> str:

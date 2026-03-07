@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import mono_ai_budget_bot.bot.handlers as handlers
 import mono_ai_budget_bot.bot.handlers_menu as handlers_menu
 import mono_ai_budget_bot.bot.templates as templates
+import mono_ai_budget_bot.nlq.memory_store as ms
 from mono_ai_budget_bot.bot.onboarding_flow import show_data_status
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.rules_store import RulesStore
@@ -404,7 +405,9 @@ def test_menu_reports_opens_canonical_period_picker_after_onboarding(tmp_path: P
     assert query.answer_calls[-1] == (None, False, None)
 
 
-def test_menu_reports_custom_placeholder_is_stable(tmp_path: Path):
+def test_menu_reports_custom_starts_manual_flow(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
     tx_store = TxStore(tmp_path / "tx")
     tx_store.update_coverage_window(
         1,
@@ -437,10 +440,18 @@ def test_menu_reports_custom_placeholder_is_stable(tmp_path: Path):
 
     asyncio.run(cb_menu_reports_custom(query))
 
+    mem = ms.load_memory(1)
+
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert text == templates.menu_reports_custom_placeholder_message()
+    assert text == templates.menu_reports_custom_start_prompt()
     assert _kb_dump(kb) == [[("⬅️ Назад", "menu:reports")]]
+    assert mem["pending_manual_mode"] == {
+        "expected": "report_custom_start",
+        "hint": "YYYY-MM-DD",
+        "source": "reports_custom",
+    }
+    assert mem["reports_custom"] == {}
     assert query.answer_calls[-1] == (None, False, None)
 
 
@@ -504,6 +515,137 @@ def test_menu_ask_guides_to_refresh_when_ledger_missing(tmp_path: Path):
         [("⬅️ Назад", "menu:root")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_reports_custom_invalid_order_guides_correction(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    mem = ms.load_memory(1)
+    mem["reports_custom"] = {
+        "start_date": "2026-03-10",
+        "start_ts": 1773100800,
+    }
+    ms.save_memory(1, mem)
+    ms.set_pending_manual_mode(
+        1,
+        expected="report_custom_end",
+        hint="YYYY-MM-DD",
+        source="reports_custom",
+        ttl_sec=900,
+    )
+
+    handle_plain_text = dp.message.handlers["handle_plain_text"]
+    message = DummyMessage(user_id=1, text="2026-03-01")
+
+    asyncio.run(handle_plain_text(message))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_custom_invalid_order_message(
+        "2026-03-10",
+        "2026-03-01",
+    )
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:reports")]]
+
+    mem2 = ms.load_memory(1)
+    assert mem2["pending_manual_mode"] == {
+        "expected": "report_custom_end",
+        "hint": "YYYY-MM-DD",
+        "source": "reports_custom",
+    }
+
+
+def test_reports_custom_builds_report_after_valid_range(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1772496000,
+        coverage_to_ts=1773532800,
+    )
+    tx_store.append_many(
+        1,
+        "acc1",
+        [
+            {
+                "id": "tx1",
+                "time": 1772755200,
+                "account_id": "acc1",
+                "amount": -12000,
+                "description": "Coffee",
+                "mcc": 5814,
+                "currencyCode": 980,
+            }
+        ],
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    mem = ms.load_memory(1)
+    mem["reports_custom"] = {
+        "start_date": "2026-03-03",
+        "start_ts": 1772496000,
+    }
+    ms.save_memory(1, mem)
+    ms.set_pending_manual_mode(
+        1,
+        expected="report_custom_end",
+        hint="YYYY-MM-DD",
+        source="reports_custom",
+        ttl_sec=900,
+    )
+
+    handle_plain_text = dp.message.handlers["handle_plain_text"]
+    message = DummyMessage(user_id=1, text="2026-03-05")
+
+    asyncio.run(handle_plain_text(message))
+
+    assert len(message.answers) == 2
+    assert message.answers[0][0] == templates.menu_reports_custom_building_message(
+        "2026-03-03", "2026-03-05"
+    )
+    assert message.answers[1][0] == "REPORT"
+
+    mem2 = ms.load_memory(1)
+    assert mem2.get("pending_manual_mode") is None
+    assert mem2.get("reports_custom") is None
 
 
 def test_menu_data_new_token_starts_manual_entry_with_mydata_back(tmp_path: Path):

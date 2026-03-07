@@ -17,6 +17,7 @@ from .accounts_ui import render_accounts_screen
 from .clarify import validate_ok_or_alert
 from .errors import map_monobank_error
 from .handlers_common import HandlerContext
+from .handlers_reports import handle_reports_custom_manual_input
 from .onboarding_flow import submit_manual_token
 from .ui import build_coverage_cta_keyboard, build_nlq_clarify_keyboard
 
@@ -209,6 +210,16 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
             )
             if handled:
                 return
+
+        handled_custom_report = await handle_reports_custom_manual_input(
+            message,
+            ctx=ctx,
+            user_id=user_id,
+            text_raw=text_raw,
+            now_ts=now_ts,
+        )
+        if handled_custom_report:
+            return
 
         if text_lower == "cancel":
             memory_store.pop_pending_intent(user_id)
