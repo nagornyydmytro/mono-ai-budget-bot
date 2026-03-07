@@ -80,8 +80,17 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         ]
         text, kb = render_accounts_screen(accounts, set(selected))
 
+        mem = memory_store.load_memory(tg_id) if tg_id is not None else {}
+        picker = mem.get("accounts_picker") if isinstance(mem, dict) else None
+        source = picker.get("source") if isinstance(picker, dict) else None
+        prefix_text = (
+            templates.data_accounts_picker_intro()
+            if source == "data_menu"
+            else templates.connect_success_confirm()
+        )
+
         if query.message:
-            prefix = f"{templates.connect_success_confirm()}\n\n"
+            prefix = f"{prefix_text}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
         await query.answer()
 
@@ -126,8 +135,17 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         ]
         text, kb = render_accounts_screen(accounts, set())
 
+        mem = memory_store.load_memory(tg_id) if tg_id is not None else {}
+        picker = mem.get("accounts_picker") if isinstance(mem, dict) else None
+        source = picker.get("source") if isinstance(picker, dict) else None
+        prefix_text = (
+            templates.data_accounts_picker_intro()
+            if source == "data_menu"
+            else templates.connect_success_confirm()
+        )
+
         if query.message:
-            prefix = f"{templates.connect_success_confirm()}\n\n"
+            prefix = f"{prefix_text}\n\n"
             await query.message.edit_text(f"{prefix}{text}", reply_markup=kb)
 
         await query.answer()
@@ -174,6 +192,15 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         onb["accounts_confirmed"] = True
         prof["onboarding"] = onb
         ctx.profile_store.save(tg_id, prof)
+
+        if source == "data_menu":
+            if query.message:
+                await query.message.edit_text(
+                    templates.data_accounts_saved_message(count),
+                    reply_markup=build_back_keyboard("menu:mydata"),
+                )
+            await query.answer()
+            return
 
         kb = build_bootstrap_picker_keyboard(include_skip=(onboarding_done and not changed))
 

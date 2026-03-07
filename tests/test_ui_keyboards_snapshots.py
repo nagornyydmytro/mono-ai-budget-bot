@@ -2,6 +2,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_bootstrap_picker_keyboard,
     build_coverage_cta_keyboard,
     build_currency_screen_keyboard,
+    build_data_menu_keyboard,
     build_main_menu_keyboard,
 )
 
@@ -44,4 +45,17 @@ def test_coverage_cta_keyboard_snapshot():
     assert _kb_dump(kb) == [
         [("⬇️ Завантажити цей період", "cov_sync:deadbeef")],
         [("❌ Скасувати", "cov_cancel:deadbeef")],
+    ]
+
+
+def test_data_menu_keyboard_snapshot():
+    kb = build_data_menu_keyboard()
+    assert _kb_dump(kb) == [
+        [("🔑 Change token", "menu:data:new_token")],
+        [("💳 Change accounts", "menu:data:accounts")],
+        [("🔄 Refresh latest", "menu:data:refresh")],
+        [("📥 Bootstrap history", "menu:data:bootstrap")],
+        [("📊 Status", "menu:data:status")],
+        [("🧹 Wipe cache", "menu:data:wipe")],
+        [("⬅️ Назад", "menu:root")],
     ]

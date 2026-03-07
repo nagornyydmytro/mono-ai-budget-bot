@@ -36,11 +36,11 @@ def stale_button_message() -> str:
 def status_message(*, accounts_selected: int, onboarding_done: bool) -> str:
     return "\n".join(
         [
-            "📊 Status",
+            "📊 Статус даних",
             "",
             "Monobank: ✅",
             f"Карток вибрано: {accounts_selected}",
-            f"Онбординг: {'✅' if onboarding_done else '⏳'}",
+            f"Стан налаштування: {'✅ Готово' if onboarding_done else '⏳ Потрібно завершити'}",
         ]
     ).strip()
 
@@ -663,9 +663,9 @@ def menu_reports_message() -> str:
 def menu_data_message() -> str:
     return "\n".join(
         [
-            "📊 Мої дані",
+            "⚙️ *Мої дані*",
             "",
-            "Тут можна керувати підключенням Monobank і синхронізацією.",
+            "Тут можна керувати підключенням Monobank, картками та синхронізацією.",
         ]
     ).strip()
 
@@ -680,6 +680,30 @@ def menu_section_placeholder_message(title: str) -> str:
 
 def menu_categories_action_placeholder_message() -> str:
     return "🗂️ *Категорії*\n\n🚧 Ця дія ще в розробці."
+
+
+def menu_data_bootstrap_placeholder_message() -> str:
+    return "📥 *Bootstrap history*\n\n🚧 Окремий screen для bootstrap history буде додано в наступному коміті."
+
+
+def menu_data_wipe_placeholder_message() -> str:
+    return "🧹 *Wipe cache*\n\n🚧 Confirm/cancel flow для очищення кешу буде додано в наступному коміті."
+
+
+def data_accounts_picker_intro() -> str:
+    return "⚙️ *Мої дані*\n\nОбери картки для аналізу."
+
+
+def data_accounts_saved_message(count: int) -> str:
+    return "\n".join(
+        [
+            "✅ Картки збережено.",
+            "",
+            f"Вибрано карток: {count}",
+            "",
+            "Тепер можеш повернутись у розділ «Мої дані» або окремо запустити bootstrap history.",
+        ]
+    ).strip()
 
 
 def connect_token_validation_progress() -> str:

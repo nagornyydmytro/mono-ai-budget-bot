@@ -120,10 +120,12 @@ def build_reports_menu_keyboard() -> Any:
 def build_data_menu_keyboard() -> Any:
     return _build_rows(
         [
-            [("🔑 New token", "menu:data:new_token")],
+            [("🔑 Change token", "menu:data:new_token")],
             [("💳 Change accounts", "menu:data:accounts")],
             [("🔄 Refresh latest", "menu:data:refresh")],
+            [("📥 Bootstrap history", "menu:data:bootstrap")],
             [("📊 Status", "menu:data:status")],
+            [("🧹 Wipe cache", "menu:data:wipe")],
             [(BTN_BACK, "menu:root")],
         ]
     )

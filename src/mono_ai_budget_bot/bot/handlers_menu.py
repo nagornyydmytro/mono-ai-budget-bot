@@ -160,6 +160,26 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             status_message_builder=templates.status_message,
         )
 
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:bootstrap")
+    async def cb_data_bootstrap_placeholder(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+        await render_placeholder_screen(
+            query,
+            text=templates.menu_data_bootstrap_placeholder_message(),
+            reply_markup=build_back_keyboard("menu:mydata"),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:wipe")
+    async def cb_data_wipe_placeholder(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+        await render_placeholder_screen(
+            query,
+            text=templates.menu_data_wipe_placeholder_message(),
+            reply_markup=build_back_keyboard("menu:mydata"),
+        )
+
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories")
     async def cb_menu_categories(query: CallbackQuery) -> None:
         if not await ctx.gate_menu_dependencies(

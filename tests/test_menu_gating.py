@@ -429,10 +429,12 @@ def test_menu_mydata_always_available_after_onboarding(tmp_path: Path):
     text, kb = message.answers[0]
     assert text == templates.menu_data_message()
     assert _kb_dump(kb) == [
-        [("🔑 New token", "menu:data:new_token")],
+        [("🔑 Change token", "menu:data:new_token")],
         [("💳 Change accounts", "menu:data:accounts")],
         [("🔄 Refresh latest", "menu:data:refresh")],
+        [("📥 Bootstrap history", "menu:data:bootstrap")],
         [("📊 Status", "menu:data:status")],
+        [("🧹 Wipe cache", "menu:data:wipe")],
         [("⬅️ Назад", "menu:root")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
