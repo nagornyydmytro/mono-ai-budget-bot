@@ -839,6 +839,73 @@ def menu_categories_message(tree_preview: str) -> str:
     return "\n".join(parts).strip()
 
 
+def menu_categories_rules_message(summary: str) -> str:
+    return "\n".join(
+        [
+            "🧠 *Rules / aliases*",
+            "",
+            "Поточні mappings:",
+            summary.strip() or "• Поки що немає правил або alias mappings.",
+            "",
+            "Обери дію:",
+        ]
+    ).strip()
+
+
+def menu_categories_rule_pick_leaf_message(kind_label: str) -> str:
+    return f"🧠 *{kind_label}*\n\nОбери leaf category."
+
+
+def menu_categories_rule_enter_value_message(kind_label: str, leaf_name: str) -> str:
+    return "\n".join(
+        [
+            f"🧠 *{kind_label}*",
+            "",
+            f"Leaf category: *{leaf_name}*",
+            "",
+            "Тепер введи фразу вручну.",
+        ]
+    ).strip()
+
+
+def menu_categories_rule_item_message(
+    *,
+    kind_label: str,
+    current_value: str,
+    leaf_name: str,
+) -> str:
+    return "\n".join(
+        [
+            f"🧠 *{kind_label}*",
+            "",
+            f"Поточне значення: `{current_value}`",
+            f"Leaf category: *{leaf_name}*",
+            "",
+            "Обери дію:",
+        ]
+    ).strip()
+
+
+def menu_categories_rule_saved_message(
+    *,
+    kind_label: str,
+    value: str,
+    leaf_name: str,
+) -> str:
+    return "\n".join(
+        [
+            f"✅ {kind_label} збережено.",
+            "",
+            f"Фраза: `{value}`",
+            f"Leaf category: *{leaf_name}*",
+        ]
+    ).strip()
+
+
+def menu_categories_rule_deleted_message(*, kind_label: str, value: str) -> str:
+    return f"✅ Видалено: {kind_label} — `{value}`"
+
+
 def menu_section_placeholder_message(title: str) -> str:
     return f"{title}\n\n🚧 Цей розділ ще в розробці."
 

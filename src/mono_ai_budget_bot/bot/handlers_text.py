@@ -19,7 +19,7 @@ from .errors import map_monobank_error
 from .handlers_common import HandlerContext
 from .handlers_reports import handle_reports_custom_manual_input
 from .onboarding_flow import submit_manual_token
-from .ui import build_coverage_cta_keyboard, build_nlq_clarify_keyboard
+from .ui import build_back_keyboard, build_coverage_cta_keyboard, build_nlq_clarify_keyboard
 
 
 def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
@@ -219,6 +219,97 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
             now_ts=now_ts,
         )
         if handled_custom_report:
+            return
+
+        if manual is not None and str(manual.get("expected") or "") == "categories_rules_term":
+            value = " ".join(text_raw.split()).strip()
+            if not value or len(value) > 80:
+                await message.answer(
+                    "❌ Некоректна фраза. Спробуй ще раз (1–80 символів).",
+                    reply_markup=build_back_keyboard("menu:categories:rules"),
+                )
+                return
+
+            mem = memory_store.load_memory(user_id)
+            state = mem.get("categories_rules_ui")
+            if not isinstance(state, dict):
+                memory_store.pop_pending_manual_mode(user_id)
+                await message.answer("Немає активної дії для rules / aliases.")
+                return
+
+            kind = str(state.get("kind") or "")
+            leaf_id = str(state.get("leaf_id") or "").strip()
+            leaf_name = str(state.get("leaf_name") or "").strip() or leaf_id
+            mode = str(state.get("mode") or "").strip()
+
+            if kind in {"merchant_rule", "recipient_rule"}:
+                rules = ctx.rules_store.load(user_id)
+                old_id = str(state.get("entry_id") or "").strip()
+
+                if old_id:
+                    rules = [r for r in rules if r.id != old_id]
+
+                rid = hashlib.sha1(f"{kind}:{leaf_id}:{value.lower()}".encode("utf-8")).hexdigest()[
+                    :10
+                ]
+                rules.append(
+                    Rule(
+                        id=rid,
+                        leaf_id=leaf_id,
+                        merchant_contains=value if kind == "merchant_rule" else None,
+                        recipient_contains=value if kind == "recipient_rule" else None,
+                    )
+                )
+                ctx.rules_store.save(user_id, rules)
+            elif kind == "alias":
+                tax = ctx.taxonomy_store.load(user_id) or {}
+                alias_terms = tax.get("alias_terms")
+                if not isinstance(alias_terms, dict):
+                    alias_terms = {}
+
+                old_value = str(state.get("value") or "").strip()
+                if mode == "edit_term" and old_value:
+                    current = [
+                        str(x).strip()
+                        for x in alias_terms.get(leaf_id, [])
+                        if isinstance(x, str) and str(x).strip() and str(x).strip() != old_value
+                    ]
+                    if current:
+                        alias_terms[leaf_id] = current
+                    else:
+                        alias_terms.pop(leaf_id, None)
+
+                current = [
+                    str(x).strip()
+                    for x in alias_terms.get(leaf_id, [])
+                    if isinstance(x, str) and str(x).strip()
+                ]
+                if value not in current:
+                    current.append(value)
+                alias_terms[leaf_id] = current
+                tax["alias_terms"] = alias_terms
+                ctx.taxonomy_store.save(user_id, tax)
+            else:
+                memory_store.pop_pending_manual_mode(user_id)
+                await message.answer("Невідомий тип правила.")
+                return
+
+            memory_store.pop_pending_manual_mode(user_id)
+            mem.pop("categories_rules_ui", None)
+            memory_store.save_memory(user_id, mem)
+
+            await message.answer(
+                templates.menu_categories_rule_saved_message(
+                    kind_label={
+                        "merchant_rule": "Merchant rule",
+                        "recipient_rule": "Recipient rule",
+                        "alias": "Alias mapping",
+                    }.get(kind, "Rule"),
+                    value=value,
+                    leaf_name=leaf_name,
+                ),
+                reply_markup=build_back_keyboard("menu:categories:rules"),
+            )
             return
 
         if text_lower == "cancel":

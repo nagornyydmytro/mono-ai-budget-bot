@@ -304,6 +304,51 @@ def build_categories_menu_keyboard() -> Any:
     )
 
 
+def build_categories_rules_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("➕ Merchant rule", "menu:categories:rules:add_merchant")],
+            [("➕ Recipient rule", "menu:categories:rules:add_recipient")],
+            [("➕ Alias mapping", "menu:categories:rules:add_alias")],
+            [("✏️ Edit existing", "menu:categories:rules:edit")],
+            [("🗑️ Delete existing", "menu:categories:rules:delete")],
+            [(BTN_BACK, "menu:categories")],
+        ]
+    )
+
+
+def build_categories_leaf_picker_keyboard(
+    items: list[tuple[str, str]],
+    *,
+    callback_prefix: str,
+    back_callback: str,
+) -> Any:
+    rows: list[list[tuple[str, str]]] = []
+    for leaf_id, label in items:
+        rows.append([(label, f"{callback_prefix}:{leaf_id}")])
+    rows.append([(BTN_BACK, back_callback)])
+    return _build_rows(rows)
+
+
+def build_categories_rule_item_actions_keyboard(index: int) -> Any:
+    return _build_rows(
+        [
+            [("✏️ Змінити фразу", f"menu:categories:rules:edit:term:{index}")],
+            [("🎯 Змінити leaf", f"menu:categories:rules:edit:leaf:{index}")],
+            [(BTN_BACK, "menu:categories:rules:edit")],
+        ]
+    )
+
+
+def build_categories_rule_delete_confirm_keyboard(index: int) -> Any:
+    return _build_rows(
+        [
+            [("✅ Видалити", f"menu:categories:rules:delete:confirm:{index}")],
+            [(BTN_CANCEL, "menu:categories:rules:delete")],
+        ]
+    )
+
+
 def build_taxonomy_migration_keyboard(
     *,
     target_label: str,
