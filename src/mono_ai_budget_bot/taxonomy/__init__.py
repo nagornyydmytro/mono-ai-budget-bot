@@ -15,8 +15,9 @@ from mono_ai_budget_bot.taxonomy.models import (
     new_taxonomy,
     validate_taxonomy,
 )
+from mono_ai_budget_bot.taxonomy.pipeline import CATEGORIZATION_PRIORITY, categorize_tx
 from mono_ai_budget_bot.taxonomy.presets import TaxPreset, build_taxonomy_preset
-from mono_ai_budget_bot.taxonomy.rules import Categorization, Rule, categorize_tx, find_leaf_by_name
+from mono_ai_budget_bot.taxonomy.rules import Categorization, Rule, find_leaf_by_name
 
 __all__ = [
     "TaxKind",
@@ -36,6 +37,7 @@ __all__ = [
     "add_subcategory_with_migration",
     "Categorization",
     "Rule",
+    "CATEGORIZATION_PRIORITY",
     "categorize_tx",
     "find_leaf_by_name",
     "TaxPreset",

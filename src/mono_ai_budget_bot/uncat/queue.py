@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from mono_ai_budget_bot.storage.tx_store import TxRecord
-from mono_ai_budget_bot.taxonomy.rules import Rule, categorize_tx
+from mono_ai_budget_bot.taxonomy.pipeline import categorize_tx
+from mono_ai_budget_bot.taxonomy.rules import Rule
 
 
 @dataclass(frozen=True)

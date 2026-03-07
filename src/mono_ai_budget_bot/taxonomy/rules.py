@@ -3,10 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Optional, Sequence
 
-from mono_ai_budget_bot.analytics.categories import category_from_mcc
-from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.storage.tx_store import TxRecord
-from mono_ai_budget_bot.taxonomy.models import TaxKind, _node, ensure_leaf_target, is_leaf
+from mono_ai_budget_bot.taxonomy.models import TaxKind, _node, is_leaf
 
 Bucket = Literal["real_income", "real_expense", "turnover", "needs_clarify"]
 
@@ -121,55 +119,12 @@ def categorize_tx(
     override_leaf_id: str | None = None,
     alias_categories: dict[str, list[str]] | None = None,
 ) -> Categorization:
-    tx_kind = classify_kind(tx.amount, tx.mcc, tx.description)
+    from mono_ai_budget_bot.taxonomy.pipeline import categorize_tx as canonical_categorize_tx
 
-    if override_leaf_id:
-        ensure_leaf_target(tax, node_id=override_leaf_id)
-        n = _node(tax, override_leaf_id)
-        kind = str(n.get("kind"))
-        if kind == "income":
-            return Categorization(bucket="real_income", leaf_id=override_leaf_id, reason="override")
-        return Categorization(bucket="real_expense", leaf_id=override_leaf_id, reason="override")
-
-    for r in rules:
-        if _rule_matches(r, tx, tx_kind):
-            ensure_leaf_target(tax, node_id=r.leaf_id)
-            n = _node(tax, r.leaf_id)
-            kind = str(n.get("kind"))
-            if kind == "income":
-                return Categorization(
-                    bucket="real_income", leaf_id=r.leaf_id, reason=f"rule:{r.id}"
-                )
-            return Categorization(bucket="real_expense", leaf_id=r.leaf_id, reason=f"rule:{r.id}")
-
-    if alias_categories:
-        for cat_name, terms in alias_categories.items():
-            if not isinstance(cat_name, str):
-                continue
-            if not isinstance(terms, list):
-                continue
-            lid = find_leaf_by_name(tax, root_kind="expense", name=cat_name)
-            if not lid:
-                continue
-            for t in terms:
-                if not isinstance(t, str) or not t.strip():
-                    continue
-                if _match_contains(tx.description, t):
-                    ensure_leaf_target(tax, node_id=lid)
-                    return Categorization(bucket="real_expense", leaf_id=lid, reason="alias")
-
-    if tx_kind in {"transfer_out", "transfer_in"}:
-        return Categorization(bucket="turnover", leaf_id=None, reason="transfer_without_rule")
-
-    if tx_kind == "spend":
-        if tx.mcc is not None:
-            mcc_name = category_from_mcc(int(tx.mcc))
-            if mcc_name:
-                lid = find_leaf_by_name(tax, root_kind="expense", name=mcc_name)
-                if lid:
-                    ensure_leaf_target(tax, node_id=lid)
-                    return Categorization(bucket="real_expense", leaf_id=lid, reason="mcc_fallback")
-
-        return Categorization(bucket="needs_clarify", leaf_id=None, reason="purchase_without_rule")
-
-    return Categorization(bucket="needs_clarify", leaf_id=None, reason="income_without_rule")
+    return canonical_categorize_tx(
+        tax=tax,
+        tx=tx,
+        rules=rules,
+        override_leaf_id=override_leaf_id,
+        alias_categories=alias_categories,
+    )
