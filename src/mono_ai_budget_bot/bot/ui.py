@@ -209,6 +209,37 @@ def build_activity_custom_toggles_keyboard(enabled: dict[str, bool]) -> Any:
     return _build_rows(rows)
 
 
+def build_uncat_frequency_keyboard(current_value: str) -> Any:
+    rows = [
+        [
+            (
+                "✅ Одразу" if current_value == "immediate" else "⬜️ Одразу",
+                "menu:personalization:uncat:immediate",
+            )
+        ],
+        [
+            (
+                "✅ Раз на день" if current_value == "daily" else "⬜️ Раз на день",
+                "menu:personalization:uncat:daily",
+            )
+        ],
+        [
+            (
+                "✅ Раз на тиждень" if current_value == "weekly" else "⬜️ Раз на тиждень",
+                "menu:personalization:uncat:weekly",
+            )
+        ],
+        [
+            (
+                "✅ Перед звітом" if current_value == "before_report" else "⬜️ Перед звітом",
+                "menu:personalization:uncat:before_report",
+            )
+        ],
+        [(BTN_BACK, "menu:personalization")],
+    ]
+    return _build_rows(rows)
+
+
 def build_reports_preset_keyboard() -> Any:
     return _build_rows(
         [

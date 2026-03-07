@@ -256,6 +256,23 @@ def test_templates_menu_activity_custom_message_snapshot():
     )
 
 
+def test_templates_menu_uncat_frequency_message_snapshot():
+    assert (
+        templates.menu_uncat_frequency_message("Перед звітом")
+        == "\n".join(
+            [
+                "🧾 *Uncategorized prompts*",
+                "",
+                "Поточний режим: Перед звітом",
+                "",
+                "Це той самий параметр, що використовується і в onboarding, і після нього.",
+                "",
+                "Обери частоту:",
+            ]
+        ).strip()
+    )
+
+
 def test_templates_menu_reports_preset_message_snapshot():
     assert (
         templates.menu_reports_preset_message("Custom")

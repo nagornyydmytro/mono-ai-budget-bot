@@ -770,6 +770,20 @@ def menu_activity_custom_message() -> str:
     ).strip()
 
 
+def menu_uncat_frequency_message(current_label: str) -> str:
+    return "\n".join(
+        [
+            "🧾 *Uncategorized prompts*",
+            "",
+            f"Поточний режим: {current_label}",
+            "",
+            "Це той самий параметр, що використовується і в onboarding, і після нього.",
+            "",
+            "Обери частоту:",
+        ]
+    ).strip()
+
+
 def menu_reports_preset_message(current_preset_label: str) -> str:
     return "\n".join(
         [

@@ -11,6 +11,7 @@ from mono_ai_budget_bot.settings.activity import (
     set_activity_mode,
     set_activity_toggle,
 )
+from mono_ai_budget_bot.settings.onboarding import apply_onboarding_settings
 from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
 
 from . import templates
@@ -32,6 +33,7 @@ from .ui import (
     build_reports_menu_keyboard,
     build_reports_preset_keyboard,
     build_rows_keyboard,
+    build_uncat_frequency_keyboard,
 )
 
 
@@ -230,8 +232,13 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             )
             return
         elif data == "menu:personalization:uncat":
-            title = "🧾 *Uncategorized prompts*"
-            current_value = _uncat_label(str(prof.get("uncategorized_prompt_frequency") or ""))
+            current_value = str(prof.get("uncategorized_prompt_frequency") or "")
+            await render_menu_screen(
+                query,
+                text=templates.menu_uncat_frequency_message(_uncat_label(current_value)),
+                reply_markup=build_uncat_frequency_keyboard(current_value),
+            )
+            return
         else:
             title = "🤖 *AI features*"
             current_value = _ai_features_label(prof)
@@ -306,6 +313,36 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             query,
             text=templates.menu_activity_custom_message(),
             reply_markup=build_activity_custom_toggles_keyboard(get_activity_toggles(prof)),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data
+        in {
+            "menu:personalization:uncat:immediate",
+            "menu:personalization:uncat:daily",
+            "menu:personalization:uncat:weekly",
+            "menu:personalization:uncat:before_report",
+        }
+    )
+    async def cb_menu_personalization_uncat_frequency(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        freq = str(query.data or "").rsplit(":", 1)[1]
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        prof = apply_onboarding_settings(prof, uncategorized_prompt_frequency=freq)
+        ctx.profile_store.save(tg_id, prof)
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_uncat_frequency_message(_uncat_label(freq)),
+            reply_markup=build_uncat_frequency_keyboard(freq),
         )
 
     @dp.callback_query(

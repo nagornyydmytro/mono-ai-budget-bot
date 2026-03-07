@@ -13,6 +13,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_reports_menu_keyboard,
     build_reports_preset_keyboard,
     build_rows_keyboard,
+    build_uncat_frequency_keyboard,
 )
 
 
@@ -122,6 +123,17 @@ def test_activity_custom_toggles_keyboard_snapshot():
         [("❌ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")],
         [("✅ Coach nudges", "menu:personalization:activity:toggle:coach_nudges")],
         [("⬅️ Назад", "menu:personalization:activity")],
+    ]
+
+
+def test_uncat_frequency_keyboard_snapshot():
+    kb = build_uncat_frequency_keyboard("before_report")
+    assert _kb_dump(kb) == [
+        [("⬜️ Одразу", "menu:personalization:uncat:immediate")],
+        [("⬜️ Раз на день", "menu:personalization:uncat:daily")],
+        [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
+        [("✅ Перед звітом", "menu:personalization:uncat:before_report")],
+        [("⬅️ Назад", "menu:personalization")],
     ]
 
 

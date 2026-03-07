@@ -1775,6 +1775,100 @@ def test_menu_personalization_activity_toggle_updates_custom_flags(tmp_path: Pat
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_personalization_uncat_opens_frequency_screen(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_personalization_items = dp.callback_query.handlers["cb_menu_personalization_items"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:uncat",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_items(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_uncat_frequency_message("Перед звітом")
+    assert _kb_dump(kb) == [
+        [("⬜️ Одразу", "menu:personalization:uncat:immediate")],
+        [("⬜️ Раз на день", "menu:personalization:uncat:daily")],
+        [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
+        [("✅ Перед звітом", "menu:personalization:uncat:before_report")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_personalization_uncat_frequency_updates_shared_profile_setting(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+        }
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_menu_personalization_uncat_frequency = dp.callback_query.handlers[
+        "cb_menu_personalization_uncat_frequency"
+    ]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:uncat:daily",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_uncat_frequency(query))
+
+    assert profile_store.profile["uncategorized_prompt_frequency"] == "daily"
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_uncat_frequency_message("Раз на день")
+    assert _kb_dump(kb) == [
+        [("⬜️ Одразу", "menu:personalization:uncat:immediate")],
+        [("✅ Раз на день", "menu:personalization:uncat:daily")],
+        [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
+        [("⬜️ Перед звітом", "menu:personalization:uncat:before_report")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_personalization_reports_opens_preset_screen(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     reports_store = ReportsStore(base_dir=tmp_path / "reports_cfg")
