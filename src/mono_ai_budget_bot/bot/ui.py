@@ -157,6 +157,58 @@ def build_personalization_menu_keyboard() -> Any:
     )
 
 
+def build_activity_mode_keyboard(current_mode: str) -> Any:
+    rows = [
+        [
+            (
+                "✅ Loud" if current_mode == "loud" else "⬜️ Loud",
+                "menu:personalization:activity:loud",
+            )
+        ],
+        [
+            (
+                "✅ Quiet" if current_mode == "quiet" else "⬜️ Quiet",
+                "menu:personalization:activity:quiet",
+            )
+        ],
+        [
+            (
+                "✅ Custom" if current_mode == "custom" else "⬜️ Custom",
+                "menu:personalization:activity:custom",
+            )
+        ],
+        [(BTN_BACK, "menu:personalization")],
+    ]
+    return _build_rows(rows)
+
+
+def build_activity_custom_toggles_keyboard(enabled: dict[str, bool]) -> Any:
+    labels = {
+        "auto_reports": "Auto reports",
+        "uncat_prompts": "Uncategorized prompts",
+        "trends_alerts": "Trend nudges",
+        "anomalies_alerts": "Anomaly nudges",
+        "forecast_alerts": "Forecast nudges",
+        "coach_nudges": "Coach nudges",
+    }
+    order = [
+        "auto_reports",
+        "uncat_prompts",
+        "trends_alerts",
+        "anomalies_alerts",
+        "forecast_alerts",
+        "coach_nudges",
+    ]
+
+    rows: list[list[tuple[str, str]]] = []
+    for key in order:
+        mark = "✅" if enabled.get(key, False) else "❌"
+        rows.append([(f"{mark} {labels[key]}", f"menu:personalization:activity:toggle:{key}")])
+
+    rows.append([(BTN_BACK, "menu:personalization:activity")])
+    return _build_rows(rows)
+
+
 def build_reports_preset_keyboard() -> Any:
     return _build_rows(
         [

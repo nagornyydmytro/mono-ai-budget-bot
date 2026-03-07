@@ -745,6 +745,31 @@ def menu_personalization_item_message(*, title: str, current_value: str) -> str:
     ).strip()
 
 
+def menu_activity_mode_message(current_mode_label: str) -> str:
+    return "\n".join(
+        [
+            "⚡ *Activity mode*",
+            "",
+            f"Поточний режим: {current_mode_label}",
+            "",
+            "Loud — увімкнені всі proactive outputs.",
+            "Quiet — proactive outputs тимчасово вимкнені.",
+            "Custom — можна окремо керувати behavior flags.",
+        ]
+    ).strip()
+
+
+def menu_activity_custom_message() -> str:
+    return "\n".join(
+        [
+            "🛠️ *Custom activity flags*",
+            "",
+            "Тут можна окремо керувати behavior flags.",
+            "Quiet не видаляє ці налаштування — лише тимчасово вимикає proactive outputs.",
+        ]
+    ).strip()
+
+
 def menu_reports_preset_message(current_preset_label: str) -> str:
     return "\n".join(
         [

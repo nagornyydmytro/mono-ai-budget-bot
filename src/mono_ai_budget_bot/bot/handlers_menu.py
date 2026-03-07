@@ -5,7 +5,12 @@ from aiogram.types import CallbackQuery
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.reports.config import ReportsConfig, build_reports_preset
-from mono_ai_budget_bot.settings.activity import normalize_activity_settings
+from mono_ai_budget_bot.settings.activity import (
+    get_activity_toggles,
+    normalize_activity_settings,
+    set_activity_mode,
+    set_activity_toggle,
+)
 from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
 
 from . import templates
@@ -14,6 +19,8 @@ from .handlers_common import HandlerContext
 from .menu_flow import render_menu_screen, render_placeholder_screen
 from .onboarding_flow import begin_manual_token_entry, open_accounts_picker, show_data_status
 from .ui import (
+    build_activity_custom_toggles_keyboard,
+    build_activity_mode_keyboard,
     build_back_keyboard,
     build_bootstrap_history_keyboard,
     build_categories_menu_keyboard,
@@ -207,8 +214,14 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             title = "🧑 *Persona*"
             current_value = _persona_label(str(prof.get("persona") or ""))
         elif data == "menu:personalization:activity":
-            title = "⚡ *Activity mode*"
-            current_value = _activity_label(str(prof.get("activity_mode") or ""))
+            await render_menu_screen(
+                query,
+                text=templates.menu_activity_mode_message(
+                    _activity_label(str(prof.get("activity_mode") or ""))
+                ),
+                reply_markup=build_activity_mode_keyboard(str(prof.get("activity_mode") or "")),
+            )
+            return
         elif data == "menu:personalization:reports":
             await render_menu_screen(
                 query,
@@ -230,6 +243,69 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
                 current_value=current_value,
             ),
             reply_markup=build_back_keyboard("menu:personalization"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data
+        in {
+            "menu:personalization:activity:loud",
+            "menu:personalization:activity:quiet",
+            "menu:personalization:activity:custom",
+        }
+    )
+    async def cb_menu_personalization_activity_mode(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        mode = str(query.data or "").rsplit(":", 1)[1]
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        prof = set_activity_mode(prof, mode)
+        ctx.profile_store.save(tg_id, prof)
+
+        if mode == "custom":
+            await render_menu_screen(
+                query,
+                text=templates.menu_activity_custom_message(),
+                reply_markup=build_activity_custom_toggles_keyboard(get_activity_toggles(prof)),
+            )
+            return
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_activity_mode_message(_activity_label(mode)),
+            reply_markup=build_activity_mode_keyboard(mode),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data.startswith("menu:personalization:activity:toggle:")
+    )
+    async def cb_menu_personalization_activity_toggle(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        key = str(query.data or "").rsplit(":", 1)[1]
+        prof = _ensure_personalization_profile(ctx, tg_id)
+        enabled = get_activity_toggles(prof)
+        next_value = not bool(enabled.get(key, False))
+        prof = set_activity_toggle(prof, key, next_value)
+        ctx.profile_store.save(tg_id, prof)
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_activity_custom_message(),
+            reply_markup=build_activity_custom_toggles_keyboard(get_activity_toggles(prof)),
         )
 
     @dp.callback_query(

@@ -1,4 +1,6 @@
 from mono_ai_budget_bot.bot.ui import (
+    build_activity_custom_toggles_keyboard,
+    build_activity_mode_keyboard,
     build_bootstrap_history_keyboard,
     build_coverage_cta_keyboard,
     build_currency_screen_keyboard,
@@ -88,6 +90,38 @@ def test_personalization_menu_keyboard_snapshot():
         [("🧾 Uncategorized prompts", "menu:personalization:uncat")],
         [("🤖 AI features", "menu:personalization:ai")],
         [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_activity_mode_keyboard_snapshot():
+    kb = build_activity_mode_keyboard("quiet")
+    assert _kb_dump(kb) == [
+        [("⬜️ Loud", "menu:personalization:activity:loud")],
+        [("✅ Quiet", "menu:personalization:activity:quiet")],
+        [("⬜️ Custom", "menu:personalization:activity:custom")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+
+
+def test_activity_custom_toggles_keyboard_snapshot():
+    kb = build_activity_custom_toggles_keyboard(
+        {
+            "auto_reports": True,
+            "uncat_prompts": False,
+            "trends_alerts": True,
+            "anomalies_alerts": False,
+            "forecast_alerts": False,
+            "coach_nudges": True,
+        }
+    )
+    assert _kb_dump(kb) == [
+        [("✅ Auto reports", "menu:personalization:activity:toggle:auto_reports")],
+        [("❌ Uncategorized prompts", "menu:personalization:activity:toggle:uncat_prompts")],
+        [("✅ Trend nudges", "menu:personalization:activity:toggle:trends_alerts")],
+        [("❌ Anomaly nudges", "menu:personalization:activity:toggle:anomalies_alerts")],
+        [("❌ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")],
+        [("✅ Coach nudges", "menu:personalization:activity:toggle:coach_nudges")],
+        [("⬅️ Назад", "menu:personalization:activity")],
     ]
 
 

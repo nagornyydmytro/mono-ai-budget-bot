@@ -13,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from mono_ai_budget_bot.bot.ui import build_uncat_prompt_keyboard
+from mono_ai_budget_bot.settings.activity import is_activity_enabled
 from mono_ai_budget_bot.storage.profile_store import ProfileStore
 from mono_ai_budget_bot.storage.uncat_store import UncatStore
 from mono_ai_budget_bot.uncat.prompting import UncatPromptMetaStore, build_uncat_prompt_message
@@ -135,6 +136,9 @@ def start_jobs(
             return
 
         prof = profile_store.load(u.telegram_user_id) or {}
+        if not is_activity_enabled(prof, "uncat_prompts"):
+            return
+
         freq = str(prof.get("uncategorized_prompt_frequency") or "").strip() or "before_report"
         items = uncat_store.load(u.telegram_user_id)
 
@@ -210,6 +214,10 @@ def start_jobs(
             if not ok:
                 continue
 
+            prof = profile_store.load(u.telegram_user_id) or {}
+            if not is_activity_enabled(prof, "auto_reports"):
+                continue
+
             stored = report_store.load(u.telegram_user_id, "week")
             if stored is None:
                 continue
@@ -224,6 +232,10 @@ def start_jobs(
         for u in users.iter_all():
             ok = await _refresh_user(u, days_back=32)
             if not ok:
+                continue
+
+            prof = profile_store.load(u.telegram_user_id) or {}
+            if not is_activity_enabled(prof, "auto_reports"):
                 continue
 
             stored = report_store.load(u.telegram_user_id, "month")

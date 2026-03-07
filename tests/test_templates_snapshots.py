@@ -225,6 +225,37 @@ def test_templates_menu_personalization_item_message_snapshot():
     )
 
 
+def test_templates_menu_activity_mode_message_snapshot():
+    assert (
+        templates.menu_activity_mode_message("Quiet")
+        == "\n".join(
+            [
+                "⚡ *Activity mode*",
+                "",
+                "Поточний режим: Quiet",
+                "",
+                "Loud — увімкнені всі proactive outputs.",
+                "Quiet — proactive outputs тимчасово вимкнені.",
+                "Custom — можна окремо керувати behavior flags.",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_activity_custom_message_snapshot():
+    assert (
+        templates.menu_activity_custom_message()
+        == "\n".join(
+            [
+                "🛠️ *Custom activity flags*",
+                "",
+                "Тут можна окремо керувати behavior flags.",
+                "Quiet не видаляє ці налаштування — лише тимчасово вимикає proactive outputs.",
+            ]
+        ).strip()
+    )
+
+
 def test_templates_menu_reports_preset_message_snapshot():
     assert (
         templates.menu_reports_preset_message("Custom")

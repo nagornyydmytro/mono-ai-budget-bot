@@ -1581,6 +1581,200 @@ def test_menu_personalization_item_reads_from_profile_store(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_personalization_activity_opens_mode_screen(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_personalization_items = dp.callback_query.handlers["cb_menu_personalization_items"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:activity",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_items(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_activity_mode_message("Quiet")
+    assert _kb_dump(kb) == [
+        [("⬜️ Loud", "menu:personalization:activity:loud")],
+        [("✅ Quiet", "menu:personalization:activity:quiet")],
+        [("⬜️ Custom", "menu:personalization:activity:custom")],
+        [("⬅️ Назад", "menu:personalization")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_personalization_activity_quiet_preserves_custom_flags(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "custom",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "activity": {
+                "mode": "custom",
+                "toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": True,
+                    "trends_alerts": True,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": True,
+                    "coach_nudges": False,
+                },
+                "custom_toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": True,
+                    "trends_alerts": True,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": True,
+                    "coach_nudges": False,
+                },
+            },
+        }
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_menu_personalization_activity_mode = dp.callback_query.handlers[
+        "cb_menu_personalization_activity_mode"
+    ]
+
+    message = DummyMessage(user_id=1)
+    query_quiet = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:activity:quiet",
+        message=message,
+    )
+    asyncio.run(cb_menu_personalization_activity_mode(query_quiet))
+
+    assert profile_store.profile["activity_mode"] == "quiet"
+    assert profile_store.profile["activity"]["toggles"]["auto_reports"] is False
+    assert profile_store.profile["activity"]["toggles"]["uncat_prompts"] is False
+    assert profile_store.profile["activity"]["custom_toggles"]["auto_reports"] is True
+    assert profile_store.profile["activity"]["custom_toggles"]["forecast_alerts"] is True
+
+    query_custom = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:activity:custom",
+        message=message,
+    )
+    asyncio.run(cb_menu_personalization_activity_mode(query_custom))
+
+    assert profile_store.profile["activity_mode"] == "custom"
+    assert len(message.answers) == 2
+    text2, kb2 = message.answers[1]
+    assert text2 == templates.menu_activity_custom_message()
+    assert _kb_dump(kb2) == [
+        [("✅ Auto reports", "menu:personalization:activity:toggle:auto_reports")],
+        [("✅ Uncategorized prompts", "menu:personalization:activity:toggle:uncat_prompts")],
+        [("✅ Trend nudges", "menu:personalization:activity:toggle:trends_alerts")],
+        [("❌ Anomaly nudges", "menu:personalization:activity:toggle:anomalies_alerts")],
+        [("✅ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")],
+        [("❌ Coach nudges", "menu:personalization:activity:toggle:coach_nudges")],
+        [("⬅️ Назад", "menu:personalization:activity")],
+    ]
+
+
+def test_menu_personalization_activity_toggle_updates_custom_flags(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "custom",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "activity": {
+                "mode": "custom",
+                "toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": True,
+                    "trends_alerts": False,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": False,
+                    "coach_nudges": False,
+                },
+                "custom_toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": True,
+                    "trends_alerts": False,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": False,
+                    "coach_nudges": False,
+                },
+            },
+        }
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_menu_personalization_activity_toggle = dp.callback_query.handlers[
+        "cb_menu_personalization_activity_toggle"
+    ]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:activity:toggle:forecast_alerts",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_activity_toggle(query))
+
+    assert profile_store.profile["activity_mode"] == "custom"
+    assert profile_store.profile["activity"]["toggles"]["forecast_alerts"] is True
+    assert profile_store.profile["activity"]["custom_toggles"]["forecast_alerts"] is True
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_activity_custom_message()
+    assert _kb_dump(kb)[4] == [
+        ("✅ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_personalization_reports_opens_preset_screen(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     reports_store = ReportsStore(base_dir=tmp_path / "reports_cfg")
