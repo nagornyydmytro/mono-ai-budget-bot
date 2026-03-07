@@ -16,7 +16,8 @@ from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.uncat_store import UncatStore
 from mono_ai_budget_bot.storage.user_store import UserConfig
 from mono_ai_budget_bot.taxonomy.rules import Rule
-from mono_ai_budget_bot.uncat.pending import UncatPendingStore
+from mono_ai_budget_bot.uncat.pending import UncatPending, UncatPendingStore
+from mono_ai_budget_bot.uncat.queue import UncatItem
 
 
 class DummyRegistry:
@@ -115,16 +116,50 @@ class DummyReportStore:
 
 
 class DummyUncatPendingStore:
-    def __init__(self, base_dir: Path | None = None):
+    def __init__(self, base_dir: Path | None = None, pending: UncatPending | None = None):
         self.base_dir = base_dir or Path(".")
+        self.pending = pending
+
+    def create(self, telegram_user_id: int, *, tx_id: str, stage: str, ttl_sec: int = 900):
+        self.pending = UncatPending(
+            pending_id="pid123",
+            created_ts=1_700_000_000,
+            ttl_sec=ttl_sec,
+            stage=stage,
+            tx_id=tx_id,
+            used=False,
+        )
+        return self.pending
 
     def load(self, telegram_user_id: int):
-        return None
+        return self.pending
+
+    def mark_used(self, telegram_user_id: int):
+        if self.pending is None:
+            return
+        self.pending = UncatPending(
+            pending_id=self.pending.pending_id,
+            created_ts=self.pending.created_ts,
+            ttl_sec=self.pending.ttl_sec,
+            stage=self.pending.stage,
+            tx_id=self.pending.tx_id,
+            used=True,
+        )
+
+    def clear(self, telegram_user_id: int):
+        self.pending = None
 
 
 class DummyUncatStore:
-    def __init__(self, base_dir: Path | None = None):
+    def __init__(self, base_dir: Path | None = None, items=None):
         self.base_dir = base_dir or Path(".")
+        self.items = list(items or [])
+
+    def load(self, telegram_user_id: int):
+        return list(self.items)
+
+    def save(self, telegram_user_id: int, items):
+        self.items = list(items)
 
 
 class DummyRulesStore:
@@ -1577,6 +1612,137 @@ def test_menu_categories_opens_canonical_submenu_with_tree_preview(tmp_path: Pat
         [("🧠 Rules / aliases", "menu:categories:rules")],
         [("⬅️ Назад", "menu:root")],
     ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_uncat_opens_first_queue_item_instead_of_placeholder(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    uncat_store = DummyUncatStore(
+        items=[
+            UncatItem(
+                tx_id="tx1",
+                time=1_700_000_100,
+                account_id="acc1",
+                amount=-12345,
+                description="Aston express",
+                mcc=5812,
+                reason="purchase_without_rule",
+            )
+        ]
+    )
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": [],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food"],
+                "is_root": True,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe"],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+    }
+    uncat_pending_store = DummyUncatPendingStore()
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+        uncat_store=uncat_store,
+        uncat_pending_store=uncat_pending_store,
+    )
+
+    cb_menu_uncat = dp.callback_query.handlers["cb_menu_uncat"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:uncat", message=message)
+
+    asyncio.run(cb_menu_uncat(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.uncat_purchase_prompt("Aston express", "123.45 грн")
+    assert _kb_dump(kb) == [
+        [("Кафе", "uncat_pick:pid123:cafe")],
+        [("➕ Створити категорію", "uncat_create:pid123")],
+        [("❌ Скасувати", "uncat_cancel:pid123")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+    assert uncat_pending_store.load(1) is not None
+    assert uncat_pending_store.load(1).stage == "pick_leaf"
+
+
+def test_menu_uncat_shows_empty_state_when_queue_is_empty(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    uncat_store = DummyUncatStore(items=[])
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        uncat_store=uncat_store,
+    )
+
+    cb_menu_uncat = dp.callback_query.handlers["cb_menu_uncat"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:uncat", message=message)
+
+    asyncio.run(cb_menu_uncat(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.uncat_empty_message()
+    assert kb is None
     assert query.answer_calls[-1] == (None, False, None)
 
 

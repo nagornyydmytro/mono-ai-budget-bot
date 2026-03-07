@@ -11,7 +11,6 @@ from mono_ai_budget_bot.taxonomy.rules import Rule
 from . import templates
 from .clarify import validate_uncat_pending_or_alert
 from .handlers_common import HandlerContext
-from .ui import build_back_keyboard
 
 
 def register_uncat_handlers(dp, *, ctx: HandlerContext) -> None:
@@ -21,16 +20,18 @@ def register_uncat_handlers(dp, *, ctx: HandlerContext) -> None:
             query,
             require_token=True,
             require_accounts=True,
-            require_ledger=True,
         ):
             return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
         await query.answer()
 
         if query.message:
-            await query.message.answer(
-                templates.uncat_menu_placeholder_message(),
-                reply_markup=build_back_keyboard("menu:root"),
-            )
+            await ctx.send_next_uncat(query.message, tg_id)
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("uncat_cancel:"))
     async def cb_uncat_cancel(query: CallbackQuery) -> None:
