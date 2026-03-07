@@ -84,8 +84,11 @@ class DummyProfileStore:
 
 
 class DummyTaxonomyStore:
+    def __init__(self, taxonomy: dict | None = None):
+        self.taxonomy = taxonomy or {"version": 1}
+
     def load(self, telegram_user_id: int):
-        return {"version": 1}
+        return self.taxonomy
 
 
 class DummyReportsStore:
@@ -146,6 +149,7 @@ def _build_dispatcher(
     render_report_for_user=None,
     profile_store=None,
     reports_store=None,
+    taxonomy_store=None,
 ):
     dp = DummyDispatcher()
     handlers.register_handlers(
@@ -156,7 +160,7 @@ def _build_dispatcher(
         store=store or DummyReportStore(),
         tx_store=tx_store,
         profile_store=profile_store or DummyProfileStore(profile),
-        taxonomy_store=DummyTaxonomyStore(),
+        taxonomy_store=taxonomy_store or DummyTaxonomyStore(),
         reports_store=reports_store or DummyReportsStore(),
         uncat_store=uncat_store or DummyUncatStore(),
         rules_store=rules_store or DummyRulesStore(),
@@ -1460,6 +1464,114 @@ def test_menu_data_wipe_cancel_returns_to_mydata(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_categories_opens_canonical_submenu_with_tree_preview(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": ["salary"],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food", "home"],
+                "is_root": True,
+            },
+            "salary": {
+                "id": "salary",
+                "name": "Зарплата",
+                "parent_id": "income",
+                "kind": "income",
+                "children": [],
+                "is_root": False,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe"],
+                "is_root": False,
+            },
+            "home": {
+                "id": "home",
+                "name": "Дім",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+    }
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+    )
+
+    cb_menu_categories = dp.callback_query.handlers["cb_menu_categories"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:categories", message=message)
+
+    asyncio.run(cb_menu_categories(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_categories_message(
+        "\n".join(
+            [
+                "*Витрати*",
+                "• Їжа",
+                "  — Кафе",
+                "• Дім",
+                "",
+                "*Доходи*",
+                "• Зарплата",
+            ]
+        )
+    )
+    assert _kb_dump(kb) == [
+        [("➕ Додати категорію", "menu:categories:add")],
+        [("↳ Додати підкатегорію", "menu:categories:add_subcategory")],
+        [("✏️ Перейменувати", "menu:categories:rename")],
+        [("🗑️ Видалити", "menu:categories:delete")],
+        [("🧠 Rules / aliases", "menu:categories:rules")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_categories_action_placeholder_renders_consistent_screen(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(
@@ -1482,13 +1594,13 @@ def test_menu_categories_action_placeholder_renders_consistent_screen(tmp_path: 
 
     cb_menu_categories_placeholders = dp.callback_query.handlers["cb_menu_categories_placeholders"]
     message = DummyMessage(user_id=1)
-    query = DummyCallbackQuery(user_id=1, data="menu:categories:add", message=message)
+    query = DummyCallbackQuery(user_id=1, data="menu:categories:add_subcategory", message=message)
 
     asyncio.run(cb_menu_categories_placeholders(query))
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert text == templates.menu_categories_action_placeholder_message()
+    assert text == templates.menu_categories_action_placeholder_message("додати підкатегорію")
     assert _kb_dump(kb) == [[("⬅️ Назад", "menu:categories")]]
     assert query.answer_calls[-1] == (None, False, None)
 

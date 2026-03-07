@@ -273,6 +273,29 @@ def test_templates_menu_uncat_frequency_message_snapshot():
     )
 
 
+def test_templates_menu_categories_message_snapshot():
+    assert (
+        templates.menu_categories_message("*Витрати*\n• Їжа\n  — Кафе")
+        == "\n".join(
+            [
+                "🗂️ *Категорії*",
+                "",
+                "Коротке дерево:",
+                "*Витрати*\n• Їжа\n  — Кафе",
+                "",
+                "Обери дію:",
+            ]
+        ).strip()
+    )
+
+
+def test_templates_menu_categories_action_placeholder_message_snapshot():
+    assert (
+        templates.menu_categories_action_placeholder_message("додати підкатегорію")
+        == "🗂️ *Категорії*\n\n🚧 Зараз недоступно: додати підкатегорію."
+    )
+
+
 def test_templates_menu_reports_preset_message_snapshot():
     assert (
         templates.menu_reports_preset_message("Custom")

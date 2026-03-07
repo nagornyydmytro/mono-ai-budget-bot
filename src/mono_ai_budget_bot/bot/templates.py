@@ -827,16 +827,24 @@ def menu_data_message() -> str:
     ).strip()
 
 
-def menu_categories_message() -> str:
-    return "🗂️ *Категорії*\n\nОбери дію:"
+def menu_categories_message(tree_preview: str) -> str:
+    parts = [
+        "🗂️ *Категорії*",
+        "",
+        "Коротке дерево:",
+        tree_preview.strip() or "• Таксономія ще не налаштована.",
+        "",
+        "Обери дію:",
+    ]
+    return "\n".join(parts).strip()
 
 
 def menu_section_placeholder_message(title: str) -> str:
     return f"{title}\n\n🚧 Цей розділ ще в розробці."
 
 
-def menu_categories_action_placeholder_message() -> str:
-    return "🗂️ *Категорії*\n\n🚧 Ця дія ще в розробці."
+def menu_categories_action_placeholder_message(action_label: str = "ця дія") -> str:
+    return f"🗂️ *Категорії*\n\n🚧 Зараз недоступно: {action_label}."
 
 
 def menu_data_bootstrap_message() -> str:

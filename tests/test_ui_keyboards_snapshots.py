@@ -2,6 +2,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_activity_custom_toggles_keyboard,
     build_activity_mode_keyboard,
     build_bootstrap_history_keyboard,
+    build_categories_menu_keyboard,
     build_coverage_cta_keyboard,
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
@@ -134,6 +135,18 @@ def test_uncat_frequency_keyboard_snapshot():
         [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
         [("✅ Перед звітом", "menu:personalization:uncat:before_report")],
         [("⬅️ Назад", "menu:personalization")],
+    ]
+
+
+def test_categories_menu_keyboard_snapshot():
+    kb = build_categories_menu_keyboard()
+    assert _kb_dump(kb) == [
+        [("➕ Додати категорію", "menu:categories:add")],
+        [("↳ Додати підкатегорію", "menu:categories:add_subcategory")],
+        [("✏️ Перейменувати", "menu:categories:rename")],
+        [("🗑️ Видалити", "menu:categories:delete")],
+        [("🧠 Rules / aliases", "menu:categories:rules")],
+        [("⬅️ Назад", "menu:root")],
     ]
 
 

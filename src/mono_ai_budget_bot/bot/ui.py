@@ -295,8 +295,10 @@ def build_categories_menu_keyboard() -> Any:
     return _build_rows(
         [
             [("➕ Додати категорію", "menu:categories:add")],
+            [("↳ Додати підкатегорію", "menu:categories:add_subcategory")],
             [("✏️ Перейменувати", "menu:categories:rename")],
             [("🗑️ Видалити", "menu:categories:delete")],
+            [("🧠 Rules / aliases", "menu:categories:rules")],
             [(BTN_BACK, "menu:root")],
         ]
     )

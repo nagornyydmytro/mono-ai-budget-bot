@@ -103,6 +103,90 @@ def _save_reports_preset_profile(ctx: HandlerContext, tg_id: int, prof: dict, pr
     ctx.profile_store.save(tg_id, prof)
 
 
+def _render_taxonomy_tree_preview(tax: dict | None) -> str:
+    if not isinstance(tax, dict):
+        return "• Таксономія ще не налаштована."
+
+    roots = tax.get("roots")
+    nodes = tax.get("nodes")
+    if not isinstance(roots, dict) or not isinstance(nodes, dict):
+        return "• Таксономія ще не налаштована."
+
+    lines: list[str] = []
+
+    def _append_branch(root_key: str, label: str) -> None:
+        rid = roots.get(root_key)
+        if not isinstance(rid, str):
+            return
+        root_node = nodes.get(rid)
+        if not isinstance(root_node, dict):
+            return
+
+        children = root_node.get("children")
+        if not isinstance(children, list):
+            children = []
+
+        lines.append(f"*{label}*")
+        if not children:
+            lines.append("• —")
+            return
+
+        shown_parents = 0
+        for cid in children:
+            if shown_parents >= 3:
+                break
+            node = nodes.get(cid)
+            if not isinstance(node, dict):
+                continue
+
+            parent_name = str(node.get("name") or "").strip()
+            if not parent_name:
+                continue
+
+            lines.append(f"• {parent_name}")
+            shown_parents += 1
+
+            sub_ids = node.get("children")
+            if not isinstance(sub_ids, list):
+                sub_ids = []
+
+            shown_subs = 0
+            for sid in sub_ids:
+                if shown_subs >= 2:
+                    break
+                sub = nodes.get(sid)
+                if not isinstance(sub, dict):
+                    continue
+                sub_name = str(sub.get("name") or "").strip()
+                if not sub_name:
+                    continue
+                lines.append(f"  — {sub_name}")
+                shown_subs += 1
+
+            if isinstance(sub_ids, list) and len(sub_ids) > shown_subs:
+                lines.append("  — …")
+
+        if len(children) > shown_parents:
+            lines.append("• …")
+
+    _append_branch("expense", "Витрати")
+    lines.append("")
+    _append_branch("income", "Доходи")
+
+    out = "\n".join([x for x in lines if x is not None]).strip()
+    return out or "• Таксономія ще не налаштована."
+
+
+def _categories_action_label(data: str) -> str:
+    return {
+        "menu:categories:add": "додати категорію",
+        "menu:categories:add_subcategory": "додати підкатегорію",
+        "menu:categories:rename": "перейменувати категорію",
+        "menu:categories:delete": "видалити категорію",
+        "menu:categories:rules": "rules / aliases",
+    }.get(data, "ця дія")
+
+
 def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:reports")
     async def cb_menu_reports(query: CallbackQuery) -> None:
@@ -632,9 +716,18 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             require_accounts=True,
         ):
             return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        tax = ctx.taxonomy_store.load(tg_id)
+        tree_preview = _render_taxonomy_tree_preview(tax)
+
         await render_menu_screen(
             query,
-            text=templates.menu_categories_message(),
+            text=templates.menu_categories_message(tree_preview),
             reply_markup=build_categories_menu_keyboard(),
         )
 
@@ -646,8 +739,10 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             require_accounts=True,
         ):
             return
+
+        action_label = _categories_action_label(str(query.data or ""))
         await render_placeholder_screen(
             query,
-            text=templates.menu_categories_action_placeholder_message(),
+            text=templates.menu_categories_action_placeholder_message(action_label),
             reply_markup=build_back_keyboard("menu:categories"),
         )
