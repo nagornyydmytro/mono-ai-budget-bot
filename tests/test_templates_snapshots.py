@@ -169,6 +169,17 @@ def test_templates_menu_data_wipe_done_message_snapshot():
     )
 
 
+def test_templates_menu_reports_message_snapshot():
+    assert templates.menu_reports_message() == "📊 *Звіти*\n\nОбери період:"
+
+
+def test_templates_menu_reports_custom_placeholder_message_snapshot():
+    assert (
+        templates.menu_reports_custom_placeholder_message()
+        == "🛠️ *Custom report*\n\n🚧 Custom period picker буде додано в наступному коміті."
+    )
+
+
 def test_templates_refresh_done_message_snapshot():
     assert (
         templates.refresh_done_message(accounts=2, fetched_requests=7, appended=123)

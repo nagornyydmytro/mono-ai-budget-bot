@@ -4,6 +4,7 @@ from mono_ai_budget_bot.bot.ui import (
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
     build_main_menu_keyboard,
+    build_reports_menu_keyboard,
     build_rows_keyboard,
 )
 
@@ -58,6 +59,17 @@ def test_data_menu_keyboard_snapshot():
         [("📥 Bootstrap history", "menu:data:bootstrap")],
         [("📊 Status", "menu:data:status")],
         [("🧹 Wipe cache", "menu:data:wipe")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_reports_menu_keyboard_snapshot():
+    kb = build_reports_menu_keyboard()
+    assert _kb_dump(kb) == [
+        [("📅 Today", "menu:reports:today")],
+        [("📊 Last 7 days", "menu:reports:week")],
+        [("🗓️ Last 30 days", "menu:reports:month")],
+        [("🛠️ Custom", "menu:reports:custom")],
         [("⬅️ Назад", "menu:root")],
     ]
 

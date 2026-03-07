@@ -358,6 +358,92 @@ def test_menu_root_opens_after_onboarding(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_reports_opens_canonical_period_picker_after_onboarding(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_reports = dp.callback_query.handlers["cb_menu_reports"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports", message=message)
+
+    asyncio.run(cb_menu_reports(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_message()
+    assert _kb_dump(kb) == [
+        [("📅 Today", "menu:reports:today")],
+        [("📊 Last 7 days", "menu:reports:week")],
+        [("🗓️ Last 30 days", "menu:reports:month")],
+        [("🛠️ Custom", "menu:reports:custom")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_reports_custom_placeholder_is_stable(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_reports_custom = dp.callback_query.handlers["cb_menu_reports_custom"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:custom", message=message)
+
+    asyncio.run(cb_menu_reports_custom(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_custom_placeholder_message()
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:reports")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_root_blocked_before_onboarding(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(

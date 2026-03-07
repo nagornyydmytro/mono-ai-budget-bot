@@ -10,24 +10,44 @@ from mono_ai_budget_bot.nlq.types import NLQRequest
 from . import templates
 from .clarify import validate_ok_or_alert
 from .handlers_common import HandlerContext
+from .menu_flow import render_placeholder_screen
+from .ui import build_back_keyboard
 
 
 def register_report_handlers(dp, *, ctx: HandlerContext) -> None:
-    @dp.callback_query(lambda c: c.data == "menu_week")
-    async def cb_menu_week(query: CallbackQuery) -> None:
+    async def _send_report_from_menu(query: CallbackQuery, period: str) -> None:
         if not await ctx.gate_menu_query_or_resume(query):
             return
         if query.message and query.from_user:
-            await ctx.send_period_report(query.message, "week", tg_id_override=query.from_user.id)
+            await ctx.send_period_report(query.message, period, tg_id_override=query.from_user.id)
         await query.answer()
 
-    @dp.callback_query(lambda c: c.data == "menu_month")
+    @dp.callback_query(lambda c: c.data in {"menu:reports:today", "menu_today"})
+    async def cb_menu_today(query: CallbackQuery) -> None:
+        await _send_report_from_menu(query, "today")
+
+    @dp.callback_query(lambda c: c.data in {"menu:reports:week", "menu_week"})
+    async def cb_menu_week(query: CallbackQuery) -> None:
+        await _send_report_from_menu(query, "week")
+
+    @dp.callback_query(lambda c: c.data in {"menu:reports:month", "menu_month"})
     async def cb_menu_month(query: CallbackQuery) -> None:
-        if not await ctx.gate_menu_query_or_resume(query):
+        await _send_report_from_menu(query, "month")
+
+    @dp.callback_query(lambda c: c.data == "menu:reports:custom")
+    async def cb_menu_reports_custom(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
             return
-        if query.message and query.from_user:
-            await ctx.send_period_report(query.message, "month", tg_id_override=query.from_user.id)
-        await query.answer()
+        await render_placeholder_screen(
+            query,
+            text=templates.menu_reports_custom_placeholder_message(),
+            reply_markup=build_back_keyboard("menu:reports"),
+        )
 
     @dp.callback_query(lambda c: bool(c.data) and str(c.data).startswith("cov_sync:"))
     async def cb_cov_sync(query: CallbackQuery) -> None:

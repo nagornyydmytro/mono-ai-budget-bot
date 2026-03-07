@@ -111,7 +111,10 @@ def build_start_menu_keyboard() -> Any:
 def build_reports_menu_keyboard() -> Any:
     return _build_rows(
         [
-            [(MENU_WEEK, "menu_week"), (MENU_MONTH, "menu_month")],
+            [("📅 Today", "menu:reports:today")],
+            [("📊 Last 7 days", "menu:reports:week")],
+            [("🗓️ Last 30 days", "menu:reports:month")],
+            [("🛠️ Custom", "menu:reports:custom")],
             [(BTN_BACK, "menu:root")],
         ]
     )

@@ -664,7 +664,11 @@ def menu_root_message() -> str:
 
 
 def menu_reports_message() -> str:
-    return "📊 *Звіти*\n\nОбери тип звіту:"
+    return "📊 *Звіти*\n\nОбери період:"
+
+
+def menu_reports_custom_placeholder_message() -> str:
+    return "🛠️ *Custom report*\n\n🚧 Custom period picker буде додано в наступному коміті."
 
 
 def menu_data_message() -> str:
