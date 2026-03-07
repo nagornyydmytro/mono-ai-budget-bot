@@ -362,6 +362,72 @@ def test_menu_root_opens_after_onboarding(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_reports_run_det_uses_existing_report_engine_without_ai(tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    class StoreWithFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {"real_spend_total_uah": 456.0},
+                    "coverage": {
+                        "coverage_from_ts": 1_700_000_000,
+                        "coverage_to_ts": 1_700_086_400,
+                        "requested_from_ts": 1_700_000_000,
+                        "requested_to_ts": 1_700_086_400,
+                    },
+                }
+            )
+
+    def fake_render_report_for_user(tg_id, period, facts, *, ai_block=None):
+        captured["render_period"] = period
+        captured["render_facts"] = facts
+        captured["ai_block"] = ai_block
+        return "REPORT"
+
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithFacts(),
+        render_report_for_user=fake_render_report_for_user,
+    )
+
+    cb_menu_run_report_mode = dp.callback_query.handlers["cb_menu_run_report_mode"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:run:week:det", message=message)
+
+    asyncio.run(cb_menu_run_report_mode(query))
+
+    assert len(message.answers) == 1
+    assert message.answers[0][0] == "REPORT"
+    assert captured["render_period"] == "week"
+    assert captured["render_facts"] == {
+        "totals": {"real_spend_total_uah": 456.0},
+        "coverage": {
+            "coverage_from_ts": 1_700_000_000,
+            "coverage_to_ts": 1_700_086_400,
+            "requested_from_ts": 1_700_000_000,
+            "requested_to_ts": 1_700_086_400,
+        },
+    }
+    assert captured["ai_block"] is None
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_reports_today_opens_mode_picker(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     tx_store.update_coverage_window(
@@ -548,6 +614,56 @@ def test_menu_reports_custom_ai_starts_manual_flow(monkeypatch, tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_reports_custom_det_starts_manual_flow(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_reports_custom_mode = dp.callback_query.handlers["cb_menu_reports_custom_mode"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:custom:det", message=message)
+
+    asyncio.run(cb_menu_reports_custom_mode(query))
+
+    mem = ms.load_memory(1)
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_reports_custom_start_prompt()
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:reports")]]
+    assert mem["pending_manual_mode"] == {
+        "expected": "report_custom_start",
+        "hint": "YYYY-MM-DD",
+        "source": "reports_custom",
+    }
+    assert mem["reports_custom"] == {"want_ai": False}
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_root_blocked_before_onboarding(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(
@@ -698,6 +814,74 @@ def test_menu_reports_run_ai_uses_aggregated_facts_only(monkeypatch, tmp_path: P
     assert "Факти:" in str(captured["user"])
     assert "raw transactions" not in str(captured["user"])
     assert "description" not in str(captured["user"])
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_reports_run_ai_without_key_falls_back_to_deterministic(tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    class StoreWithFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {"real_spend_total_uah": 321.0},
+                    "coverage": {
+                        "coverage_from_ts": 1_700_000_000,
+                        "coverage_to_ts": 1_700_086_400,
+                        "requested_from_ts": 1_700_000_000,
+                        "requested_to_ts": 1_700_086_400,
+                    },
+                }
+            )
+
+    def fake_render_report_for_user(tg_id, period, facts, *, ai_block=None):
+        captured["render_period"] = period
+        captured["render_facts"] = facts
+        captured["ai_block"] = ai_block
+        return "REPORT"
+
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithFacts(),
+        settings=SimpleNamespace(openai_api_key=None, openai_model="gpt"),
+        render_report_for_user=fake_render_report_for_user,
+    )
+
+    cb_menu_run_report_mode = dp.callback_query.handlers["cb_menu_run_report_mode"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:reports:run:month:ai", message=message)
+
+    asyncio.run(cb_menu_run_report_mode(query))
+
+    assert len(message.answers) == 2
+    assert message.answers[0][0] == templates.ai_disabled_missing_key_message()
+    assert message.answers[1][0] == "REPORT"
+    assert captured["render_period"] == "month"
+    assert captured["render_facts"] == {
+        "totals": {"real_spend_total_uah": 321.0},
+        "coverage": {
+            "coverage_from_ts": 1_700_000_000,
+            "coverage_to_ts": 1_700_086_400,
+            "requested_from_ts": 1_700_000_000,
+            "requested_to_ts": 1_700_086_400,
+        },
+    }
+    assert captured["ai_block"] is None
     assert query.answer_calls[-1] == (None, False, None)
 
 
