@@ -671,11 +671,15 @@ def menu_data_message() -> str:
 
 
 def menu_categories_message() -> str:
-    return "🗂️ *Категорії*\n\nКерування таксономією (буде розширено):"
+    return "🗂️ *Категорії*\n\nОбери дію:"
 
 
-def coming_soon_message() -> str:
-    return "🚧 Цей екран ще в розробці."
+def menu_section_placeholder_message(title: str) -> str:
+    return f"{title}\n\n🚧 Цей розділ ще в розробці."
+
+
+def menu_categories_action_placeholder_message() -> str:
+    return "🗂️ *Категорії*\n\n🚧 Ця дія ще в розробці."
 
 
 def connect_token_validation_progress() -> str:

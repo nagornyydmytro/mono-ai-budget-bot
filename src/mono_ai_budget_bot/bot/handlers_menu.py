@@ -8,7 +8,7 @@ from mono_ai_budget_bot.nlq import memory_store
 from . import templates
 from .accounts_ui import render_accounts_screen
 from .handlers_common import HandlerContext
-from .menu_flow import render_menu_screen, render_placeholder_screen, show_placeholder_alert
+from .menu_flow import render_menu_screen, render_placeholder_screen
 from .onboarding_flow import begin_manual_token_entry, open_accounts_picker, show_data_status
 from .ui import (
     build_back_keyboard,
@@ -63,9 +63,15 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             if not await ctx.gate_menu_query_or_resume(query):
                 return
 
+        title_map = {
+            "menu:ask": "💬 *Ask*",
+            "menu:insights": "✨ *Insights*",
+            "menu:personalization": "🎛️ *Персоналізація*",
+        }
+
         await render_placeholder_screen(
             query,
-            text=templates.coming_soon_message(),
+            text=templates.menu_section_placeholder_message(title_map.get(data, "🚧 *Розділ*")),
             reply_markup=build_back_keyboard("menu:root"),
         )
 
@@ -95,7 +101,7 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             hint=templates.token_paste_hint_new_token(),
             source="data_menu",
             prompt_text=templates.token_paste_prompt_new_token(),
-            reply_markup=build_back_keyboard("menu:data"),
+            reply_markup=build_back_keyboard("menu:mydata"),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:accounts")
@@ -170,6 +176,14 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:"))
     async def cb_menu_categories_placeholders(query: CallbackQuery) -> None:
-        if not await ctx.gate_menu_query_or_resume(query):
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+        ):
             return
-        await show_placeholder_alert(query, text=templates.coming_soon_message())
+        await render_placeholder_screen(
+            query,
+            text=templates.menu_categories_action_placeholder_message(),
+            reply_markup=build_back_keyboard("menu:categories"),
+        )
