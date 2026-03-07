@@ -15,6 +15,7 @@ from mono_ai_budget_bot.storage.rules_store import RulesStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.uncat_store import UncatStore
 from mono_ai_budget_bot.storage.user_store import UserConfig
+from mono_ai_budget_bot.taxonomy.rules import Rule
 from mono_ai_budget_bot.uncat.pending import UncatPendingStore
 
 
@@ -90,6 +91,9 @@ class DummyTaxonomyStore:
     def load(self, telegram_user_id: int):
         return self.taxonomy
 
+    def save(self, telegram_user_id: int, taxonomy: dict):
+        self.taxonomy = taxonomy
+
 
 class DummyReportsStore:
     def __init__(self):
@@ -124,11 +128,15 @@ class DummyUncatStore:
 
 
 class DummyRulesStore:
-    def __init__(self, base_dir: Path | None = None):
+    def __init__(self, base_dir: Path | None = None, rules=None):
         self.base_dir = base_dir or Path(".")
+        self.rules = list(rules or [])
 
     def load(self, telegram_user_id: int):
-        return None
+        return list(self.rules)
+
+    def save(self, telegram_user_id: int, rules):
+        self.rules = list(rules)
 
 
 def _kb_dump(kb) -> list[list[tuple[str, str]]]:
@@ -1603,6 +1611,356 @@ def test_menu_categories_action_placeholder_renders_consistent_screen(tmp_path: 
     assert text == templates.menu_categories_action_placeholder_message("додати підкатегорію")
     assert _kb_dump(kb) == [[("⬅️ Назад", "menu:categories")]]
     assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_categories_rules_opens_canonical_submenu_with_summary(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": [],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food"],
+                "is_root": True,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe"],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+        "alias_terms": {"cafe": ["латте"]},
+    }
+    rules_store = DummyRulesStore(
+        rules=[
+            Rule(id="r1", leaf_id="cafe", merchant_contains="silpo"),
+            Rule(id="r2", leaf_id="cafe", recipient_contains="anna"),
+        ]
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+        rules_store=rules_store,
+    )
+
+    cb_menu_categories_rules = dp.callback_query.handlers["cb_menu_categories_rules"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:categories:rules", message=message)
+
+    asyncio.run(cb_menu_categories_rules(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "Merchant rule: `silpo` → Їжа → Кафе" in text
+    assert "Recipient rule: `anna` → Їжа → Кафе" in text
+    assert "Alias mapping: `латте` → Їжа → Кафе" in text
+    assert _kb_dump(kb) == [
+        [("➕ Merchant rule", "menu:categories:rules:add_merchant")],
+        [("➕ Recipient rule", "menu:categories:rules:add_recipient")],
+        [("➕ Alias mapping", "menu:categories:rules:add_alias")],
+        [("✏️ Edit existing", "menu:categories:rules:edit")],
+        [("🗑️ Delete existing", "menu:categories:rules:delete")],
+        [("⬅️ Назад", "menu:categories")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_categories_rules_create_merchant_starts_leaf_picker(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": [],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food"],
+                "is_root": True,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe"],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+    }
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+    )
+
+    cb_menu_categories_rules_new = dp.callback_query.handlers["cb_menu_categories_rules_new"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1, data="menu:categories:rules:add_merchant", message=message
+    )
+
+    asyncio.run(cb_menu_categories_rules_new(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_categories_rule_pick_leaf_message("Merchant rule")
+    assert _kb_dump(kb) == [
+        [("Їжа → Кафе", "menu:categories:rules:new:merchant_rule:cafe")],
+        [("⬅️ Назад", "menu:categories:rules")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_categories_rules_edit_pick_opens_item_actions(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": [],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food"],
+                "is_root": True,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe"],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+    }
+    rules_store = DummyRulesStore(rules=[Rule(id="r1", leaf_id="cafe", merchant_contains="silpo")])
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+        rules_store=rules_store,
+    )
+
+    cb_menu_categories_rules_pick_existing = dp.callback_query.handlers[
+        "cb_menu_categories_rules_pick_existing"
+    ]
+    cb_menu_categories_rules_edit_pick = dp.callback_query.handlers[
+        "cb_menu_categories_rules_edit_pick"
+    ]
+    message = DummyMessage(user_id=1)
+
+    query_pick = DummyCallbackQuery(user_id=1, data="menu:categories:rules:edit", message=message)
+    asyncio.run(cb_menu_categories_rules_pick_existing(query_pick))
+
+    query_edit = DummyCallbackQuery(
+        user_id=1, data="menu:categories:rules:editpick:0", message=message
+    )
+    asyncio.run(cb_menu_categories_rules_edit_pick(query_edit))
+
+    assert len(message.answers) == 2
+    text, kb = message.answers[1]
+    assert text == templates.menu_categories_rule_item_message(
+        kind_label="Merchant rule",
+        current_value="silpo",
+        leaf_name="Їжа → Кафе",
+    )
+    assert _kb_dump(kb) == [
+        [("✏️ Змінити фразу", "menu:categories:rules:edit:term:0")],
+        [("🎯 Змінити leaf", "menu:categories:rules:edit:leaf:0")],
+        [("⬅️ Назад", "menu:categories:rules:edit")],
+    ]
+    assert query_edit.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_categories_rules_delete_confirm_removes_rule(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": [],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food"],
+                "is_root": True,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe"],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+    }
+    rules_store = DummyRulesStore(rules=[Rule(id="r1", leaf_id="cafe", merchant_contains="silpo")])
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+        rules_store=rules_store,
+    )
+
+    cb_menu_categories_rules_pick_existing = dp.callback_query.handlers[
+        "cb_menu_categories_rules_pick_existing"
+    ]
+    cb_menu_categories_rules_delete_confirm = dp.callback_query.handlers[
+        "cb_menu_categories_rules_delete_confirm"
+    ]
+    message = DummyMessage(user_id=1)
+
+    query_pick = DummyCallbackQuery(user_id=1, data="menu:categories:rules:delete", message=message)
+    asyncio.run(cb_menu_categories_rules_pick_existing(query_pick))
+
+    query_delete = DummyCallbackQuery(
+        user_id=1, data="menu:categories:rules:delete:confirm:0", message=message
+    )
+    asyncio.run(cb_menu_categories_rules_delete_confirm(query_delete))
+
+    assert rules_store.load(1) == []
+    assert len(message.answers) == 2
+    text, kb = message.answers[1]
+    assert text == templates.menu_categories_rule_deleted_message(
+        kind_label="Merchant rule",
+        value="silpo",
+    )
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:categories:rules")]]
+    assert query_delete.answer_calls[-1] == (None, False, None)
 
 
 def test_menu_personalization_opens_canonical_submenu(tmp_path: Path):
