@@ -1581,6 +1581,47 @@ def test_menu_personalization_item_reads_from_profile_store(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_personalization_persona_reads_from_profile_store(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "supportive",
+            "reports_preset": "min",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_personalization_items = dp.callback_query.handlers["cb_menu_personalization_items"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:personalization:persona",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_items(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_personalization_item_message(
+        title="🧑 *Persona*",
+        current_value="Supportive",
+    )
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:personalization")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_personalization_activity_opens_mode_screen(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(

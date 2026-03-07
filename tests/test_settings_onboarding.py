@@ -23,6 +23,35 @@ def test_apply_onboarding_settings_valid():
     assert p["persona"] == "rational"
 
 
+def test_apply_onboarding_settings_keeps_shared_personalization_state_consistent():
+    p = {}
+    p = apply_onboarding_settings(
+        p,
+        activity_mode="quiet",
+        uncategorized_prompt_frequency="before_report",
+        persona="supportive",
+    )
+
+    assert p["activity_mode"] == "quiet"
+    assert p["activity"]["mode"] == "quiet"
+    assert p["activity"]["toggles"]["auto_reports"] is False
+    assert p["activity"]["toggles"]["uncat_prompts"] is False
+    assert p["uncategorized_prompt_frequency"] == "before_report"
+    assert p["persona"] == "supportive"
+
+    p2 = apply_onboarding_settings(
+        p,
+        activity_mode="custom",
+        uncategorized_prompt_frequency="daily",
+        persona="rational",
+    )
+
+    assert p2["activity_mode"] == "custom"
+    assert p2["activity"]["mode"] == "custom"
+    assert p2["uncategorized_prompt_frequency"] == "daily"
+    assert p2["persona"] == "rational"
+
+
 def test_apply_onboarding_settings_rejects_invalid():
     with pytest.raises(ValueError):
         apply_onboarding_settings({}, activity_mode="x")
