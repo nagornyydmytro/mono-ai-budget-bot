@@ -41,7 +41,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
         cfg = ctx.users.load(tg_id)
         if cfg is None:
-            await query.answer("Спочатку /connect", show_alert=True)
+            await query.answer("Спочатку підключи Monobank.", show_alert=True)
             return
 
         acc_id = (query.data or "").split("acc_toggle:", 1)[1].strip()
@@ -94,7 +94,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
         cfg = ctx.users.load(tg_id)
         if cfg is None:
-            await query.answer("Спочатку підключи /connect", show_alert=True)
+            await query.answer("Спочатку підключи Monobank.", show_alert=True)
             return
 
         selected_ids = set(cfg.selected_account_ids or [])
@@ -236,12 +236,12 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
         cfg = ctx.users.load(tg_id)
         if cfg is None or not cfg.mono_token:
-            await query.answer("Спочатку /connect", show_alert=True)
+            await query.answer("Спочатку підключи Monobank.", show_alert=True)
             return
 
         account_ids = list(cfg.selected_account_ids or [])
         if not account_ids:
-            await query.answer("Спочатку вибери картки: /accounts", show_alert=True)
+            await query.answer("Спочатку вибери картки.", show_alert=True)
             return
 
         if query.data == "boot_skip":
