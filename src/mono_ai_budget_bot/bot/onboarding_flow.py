@@ -25,7 +25,7 @@ async def send_start_screen(
         start_text=start_text,
         connected_text=connected_text,
     )
-    await message.answer(text, reply_markup=reply_markup)
+    await message.edit_text(text, reply_markup=reply_markup)
 
 
 async def begin_manual_token_entry(
@@ -179,6 +179,7 @@ async def send_onboarding_next(
     start_message_text: str,
     connect_success_confirm_text: str,
     accounts_after_done_with_count_text,
+    taxonomy_preset_prompt_text: str,
     reports_preset_labels,
     reports_preset_prompt_text: str,
     activity_mode_labels,
@@ -206,13 +207,17 @@ async def send_onboarding_next(
 
     cfg = users.load(tg_id)
     prof = profile_store.load(tg_id) or {}
+    onb = prof.get("onboarding")
+    if not isinstance(onb, dict):
+        onb = {}
 
     if cfg is None or not cfg.mono_token:
         kb = build_start_menu_keyboard()
         await msg.answer(start_message_text, reply_markup=kb)
         return
 
-    if not cfg.selected_account_ids:
+    accounts_confirmed = bool(onb.get("accounts_confirmed"))
+    if not cfg.selected_account_ids or not accounts_confirmed:
         mb = monobank_client_cls(token=cfg.mono_token)
         try:
             info = mb.client_info()
@@ -229,12 +234,26 @@ async def send_onboarding_next(
         return
 
     if taxonomy_store.load(tg_id) is None:
-        count = len(cfg.selected_account_ids)
-        kb = build_bootstrap_picker_keyboard(include_skip=False)
-        await msg.answer(accounts_after_done_with_count_text(count), reply_markup=kb)
+        bootstrap_requested = bool(onb.get("bootstrap_requested"))
+
+        if not bootstrap_requested:
+            count = len(cfg.selected_account_ids)
+            kb = build_bootstrap_picker_keyboard(include_skip=False)
+            await msg.answer(accounts_after_done_with_count_text(count), reply_markup=kb)
+            return
+
+        kb = build_vertical_options_keyboard(
+            [
+                ("⚡ Мінімальний", "tax_preset_min"),
+                ("🧠 Максимальний (детально)", "tax_preset_max"),
+                ("🛠️ Custom — налаштую потім", "tax_preset_custom"),
+            ]
+        )
+        await msg.answer(taxonomy_preset_prompt_text, reply_markup=kb)
         return
 
-    if reports_store.load(tg_id) is None:
+    reports_configured = bool(onb.get("reports_configured"))
+    if not reports_configured:
         l1, l2, l3 = reports_preset_labels()
         kb = build_vertical_options_keyboard(
             [

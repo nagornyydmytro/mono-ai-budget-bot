@@ -41,7 +41,7 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             return
         await render_menu_screen(
             query,
-            text=templates.main_menu_message(),
+            text=templates.menu_root_message(),
             reply_markup=build_main_menu_keyboard(),
         )
 

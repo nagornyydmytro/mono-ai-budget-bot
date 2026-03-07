@@ -219,9 +219,14 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
         if cfg is None or not cfg.mono_token:
             await message.answer(templates.err_not_connected())
             return
+
         if not cfg.selected_account_ids:
-            await message.answer(templates.err_no_accounts_selected())
+            await ctx.prompt_finish_onboarding(
+                message,
+                text=templates.onboarding_pick_accounts_prompt_message(),
+            )
             return
+
         ctx.sync_onboarding_progress(user_id)
         if not ctx.onboarding_done(user_id):
             await ctx.prompt_finish_onboarding(message)

@@ -80,7 +80,10 @@ def register_start_handlers(dp, *, ctx: HandlerContext) -> None:
     @dp.callback_query(lambda c: c.data == "currency_refresh")
     async def cb_currency_refresh(query: CallbackQuery) -> None:
         if query.message:
-            await query.message.answer(templates.currency_refresh_progress_message())
+            await query.message.edit_text(
+                templates.currency_refresh_progress_message(),
+                reply_markup=None,
+            )
             await ctx.send_currency_screen(query.message, force_refresh=True)
         await query.answer("Оновлено")
 
@@ -101,10 +104,10 @@ def register_start_handlers(dp, *, ctx: HandlerContext) -> None:
                 cfg = ctx.users.load(tg_id)
                 if cfg is not None and cfg.mono_token:
                     text = templates.start_message_connected()
-                await query.message.answer(text, reply_markup=kb)
+                await query.message.edit_text(text, reply_markup=kb)
             else:
                 kb = build_main_menu_keyboard(uncat_enabled=True)
-                await query.message.answer(templates.menu_root_message(), reply_markup=kb)
+                await query.message.edit_text(templates.menu_root_message(), reply_markup=kb)
 
         await query.answer()
 
@@ -121,9 +124,9 @@ def register_start_handlers(dp, *, ctx: HandlerContext) -> None:
 
             if not onboarding_done:
                 kb = build_back_keyboard("onb_back_main")
-                await query.message.answer(templates.help_message(), reply_markup=kb)
+                await query.message.edit_text(templates.help_message(), reply_markup=kb)
             else:
                 kb = build_main_menu_keyboard(uncat_enabled=True)
-                await query.message.answer(templates.help_message(), reply_markup=kb)
+                await query.message.edit_text(templates.help_message(), reply_markup=kb)
 
         await query.answer()

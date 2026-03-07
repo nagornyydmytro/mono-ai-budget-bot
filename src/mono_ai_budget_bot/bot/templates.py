@@ -280,9 +280,7 @@ def nlq_failed_message() -> str:
 
 
 def monobank_invalid_token_message() -> str:
-    return error(
-        "Токен Monobank недійсний або прострочений. Зроби /connect і додай актуальний токен."
-    )
+    return error("Токен Monobank недійсний або прострочений. Встав актуальний токен.")
 
 
 def monobank_rate_limit_message() -> str:
@@ -630,11 +628,19 @@ def currency_screen_text(updated: str, usd: str | None, eur: str | None, pln: st
 
 
 def err_not_connected() -> str:
-    return warning("Monobank не підключено. Зроби `/connect <token>` або натисни 🔐 Connect.")
+    return warning("Monobank не підключено.")
 
 
 def err_no_accounts_selected() -> str:
-    return warning("Не вибрано картки. Відкрий `/accounts` і натисни ✅ Done.")
+    return warning("Не вибрано картки.")
+
+
+def onboarding_connect_required_message() -> str:
+    return warning("Спершу підключи Monobank.")
+
+
+def onboarding_pick_accounts_prompt_message() -> str:
+    return warning("Спершу вибери картки 👇")
 
 
 def err_no_ledger(period: str) -> str:

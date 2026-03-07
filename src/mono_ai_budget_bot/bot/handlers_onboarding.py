@@ -53,6 +53,15 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             selected.add(acc_id)
 
         save_selected_accounts(ctx.users, tg_id, sorted(selected))
+
+        prof = ctx.profile_store.load(tg_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+        onb["accounts_confirmed"] = False
+        prof["onboarding"] = onb
+        ctx.profile_store.save(tg_id, prof)
+
         ctx.sync_onboarding_progress(tg_id)
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -94,6 +103,15 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             return
 
         save_selected_accounts(ctx.users, tg_id, [])
+
+        prof = ctx.profile_store.load(tg_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+        onb["accounts_confirmed"] = False
+        prof["onboarding"] = onb
+        ctx.profile_store.save(tg_id, prof)
+
         ctx.sync_onboarding_progress(tg_id)
 
         mb = MonobankClient(token=cfg.mono_token)
@@ -149,6 +167,14 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             mem.pop("accounts_picker", None)
             memory_store.save_memory(tg_id, mem)
 
+        prof = ctx.profile_store.load(tg_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+        onb["accounts_confirmed"] = True
+        prof["onboarding"] = onb
+        ctx.profile_store.save(tg_id, prof)
+
         kb = build_bootstrap_picker_keyboard(include_skip=(onboarding_done and not changed))
 
         if query.message:
@@ -178,7 +204,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             kb = build_vertical_options_keyboard(
                 [("✅ Ввести токен", "onb_token"), ("⬅️ Назад", "onb_back_main")]
             )
-            await query.message.answer(templates.connect_instructions(), reply_markup=kb)
+            await query.message.edit_text(templates.connect_instructions(), reply_markup=kb)
         await query.answer()
 
     @dp.callback_query(lambda c: c.data == "onb_token")
@@ -233,6 +259,15 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
         days_map = {"boot_30": 30, "boot_90": 90, "boot_180": 180, "boot_365": 365}
         days = int(days_map[str(query.data)])
+
+        prof = ctx.profile_store.load(tg_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+        onb["bootstrap_requested"] = True
+        onb["bootstrap_days"] = days
+        prof["onboarding"] = onb
+        ctx.profile_store.save(tg_id, prof)
 
         if query.message:
             await query.message.edit_text(templates.bootstrap_started_message(days))
@@ -323,6 +358,15 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         preset = preset_map[str(query.data)]
         tax = build_taxonomy_preset(preset)
         ctx.taxonomy_store.save(tg_id, tax)
+
+        prof = ctx.profile_store.load(tg_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+        onb["taxonomy_configured"] = True
+        prof["onboarding"] = onb
+        ctx.profile_store.save(tg_id, prof)
+
         ctx.sync_onboarding_progress(tg_id)
 
         kb = build_vertical_options_keyboard(
@@ -356,6 +400,15 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         preset = preset_map[str(query.data)]
         cfg = build_reports_preset(preset)
         ctx.reports_store.save(tg_id, cfg)
+
+        prof = ctx.profile_store.load(tg_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+        onb["reports_configured"] = True
+        prof["onboarding"] = onb
+        ctx.profile_store.save(tg_id, prof)
+
         ctx.sync_onboarding_progress(tg_id)
 
         if preset == "custom":

@@ -211,6 +211,7 @@ def register_handlers(
             start_message_text=templates.start_message(),
             connect_success_confirm_text=templates.connect_success_confirm(),
             accounts_after_done_with_count_text=templates.accounts_after_done_with_count,
+            taxonomy_preset_prompt_text=templates.taxonomy_preset_prompt(),
             reports_preset_labels=templates.reports_preset_labels,
             reports_preset_prompt_text=templates.reports_preset_prompt(),
             activity_mode_labels=templates.activity_mode_labels,
@@ -272,7 +273,7 @@ def register_handlers(
                 pass
 
         kb = build_currency_screen_keyboard()
-        await message.answer(text, reply_markup=kb)
+        await message.edit_text(text, reply_markup=kb)
 
     async def _send_period_report(
         message: Message,
@@ -307,6 +308,12 @@ def register_handlers(
             return
 
         stored = store.load(tg_id, period)
+        if stored is None:
+            from .app import refresh_period_for_user
+
+            await refresh_period_for_user(period, cfg, store)
+            stored = store.load(tg_id, period)
+
         if stored is None:
             await message.answer(templates.err_no_ledger(period))
             return
