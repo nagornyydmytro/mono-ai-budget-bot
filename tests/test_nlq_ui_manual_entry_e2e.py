@@ -122,3 +122,48 @@ def test_manual_entry_category_alias_e2e(tmp_path, monkeypatch):
     ca = mem2.get("category_aliases")
     assert isinstance(ca, dict)
     assert "каршерінг" in ca
+
+
+def test_multi_mapping_recipient_alias_requires_choice_and_saves_after_pick(tmp_path, monkeypatch):
+    _patch_stores(monkeypatch, tmp_path)
+
+    ms.add_learned_mapping(1, bucket="recipient", alias="дівчині", value="anna k.")
+    ms.add_learned_mapping(1, bucket="recipient", alias="дівчині", value="kate s.")
+
+    msg = ex.execute_intent(
+        1, {"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"}
+    )
+    assert "Кого саме" in msg
+
+    mem = ms.load_memory(1)
+    assert mem.get("pending_kind") == "recipient"
+    opts = mem.get("pending_options")
+    assert isinstance(opts, list)
+    assert set(opts) == {"anna k.", "kate s."}
+
+    resp = handle_nlq(NLQRequest(telegram_user_id=1, text="1", now_ts=2000))
+    assert resp.result is not None
+
+    mem2 = ms.load_memory(1)
+    ra = mem2.get("recipient_aliases")
+    assert isinstance(ra, dict)
+    assert ra.get("дівчині") in {"anna k.", "kate s."}
+
+
+def test_recipient_alias_is_not_saved_without_ledger_evidence(tmp_path, monkeypatch):
+    _patch_stores(monkeypatch, tmp_path)
+
+    ms.set_pending_intent(
+        1,
+        payload={"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"},
+        kind="recipient",
+        options=["Ghost Person"],
+    )
+
+    resp = handle_nlq(NLQRequest(telegram_user_id=1, text="Ghost Person", now_ts=2000))
+    assert resp.result is not None
+    assert "Не знайшов такого отримувача" in resp.result.text
+
+    mem = ms.load_memory(1)
+    ra = mem.get("recipient_aliases")
+    assert not isinstance(ra, dict) or "дівчині" not in ra

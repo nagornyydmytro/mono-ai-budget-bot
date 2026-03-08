@@ -15,6 +15,7 @@ from mono_ai_budget_bot.nlq.memory_store import (
     pop_pending_manual_mode,
     save_category_alias,
     save_memory,
+    save_recipient_alias,
 )
 from mono_ai_budget_bot.nlq.resolver import resolve
 from mono_ai_budget_bot.nlq.router import route
@@ -277,6 +278,31 @@ def _seen_categories(rows: list[TxRecord]) -> list[str]:
     return out
 
 
+def _recipient_has_ledger_evidence(
+    rows: list[TxRecord],
+    *,
+    value: str,
+    pending_intent: dict | None,
+) -> bool:
+    s = norm(value)
+    if not s:
+        return False
+
+    kind_prefix: str | None = None
+    if isinstance(pending_intent, dict):
+        intent_name = str(pending_intent.get("intent") or "")
+        if intent_name.startswith("transfer_out"):
+            kind_prefix = "transfer_out"
+        elif intent_name.startswith("transfer_in"):
+            kind_prefix = "transfer_in"
+
+    for cand in _top_recipients(rows, value, kind_prefix=kind_prefix, limit=50):
+        cand_norm = norm(cand)
+        if cand_norm == s or s in cand_norm:
+            return True
+    return False
+
+
 def _manual_entry_try_resolve(
     *,
     expected: str,
@@ -426,20 +452,72 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 pop_pending_action(req.telegram_user_id)
                 return NLQResponse(result=NLQResult(text="Ок, не зберігаю."), clarification=None)
 
-        alias = _extract_recipient_alias(pending)
-        match_value = _resolve_followup_value(req.text, options).strip().lower()
+        if pending_kind == "recipient":
+            alias = _extract_recipient_alias(pending)
+            if alias and req.text.strip().lower() in {
+                "0",
+                "cancel",
+                "скасувати",
+                "ні",
+                "нет",
+            }:
+                pop_pending_action(req.telegram_user_id)
+                return NLQResponse(result=NLQResult(text="Ок, не зберігаю."), clarification=None)
 
-        if alias and match_value:
-            ra = mem.get("recipient_aliases")
-            if not isinstance(ra, dict):
-                ra = {}
-            ra[alias] = match_value
-            mem["recipient_aliases"] = ra
-            save_memory(req.telegram_user_id, mem)
+            rows = _load_validation_rows(req.telegram_user_id, req.now_ts)
+            match_value = _resolve_followup_value(req.text, options).strip()
 
-            pop_pending_action(req.telegram_user_id)
-            text = execute_intent(req.telegram_user_id, pending)
-            return NLQResponse(result=NLQResult(text=text), clarification=None)
+            if (
+                alias
+                and match_value
+                and _recipient_has_ledger_evidence(
+                    rows,
+                    value=match_value,
+                    pending_intent=pending,
+                )
+            ):
+                save_recipient_alias(req.telegram_user_id, alias, match_value)
+                pop_pending_action(req.telegram_user_id)
+                text = execute_intent(req.telegram_user_id, pending)
+                return NLQResponse(result=NLQResult(text=text), clarification=None)
+
+            selected, suggested, err = _manual_entry_try_resolve(
+                expected="recipient",
+                user_text=req.text,
+                pending_intent=pending,
+                pending_options=options,
+                rows=rows,
+            )
+
+            if (
+                alias
+                and selected
+                and _recipient_has_ledger_evidence(
+                    rows,
+                    value=selected,
+                    pending_intent=pending,
+                )
+            ):
+                save_recipient_alias(req.telegram_user_id, alias, selected)
+                pop_pending_action(req.telegram_user_id)
+                text = execute_intent(req.telegram_user_id, pending)
+                return NLQResponse(result=NLQResult(text=text), clarification=None)
+
+            if suggested:
+                mem["pending_options"] = list(suggested)
+                save_memory(req.telegram_user_id, mem)
+                lines = [
+                    (err or "Не знайшов відповідність."),
+                    "Вибери номер або введи точне ім'я як у виписці:",
+                ]
+                for i, opt in enumerate(suggested, start=1):
+                    lines.append(f"{i}) {opt}")
+                return NLQResponse(result=NLQResult(text="\n".join(lines)), clarification=None)
+
+            return NLQResponse(
+                result=NLQResult(text=(err or "Не знайшов такого отримувача в виписці.")),
+                clarification=None,
+            )
 
     intent = route(req)
     if not intent:

@@ -26,6 +26,7 @@ from mono_ai_budget_bot.nlq.memory_store import (
     DEFAULT_MERCHANT_ALIASES,
     load_memory,
     resolve_merchant_filters,
+    resolve_recipient_candidates,
     save_memory,
     set_pending_intent,
 )
@@ -45,32 +46,6 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     intent = str(intent_payload.get("intent") or "unsupported").strip()
 
     mem = load_memory(telegram_user_id)
-    pending = mem.get("pending_intent")
-
-    if isinstance(pending, dict):
-        alias = str(pending.get("recipient_alias") or "").strip().lower()
-
-        followup_value = (
-            intent_payload.get("merchant_contains")
-            or intent_payload.get("recipient_alias")
-            or intent_payload.get("recipient_contains")
-            or ""
-        )
-        followup_value = str(followup_value).strip().lower()
-
-        if alias and followup_value:
-            ra = mem.get("recipient_aliases")
-            if not isinstance(ra, dict):
-                ra = {}
-            ra[alias] = followup_value
-            mem["recipient_aliases"] = ra
-
-            mem["pending_intent"] = None
-            mem["pending_kind"] = None
-            mem["pending_options"] = None
-            save_memory(telegram_user_id, mem)
-
-            return execute_intent(telegram_user_id, pending)
 
     if intent == "unsupported":
         return templates.nlq_unsupported_message()
@@ -316,9 +291,19 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
     if intent.startswith("transfer_") and recipient_alias:
-        mem = load_memory(telegram_user_id)
-        ra = mem.get("recipient_aliases") or {}
-        if not isinstance(ra, dict) or recipient_alias not in ra:
+        learned_candidates = resolve_recipient_candidates(telegram_user_id, recipient_alias) or []
+        if len(learned_candidates) > 1:
+            set_pending_intent(
+                telegram_user_id,
+                intent_payload,
+                kind="recipient",
+                options=learned_candidates,
+            )
+            return templates.nlq_recipient_ambiguous_with_options(
+                alias=recipient_alias, options=learned_candidates
+            )
+
+        if not learned_candidates:
             kind_prefix = "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
             options = _top_recipient_candidates(rows, kind_prefix=kind_prefix, limit=5)
             set_pending_intent(telegram_user_id, intent_payload, kind="recipient", options=options)
@@ -336,12 +321,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     recipient_match: str | None = None
     if recipient_alias and intent.startswith("transfer_"):
-        mem = load_memory(telegram_user_id)
-        ra = mem.get("recipient_aliases") or {}
-        if isinstance(ra, dict):
-            v = ra.get(recipient_alias)
-            if isinstance(v, str) and v.strip():
-                recipient_match = v.strip().lower()
+        recipient_candidates = resolve_recipient_candidates(telegram_user_id, recipient_alias) or []
+        if len(recipient_candidates) == 1:
+            recipient_match = recipient_candidates[0]
 
     filter_intent = _filter_intent_for_payload(intent, intent_payload)
 

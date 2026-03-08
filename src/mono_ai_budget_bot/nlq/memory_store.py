@@ -83,6 +83,8 @@ def load_memory(telegram_user_id: int) -> dict[str, Any]:
         data["category_aliases"] = dict(DEFAULT_CATEGORY_ALIASES)
     if "recipient_aliases" not in data or not isinstance(data.get("recipient_aliases"), dict):
         data["recipient_aliases"] = {}
+    if "learned_mappings" not in data or not isinstance(data.get("learned_mappings"), dict):
+        data["learned_mappings"] = {"merchant": {}, "recipient": {}, "category": {}}
     if "alias_stats" not in data or not isinstance(data.get("alias_stats"), dict):
         data["alias_stats"] = {"merchant": {}, "category": {}, "recipient": {}}
     if "pending_intent" not in data:
@@ -125,14 +127,39 @@ def _get_learned_bucket(mem: dict[str, Any], bucket: str) -> dict[str, list[str]
     for k, v in b.items():
         if not isinstance(k, str):
             continue
+
+        key = norm(k)
+        if not key:
+            continue
+
+        values: list[str] = []
+        seen: set[str] = set()
+
+        src_items: list[str]
         if isinstance(v, list):
-            vv = [norm(x) for x in v if isinstance(x, str) and norm(x)]
-            if vv:
-                out[norm(k)] = list(dict.fromkeys(vv))
+            src_items = [x for x in v if isinstance(x, str)]
         elif isinstance(v, str):
-            vv = norm(v)
-            if vv:
-                out[norm(k)] = [vv]
+            src_items = [v]
+        else:
+            src_items = []
+
+        for item in src_items:
+            if bucket == "recipient":
+                original = item.strip().lower()
+                dedupe_key = norm(item)
+                if not original or not dedupe_key or dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                values.append(original)
+            else:
+                normalized = norm(item)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                values.append(normalized)
+
+        if values:
+            out[key] = values
 
     lm[bucket] = out
     mem["learned_mappings"] = lm
@@ -156,14 +183,33 @@ def get_learned_mapping(telegram_user_id: int, *, bucket: str, alias: str) -> li
 
 def add_learned_mapping(telegram_user_id: int, *, bucket: str, alias: str, value: str) -> None:
     a = norm(alias)
-    v = norm(value)
-    if not a or not v:
+    if bucket == "recipient":
+        stored_value = str(value or "").strip().lower()
+        dedupe_value = norm(value)
+    else:
+        stored_value = norm(value)
+        dedupe_value = stored_value
+
+    if not a or not stored_value or not dedupe_value:
         return
+
     mem = load_memory(telegram_user_id)
     b = _get_learned_bucket(mem, bucket)
     cur = b.get(a) or []
-    if v not in cur:
-        cur.append(v)
+
+    exists = False
+    for item in cur:
+        if bucket == "recipient":
+            if norm(item) == dedupe_value:
+                exists = True
+                break
+        elif item == stored_value:
+            exists = True
+            break
+
+    if not exists:
+        cur.append(stored_value)
+
     b[a] = cur
     mem["learned_mappings"] = mem.get("learned_mappings")
     _touch_alias(mem, bucket, a)
@@ -177,10 +223,27 @@ def set_learned_mapping(
     a = norm(alias)
     if not a:
         return
-    vv = [norm(x) for x in values if isinstance(x, str) and norm(x)]
-    vv = list(dict.fromkeys(vv))
+
+    vv: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        if bucket == "recipient":
+            stored_value = item.strip().lower()
+            dedupe_value = norm(item)
+        else:
+            stored_value = norm(item)
+            dedupe_value = stored_value
+
+        if not stored_value or not dedupe_value or dedupe_value in seen:
+            continue
+        seen.add(dedupe_value)
+        vv.append(stored_value)
+
     if not vv:
         return
+
     mem = load_memory(telegram_user_id)
     b = _get_learned_bucket(mem, bucket)
     b[a] = vv
@@ -304,9 +367,9 @@ def pop_pending_manual_mode(telegram_user_id: int) -> dict[str, Any] | None:
 
 
 def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) -> None:
-    a = (alias or "").strip().lower()
-    v = (match_value or "").strip().lower()
-    if not a or not v:
+    a = norm(alias)
+    stored_value = str(match_value or "").strip().lower()
+    if not a or not stored_value:
         return
 
     mem = load_memory(telegram_user_id)
@@ -314,11 +377,11 @@ def save_recipient_alias(telegram_user_id: int, alias: str, match_value: str) ->
     if not isinstance(ra, dict):
         ra = {}
 
-    ra[a] = v
+    ra[a] = stored_value
     mem["recipient_aliases"] = ra
     save_memory(telegram_user_id, mem)
 
-    add_learned_mapping(telegram_user_id, bucket="recipient", alias=a, value=v)
+    add_learned_mapping(telegram_user_id, bucket="recipient", alias=a, value=stored_value)
 
 
 def _touch_alias(mem: dict[str, Any], bucket: str, alias: str) -> None:
@@ -490,6 +553,43 @@ def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None)
     if not terms:
         return None
     return terms[0]
+
+
+def resolve_recipient_candidates(
+    telegram_user_id: int,
+    recipient_alias: str | None,
+) -> list[str] | None:
+    raw = norm(recipient_alias)
+    if not raw:
+        return None
+
+    learned = get_learned_mapping(telegram_user_id, bucket="recipient", alias=raw)
+    if learned:
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in learned:
+            if not isinstance(item, str):
+                continue
+            original = item.strip().lower()
+            key = norm(item)
+            if not original or not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(original)
+        return out or None
+
+    mem = load_memory(telegram_user_id)
+    ra = mem.get("recipient_aliases")
+    if not isinstance(ra, dict):
+        return None
+
+    direct = ra.get(raw)
+    if isinstance(direct, str):
+        original = direct.strip().lower()
+        if original:
+            return [original]
+
+    return None
 
 
 def save_category_alias(telegram_user_id: int, alias: str, merchant_terms: list[str]) -> None:

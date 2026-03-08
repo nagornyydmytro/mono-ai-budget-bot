@@ -22,3 +22,14 @@ def test_learned_mappings_respects_ttl_for_touch(tmp_path, monkeypatch):
 
     mem = ms.load_memory(2)
     assert isinstance(mem.get("alias_stats"), dict)
+
+
+def test_resolve_recipient_candidates_prefers_multi_mapping(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    ms.add_learned_mapping(3, bucket="recipient", alias="мама", value="olena ivanovna")
+    ms.add_learned_mapping(3, bucket="recipient", alias="мама", value="olena petrova")
+
+    vals = ms.resolve_recipient_candidates(3, "мама")
+    assert vals is not None
+    assert set(vals) == {"olena ivanovna", "olena petrova"}

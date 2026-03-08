@@ -103,7 +103,7 @@ def test_transfer_requires_recipient_mapping_sets_pending(tmp_path, monkeypatch)
     assert isinstance(mem.get("pending_intent"), dict)
 
 
-def test_followup_completes_and_saves_mapping(tmp_path, monkeypatch):
+def test_followup_does_not_save_mapping_without_confirmation(tmp_path, monkeypatch):
     import time as timemod
 
     import mono_ai_budget_bot.nlq.executor as exmod
@@ -121,7 +121,7 @@ def test_followup_completes_and_saves_mapping(tmp_path, monkeypatch):
 
     exmod.execute_intent(1, {"intent": "spend_sum", "merchant_contains": "McDonalds"})
     mem = msmod.load_memory(1)
-    assert "дівчині" in mem.get("recipient_aliases", {})
+    assert "дівчині" not in mem.get("recipient_aliases", {})
 
 
 def test_default_merchant_aliases_contains_mcdonalds(tmp_path):
