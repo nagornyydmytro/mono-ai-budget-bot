@@ -5,7 +5,10 @@ from aiogram.types import CallbackQuery
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.reports.config import ReportsConfig, build_reports_preset
-from mono_ai_budget_bot.reports.renderer import _render_anomalies_block, _render_trends_block
+from mono_ai_budget_bot.reports.renderer import (
+    _render_anomalies_block,
+    _render_trends_block,
+)
 from mono_ai_budget_bot.settings.activity import (
     get_activity_toggles,
     normalize_activity_settings,
@@ -19,6 +22,7 @@ from mono_ai_budget_bot.taxonomy.rules import Rule
 
 from . import templates
 from .accounts_ui import render_accounts_screen
+from .formatting import format_money_uah_pretty
 from .handlers_common import HandlerContext
 from .menu_flow import render_menu_screen, render_placeholder_screen
 from .onboarding_flow import begin_manual_token_entry, open_accounts_picker, show_data_status
@@ -33,8 +37,10 @@ from .ui import (
     build_categories_rule_item_actions_keyboard,
     build_categories_rules_menu_keyboard,
     build_data_menu_keyboard,
+    build_insights_forecast_keyboard,
     build_insights_guidance_keyboard,
     build_insights_menu_keyboard,
+    build_insights_whatif_keyboard,
     build_main_menu_keyboard,
     build_personalization_menu_keyboard,
     build_reports_custom_blocks_menu_keyboard,
@@ -371,6 +377,66 @@ def _render_insight_body(section_key: str, facts: dict) -> str | None:
     return None
 
 
+def _render_whatif_pct_body(facts: dict, pct: int) -> str | None:
+    whatifs = facts.get("whatif_suggestions") or []
+    if not isinstance(whatifs, list) or not whatifs:
+        return None
+
+    lines: list[str] = []
+    lines.append("*What-if (можлива економія):*")
+
+    added = 0
+    for item in whatifs[:3]:
+        scenarios = item.get("scenarios") or []
+        if not isinstance(scenarios, list):
+            continue
+        match = next((s for s in scenarios if int(s.get("pct", 0)) == int(pct)), None)
+        if not isinstance(match, dict):
+            continue
+
+        title = str(item.get("title") or "—").strip() or "—"
+        base = float(item.get("monthly_spend_uah") or 0.0)
+        projected = float(match.get("projected_monthly_uah") or 0.0)
+        savings = float(match.get("monthly_savings_uah") or 0.0)
+
+        lines.append(
+            f"• {title}: зараз ~{format_money_uah_pretty(base)}/міс → "
+            f"при -{int(pct)}% буде ~{format_money_uah_pretty(projected)}/міс, "
+            f"економія ~{format_money_uah_pretty(savings)}/міс"
+        )
+        added += 1
+
+    if added == 0:
+        return None
+
+    return "\n".join(lines).strip()
+
+
+def _render_forecast_projection_body(facts: dict, metric: str) -> str | None:
+    totals = facts.get("totals") or {}
+    if not isinstance(totals, dict):
+        return None
+
+    if metric == "income":
+        label = "Надходження"
+        value = float(totals.get("income_total_uah") or 0.0)
+    else:
+        label = "Реальні витрати"
+        value = float(totals.get("real_spend_total_uah") or 0.0)
+
+    if value <= 0:
+        return None
+
+    return "\n".join(
+        [
+            "*Forecast (deterministic projection):*",
+            f"• База: останні 30 днів = {label.lower()} {format_money_uah_pretty(value)}",
+            f"• Якщо поточний темп збережеться, наступні 30 днів ≈ {format_money_uah_pretty(value)}",
+            "• Це не prediction magic і не ML-прогноз, а механічна проєкція з уже підготовленого 30-денного вікна.",
+        ]
+    ).strip()
+
+
 def _load_alias_terms(tax: dict | None) -> dict[str, list[str]]:
     if not isinstance(tax, dict):
         return {}
@@ -540,7 +606,25 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             )
             return
 
-        rendered = _render_insight_body(str(query.data or ""), facts)
+        insight_key = str(query.data or "")
+
+        if insight_key == "menu:insights:whatif":
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_whatif_message(),
+                reply_markup=build_insights_whatif_keyboard(),
+            )
+            return
+
+        if insight_key == "menu:insights:forecast":
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_forecast_message(),
+                reply_markup=build_insights_forecast_keyboard(),
+            )
+            return
+
+        rendered = _render_insight_body(insight_key, facts)
         if rendered:
             intro_map = {
                 "menu:insights:trends": "Детермінований зріз на основі вже підготовлених trends facts за місячним контекстом.",
@@ -569,6 +653,101 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             query,
             text=templates.menu_insight_placeholder_message(section_label),
             reply_markup=build_back_keyboard("menu:insights"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data in {"menu:insights:whatif:pct:10", "menu:insights:whatif:pct:20"}
+    )
+    async def cb_menu_insight_whatif_variants(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        facts = _load_month_facts(ctx, tg_id)
+        if not isinstance(facts, dict) or not facts:
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_needs_data_message("🧮 *What-if*"),
+                reply_markup=build_insights_guidance_keyboard(),
+            )
+            return
+
+        pct = 10 if str(query.data or "").endswith(":10") else 20
+        body = _render_whatif_pct_body(facts, pct)
+        if not body:
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_needs_data_message("🧮 *What-if*"),
+                reply_markup=build_insights_guidance_keyboard(),
+            )
+            return
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_insight_result_message(
+                "🧮 *What-if*",
+                f"Сценарій -{pct}% на основі вже порахованих what-if facts.",
+                body,
+            ),
+            reply_markup=build_back_keyboard("menu:insights:whatif"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data in {"menu:insights:forecast:view:spend", "menu:insights:forecast:view:income"}
+    )
+    async def cb_menu_insight_forecast_variants(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        facts = _load_month_facts(ctx, tg_id)
+        if not isinstance(facts, dict) or not facts:
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_needs_data_message("🔮 *Forecast*"),
+                reply_markup=build_insights_guidance_keyboard(),
+            )
+            return
+
+        metric = "income" if str(query.data or "").endswith(":income") else "spend"
+        body = _render_forecast_projection_body(facts, metric)
+        if not body:
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_needs_data_message("🔮 *Forecast*"),
+                reply_markup=build_insights_guidance_keyboard(),
+            )
+            return
+
+        intro = (
+            "Детермінована проєкція доходів на основі вже підготовлених totals facts."
+            if metric == "income"
+            else "Детермінована проєкція витрат на основі вже підготовлених totals facts."
+        )
+        await render_menu_screen(
+            query,
+            text=templates.menu_insight_result_message("🔮 *Forecast*", intro, body),
+            reply_markup=build_back_keyboard("menu:insights:forecast"),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data in {"menu:data", "menu:mydata"})

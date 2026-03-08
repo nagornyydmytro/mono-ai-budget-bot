@@ -963,6 +963,28 @@ def menu_insight_result_message(section_label: str, intro: str, body: str) -> st
     ).strip()
 
 
+def menu_insights_whatif_message() -> str:
+    return "\n".join(
+        [
+            "🧮 *What-if*",
+            "",
+            "Обери сценарій скорочення витрат.",
+            "Це button-first режим на основі вже порахованих what-if facts.",
+        ]
+    ).strip()
+
+
+def menu_insights_forecast_message() -> str:
+    return "\n".join(
+        [
+            "🔮 *Forecast*",
+            "",
+            "Обери тип проєкції.",
+            "Це deterministic projection, а не prediction magic.",
+        ]
+    ).strip()
+
+
 def menu_categories_action_placeholder_message(action_label: str = "ця дія") -> str:
     return f"🗂️ *Категорії*\n\n🚧 Зараз недоступно: {action_label}."
 

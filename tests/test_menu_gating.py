@@ -595,6 +595,260 @@ def test_menu_insight_anomalies_renders_existing_deterministic_block(tmp_path: P
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_insight_whatif_opens_button_first_submenu(tmp_path: Path):
+    class StoreWithWhatIfFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "whatif_suggestions": [
+                        {
+                            "title": "Таксі",
+                            "monthly_spend_uah": 1200.0,
+                            "scenarios": [
+                                {
+                                    "pct": 10,
+                                    "monthly_savings_uah": 120.0,
+                                    "projected_monthly_uah": 1080.0,
+                                },
+                                {
+                                    "pct": 20,
+                                    "monthly_savings_uah": 240.0,
+                                    "projected_monthly_uah": 960.0,
+                                },
+                            ],
+                        }
+                    ]
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithWhatIfFacts(),
+    )
+
+    cb_menu_insight_sections = dp.callback_query.handlers["cb_menu_insight_sections"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights:whatif", message=message)
+
+    asyncio.run(cb_menu_insight_sections(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_insights_whatif_message()
+    assert _kb_dump(kb) == [
+        [("10% scenario", "menu:insights:whatif:pct:10")],
+        [("20% scenario", "menu:insights:whatif:pct:20")],
+        [("⬅️ Назад", "menu:insights")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_insight_whatif_variant_renders_existing_deterministic_projection(tmp_path: Path):
+    class StoreWithWhatIfFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "whatif_suggestions": [
+                        {
+                            "title": "Таксі",
+                            "monthly_spend_uah": 1200.0,
+                            "scenarios": [
+                                {
+                                    "pct": 10,
+                                    "monthly_savings_uah": 120.0,
+                                    "projected_monthly_uah": 1080.0,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithWhatIfFacts(),
+    )
+
+    cb_menu_insight_whatif_variants = dp.callback_query.handlers["cb_menu_insight_whatif_variants"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights:whatif:pct:10", message=message)
+
+    asyncio.run(cb_menu_insight_whatif_variants(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "🧮 *What-if*" in text
+    assert "Сценарій -10%" in text
+    assert "Таксі" in text
+    assert "1 200.00 ₴/міс" in text
+    assert "1 080.00 ₴/міс" in text
+    assert "120.00 ₴/міс" in text
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:insights:whatif")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_insight_forecast_opens_button_first_submenu(tmp_path: Path):
+    class StoreWithForecastFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {
+                        "real_spend_total_uah": 456.0,
+                        "income_total_uah": 1234.0,
+                    }
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithForecastFacts(),
+    )
+
+    cb_menu_insight_sections = dp.callback_query.handlers["cb_menu_insight_sections"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights:forecast", message=message)
+
+    asyncio.run(cb_menu_insight_sections(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_insights_forecast_message()
+    assert _kb_dump(kb) == [
+        [("💸 Real spend projection", "menu:insights:forecast:view:spend")],
+        [("💰 Income projection", "menu:insights:forecast:view:income")],
+        [("⬅️ Назад", "menu:insights")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_insight_forecast_variant_renders_deterministic_projection(tmp_path: Path):
+    class StoreWithForecastFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {
+                        "real_spend_total_uah": 456.0,
+                        "income_total_uah": 1234.0,
+                    }
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithForecastFacts(),
+    )
+
+    cb_menu_insight_forecast_variants = dp.callback_query.handlers[
+        "cb_menu_insight_forecast_variants"
+    ]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:insights:forecast:view:spend",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_insight_forecast_variants(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "🔮 *Forecast*" in text
+    assert "Детермінована проєкція витрат" in text
+    assert "Forecast (deterministic projection)" in text
+    assert "456.00 ₴" in text
+    assert "не prediction magic" in text
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:insights:forecast")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_insight_section_guides_when_prepared_facts_missing(tmp_path: Path):
     class EmptyStore:
         def load(self, telegram_user_id: int, period_key: str):

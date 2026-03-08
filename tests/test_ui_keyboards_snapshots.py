@@ -6,8 +6,10 @@ from mono_ai_budget_bot.bot.ui import (
     build_coverage_cta_keyboard,
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
+    build_insights_forecast_keyboard,
     build_insights_guidance_keyboard,
     build_insights_menu_keyboard,
+    build_insights_whatif_keyboard,
     build_main_menu_keyboard,
     build_personalization_menu_keyboard,
     build_report_mode_keyboard,
@@ -95,6 +97,24 @@ def test_insights_guidance_keyboard_snapshot():
     assert _kb_dump(kb) == [
         [("🔄 Refresh latest", "menu:data:refresh")],
         [("📊 Звіти", "menu:reports")],
+        [("⬅️ Назад", "menu:insights")],
+    ]
+
+
+def test_insights_whatif_keyboard_snapshot():
+    kb = build_insights_whatif_keyboard()
+    assert _kb_dump(kb) == [
+        [("10% scenario", "menu:insights:whatif:pct:10")],
+        [("20% scenario", "menu:insights:whatif:pct:20")],
+        [("⬅️ Назад", "menu:insights")],
+    ]
+
+
+def test_insights_forecast_keyboard_snapshot():
+    kb = build_insights_forecast_keyboard()
+    assert _kb_dump(kb) == [
+        [("💸 Real spend projection", "menu:insights:forecast:view:spend")],
+        [("💰 Income projection", "menu:insights:forecast:view:income")],
         [("⬅️ Назад", "menu:insights")],
     ]
 

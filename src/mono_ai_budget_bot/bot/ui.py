@@ -166,6 +166,26 @@ def build_insights_guidance_keyboard() -> Any:
     )
 
 
+def build_insights_whatif_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("10% scenario", "menu:insights:whatif:pct:10")],
+            [("20% scenario", "menu:insights:whatif:pct:20")],
+            [(BTN_BACK, "menu:insights")],
+        ]
+    )
+
+
+def build_insights_forecast_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("💸 Real spend projection", "menu:insights:forecast:view:spend")],
+            [("💰 Income projection", "menu:insights:forecast:view:income")],
+            [(BTN_BACK, "menu:insights")],
+        ]
+    )
+
+
 def build_personalization_menu_keyboard() -> Any:
     return _build_rows(
         [
