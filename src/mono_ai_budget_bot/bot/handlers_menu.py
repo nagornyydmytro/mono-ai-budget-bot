@@ -437,6 +437,77 @@ def _render_forecast_projection_body(facts: dict, metric: str) -> str | None:
     ).strip()
 
 
+def _render_explain_body(facts: dict) -> str | None:
+    trends = facts.get("trends") or {}
+    anomalies_raw = facts.get("anomalies")
+    anomalies: list[dict] = []
+
+    if isinstance(anomalies_raw, list):
+        anomalies = [x for x in anomalies_raw if isinstance(x, dict)]
+    elif isinstance(anomalies_raw, dict):
+        items = anomalies_raw.get("items")
+        if isinstance(items, list):
+            anomalies = [x for x in items if isinstance(x, dict)]
+
+    growing = trends.get("growing") or []
+    declining = trends.get("declining") or []
+
+    lines: list[str] = []
+    lines.append("*Explain (на базі вже порахованих facts):*")
+
+    added = 0
+
+    if isinstance(growing, list) and growing:
+        item = next((x for x in growing if isinstance(x, dict)), None)
+        if isinstance(item, dict):
+            label = str(item.get("label") or "—").strip() or "—"
+            delta = float(item.get("delta_uah") or 0.0)
+            pct = item.get("pct")
+            pct_part = f" ({int(pct)}%)" if isinstance(pct, (int, float)) else ""
+            lines.append(
+                f"• Найсильніше зростання: {label} — +{format_money_uah_pretty(delta)}{pct_part} проти попереднього вікна."
+            )
+            added += 1
+
+    if isinstance(declining, list) and declining:
+        item = next((x for x in declining if isinstance(x, dict)), None)
+        if isinstance(item, dict):
+            label = str(item.get("label") or "—").strip() or "—"
+            delta = abs(float(item.get("delta_uah") or 0.0))
+            pct = item.get("pct")
+            pct_part = f" ({abs(int(pct))}%)" if isinstance(pct, (int, float)) else ""
+            lines.append(
+                f"• Найсильніше падіння: {label} — -{format_money_uah_pretty(delta)}{pct_part} проти попереднього вікна."
+            )
+            added += 1
+
+    if anomalies:
+        item = anomalies[0]
+        label = str(item.get("label") or "—").strip() or "—"
+        last_uah = float(item.get("last_day_uah") or 0.0)
+        base_uah = float(item.get("baseline_median_uah") or 0.0)
+        reason = str(item.get("reason") or "").strip()
+
+        reason_map = {
+            "first_time_large": "це перша велика поява за період",
+            "spike_vs_median": "це сплеск відносно типової медіани",
+        }
+        reason_text = reason_map.get(reason, "це нетипове відхилення від базового патерну")
+        lines.append(
+            f"• Аномалія: {label} — факт {format_money_uah_pretty(last_uah)} при звичному рівні ~{format_money_uah_pretty(base_uah)}; {reason_text}."
+        )
+        added += 1
+
+    if added == 0:
+        return None
+
+    lines.append("")
+    lines.append(
+        "Пояснення побудоване тільки з already computed trends/anomalies facts без нових розрахунків."
+    )
+    return "\n".join(lines).strip()
+
+
 def _load_alias_terms(tax: dict | None) -> dict[str, list[str]]:
     if not isinstance(tax, dict):
         return {}
@@ -621,6 +692,27 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
                 query,
                 text=templates.menu_insights_forecast_message(),
                 reply_markup=build_insights_forecast_keyboard(),
+            )
+            return
+
+        if insight_key == "menu:insights:explain":
+            body = _render_explain_body(facts)
+            if not body:
+                await render_menu_screen(
+                    query,
+                    text=templates.menu_insights_needs_data_message("🧠 *Explain*"),
+                    reply_markup=build_insights_guidance_keyboard(),
+                )
+                return
+
+            await render_menu_screen(
+                query,
+                text=templates.menu_insight_result_message(
+                    "🧠 *Explain*",
+                    "Пояснення росту/падіння на основі вже підготовлених deterministic facts.",
+                    body,
+                ),
+                reply_markup=build_back_keyboard("menu:insights"),
             )
             return
 
