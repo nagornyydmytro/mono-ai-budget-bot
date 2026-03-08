@@ -7,6 +7,8 @@ from typing import Any, Optional
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
+from .tooling import ALLOWED_TOOL_NAMES
+
 
 class LLMReportV2(BaseModel):
     """
@@ -75,13 +77,6 @@ class ToolCall:
 @dataclass(frozen=True)
 class ToolModeResult:
     tool_calls: list[ToolCall]
-
-
-ALLOWED_TOOL_NAMES = {
-    "query_facts",
-    "query_safe_view",
-    "query_primitive",
-}
 
 
 def _extract_json_object(text: str) -> str | None:
