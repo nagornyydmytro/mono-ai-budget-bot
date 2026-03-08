@@ -69,6 +69,65 @@ def _is_out_of_scope_for_llm(text: str) -> bool:
 
 _LLM_LAST_TS: dict[int, int] = {}
 
+_ALLOWED_PLANNER_KEYS = {
+    "intent",
+    "days",
+    "start_ts",
+    "end_ts",
+    "merchant_contains",
+    "recipient_alias",
+    "period_label",
+    "category",
+    "entity_kind",
+    "threshold_uah",
+}
+
+_ALLOWED_PLANNER_INTENTS = {
+    "unsupported",
+    "spend_sum",
+    "spend_count",
+    "income_sum",
+    "income_count",
+    "transfer_out_sum",
+    "transfer_out_count",
+    "transfer_in_sum",
+    "transfer_in_count",
+    "compare_to_baseline",
+    "threshold_query",
+    "count_over",
+    "count_under",
+    "last_time",
+    "recurrence_summary",
+    "what_if",
+    "currency_convert",
+}
+
+
+def _planner_slots_to_dict(raw: object) -> dict | None:
+    if hasattr(raw, "model_dump") and callable(raw.model_dump):
+        try:
+            data = raw.model_dump(exclude_none=True)
+        except TypeError:
+            data = raw.model_dump()
+    else:
+        data = raw
+
+    if not isinstance(data, dict):
+        return None
+
+    if "tool" in data or "args" in data:
+        return None
+
+    keys = {str(k) for k in data.keys()}
+    if not keys.issubset(_ALLOWED_PLANNER_KEYS):
+        return None
+
+    intent = str(data.get("intent") or "").strip()
+    if not intent or intent not in _ALLOWED_PLANNER_INTENTS:
+        return None
+
+    return dict(data)
+
 
 def _llm_cooldown_ok(user_id: int, now_ts: int, seconds: int = 10) -> bool:
     seconds = max(5, min(int(seconds), 120))
@@ -89,11 +148,12 @@ def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
         return None
 
     try:
-        slots = client.plan_nlq(user_text=req.text, now_ts=req.now_ts)
+        raw = client.plan_nlq(user_text=req.text, now_ts=req.now_ts)
     except Exception:
         return None
 
-    if not slots or not isinstance(slots, dict):
+    slots = _planner_slots_to_dict(raw)
+    if not slots:
         return None
 
     name = str(slots.get("intent") or "").strip()

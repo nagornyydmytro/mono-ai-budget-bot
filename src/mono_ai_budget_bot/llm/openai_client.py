@@ -42,10 +42,15 @@ class NLQPlanV1(BaseModel):
     model_config = {"extra": "forbid"}
 
     intent: str = Field(min_length=1)
-    period: Optional[dict[str, Any]] = None
-    filters: Optional[dict[str, Any]] = None
-    compare: Optional[dict[str, Any]] = None
-    ask_user: Optional[dict[str, Any]] = None
+    days: Optional[int] = None
+    start_ts: Optional[int] = None
+    end_ts: Optional[int] = None
+    merchant_contains: Optional[str] = None
+    recipient_alias: Optional[str] = None
+    period_label: Optional[str] = None
+    category: Optional[str] = None
+    entity_kind: Optional[str] = None
+    threshold_uah: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -169,13 +174,14 @@ class OpenAIClient:
         model = LLMReportV2.model_validate(data)
         return model.clean()
 
-    def plan_nlq(self, *, user_text: str, now_ts: int, max_tokens: int = 450) -> NLQPlanV1:
+    def plan_nlq(self, *, user_text: str, now_ts: int, max_tokens: int = 450) -> dict[str, Any]:
         system = (
             "Ти planner для персональної фінансової аналітики. "
-            "Поверни тільки JSON-об'єкт, який відповідає схемі NLQPlanV1. "
-            "Не вигадуй факти. "
-            "Якщо запит поза межами персональної фінансової аналітики або не можеш надійно "
-            "визначити intent — поверни intent='unsupported'."
+            "Ти не рахуєш гроші, не пишеш у storage, не викликаєш tools, не повертаєш tool/args, "
+            "не працюєш із секретами, токенами або сирими транзакціями. "
+            "Твоя задача — або маршрутизувати запит у детермінований intent, або повернути "
+            "intent='unsupported'. "
+            "Поверни тільки JSON-об'єкт строго за схемою NLQPlanV1 без зайвих полів."
         )
         user = f"now_ts={int(now_ts)}\n" f"user_text={user_text}"
         payload = {
@@ -191,7 +197,7 @@ class OpenAIClient:
         resp = self._post(payload)
         raw = self._extract_text(resp)
         plan = _parse_llm_json_strict(raw, NLQPlanV1)
-        return plan
+        return plan.model_dump(exclude_none=True)
 
     def tool_mode(self, system: str, user: str, *, max_tokens: int = 450) -> ToolModeResult:
         payload = {
@@ -207,6 +213,13 @@ class OpenAIClient:
         resp = self._post(payload)
         raw = self._extract_text(resp)
         data = _parse_llm_json(raw)
+
+        if any(
+            k in data
+            for k in ("intent", "days", "merchant_contains", "recipient_alias", "category")
+        ):
+            raise ValidationError.from_exception_data("ToolMode", [])
+
         tool = str(data.get("tool") or "").strip()
         args = data.get("args") or {}
         if not tool or not isinstance(args, dict):
