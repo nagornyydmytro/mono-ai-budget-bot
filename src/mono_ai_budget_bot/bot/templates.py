@@ -913,6 +913,44 @@ def menu_section_placeholder_message(title: str) -> str:
     return f"{title}\n\n🚧 Цей розділ ще в розробці."
 
 
+def menu_insights_message() -> str:
+    return "\n".join(
+        [
+            "✨ *Insights*",
+            "",
+            "Обери тип інсайту.",
+            "",
+            "Доступні розділи:",
+            "• Trends",
+            "• Anomalies",
+            "• What-if",
+            "• Forecast",
+            "• Explain",
+        ]
+    ).strip()
+
+
+def menu_insights_needs_data_message(section_label: str) -> str:
+    return "\n".join(
+        [
+            f"{section_label}",
+            "",
+            "Поки що недостатньо підготовлених даних для цього інсайту.",
+            "Спочатку онови транзакції або відкрий звіти, щоб підготувати facts.",
+        ]
+    ).strip()
+
+
+def menu_insight_placeholder_message(section_label: str) -> str:
+    return "\n".join(
+        [
+            f"{section_label}",
+            "",
+            "🚧 Цей insights-розділ ще в розробці.",
+        ]
+    ).strip()
+
+
 def menu_categories_action_placeholder_message(action_label: str = "ця дія") -> str:
     return f"🗂️ *Категорії*\n\n🚧 Зараз недоступно: {action_label}."
 

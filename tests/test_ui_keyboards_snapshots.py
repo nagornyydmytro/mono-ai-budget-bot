@@ -6,6 +6,8 @@ from mono_ai_budget_bot.bot.ui import (
     build_coverage_cta_keyboard,
     build_currency_screen_keyboard,
     build_data_menu_keyboard,
+    build_insights_guidance_keyboard,
+    build_insights_menu_keyboard,
     build_main_menu_keyboard,
     build_personalization_menu_keyboard,
     build_report_mode_keyboard,
@@ -73,6 +75,27 @@ def test_data_menu_keyboard_snapshot():
         [("📊 Status", "menu:data:status")],
         [("🧹 Wipe cache", "menu:data:wipe")],
         [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_insights_menu_keyboard_snapshot():
+    kb = build_insights_menu_keyboard()
+    assert _kb_dump(kb) == [
+        [("📈 Trends", "menu:insights:trends")],
+        [("🚨 Anomalies", "menu:insights:anomalies")],
+        [("🧮 What-if", "menu:insights:whatif")],
+        [("🔮 Forecast", "menu:insights:forecast")],
+        [("🧠 Explain", "menu:insights:explain")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_insights_guidance_keyboard_snapshot():
+    kb = build_insights_guidance_keyboard()
+    assert _kb_dump(kb) == [
+        [("🔄 Refresh latest", "menu:data:refresh")],
+        [("📊 Звіти", "menu:reports")],
+        [("⬅️ Назад", "menu:insights")],
     ]
 
 

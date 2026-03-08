@@ -32,6 +32,8 @@ from .ui import (
     build_categories_rule_item_actions_keyboard,
     build_categories_rules_menu_keyboard,
     build_data_menu_keyboard,
+    build_insights_guidance_keyboard,
+    build_insights_menu_keyboard,
     build_main_menu_keyboard,
     build_personalization_menu_keyboard,
     build_reports_custom_blocks_menu_keyboard,
@@ -344,6 +346,14 @@ def _rules_or_aliases_reference_leaf(
     return bool(alias_terms.get(leaf_id))
 
 
+def _has_ready_insights_data(ctx: HandlerContext, tg_id: int) -> bool:
+    stored = ctx.store.load(tg_id, "month")
+    if stored is None:
+        return False
+    facts = getattr(stored, "facts", None)
+    return isinstance(facts, dict) and bool(facts)
+
+
 def _load_alias_terms(tax: dict | None) -> dict[str, list[str]]:
     if not isinstance(tax, dict):
         return {}
@@ -455,7 +465,7 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:insights")
-    async def cb_menu_placeholder_sections(query: CallbackQuery) -> None:
+    async def cb_menu_insights(query: CallbackQuery) -> None:
         if not await ctx.gate_menu_dependencies(
             query,
             require_token=True,
@@ -464,10 +474,58 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         ):
             return
 
+        await render_menu_screen(
+            query,
+            text=templates.menu_insights_message(),
+            reply_markup=build_insights_menu_keyboard(),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data
+        in {
+            "menu:insights:trends",
+            "menu:insights:anomalies",
+            "menu:insights:whatif",
+            "menu:insights:forecast",
+            "menu:insights:explain",
+        }
+    )
+    async def cb_menu_insight_sections(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(
+            query,
+            require_token=True,
+            require_accounts=True,
+            require_ledger=True,
+        ):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        label_map = {
+            "menu:insights:trends": "📈 *Trends*",
+            "menu:insights:anomalies": "🚨 *Anomalies*",
+            "menu:insights:whatif": "🧮 *What-if*",
+            "menu:insights:forecast": "🔮 *Forecast*",
+            "menu:insights:explain": "🧠 *Explain*",
+        }
+        section_label = label_map.get(str(query.data or ""), "✨ *Insights*")
+
+        if not _has_ready_insights_data(ctx, tg_id):
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_needs_data_message(section_label),
+                reply_markup=build_insights_guidance_keyboard(),
+            )
+            return
+
         await render_placeholder_screen(
             query,
-            text=templates.menu_section_placeholder_message("✨ *Insights*"),
-            reply_markup=build_back_keyboard("menu:root"),
+            text=templates.menu_insight_placeholder_message(section_label),
+            reply_markup=build_back_keyboard("menu:insights"),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data in {"menu:data", "menu:mydata"})

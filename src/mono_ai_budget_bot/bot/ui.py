@@ -143,6 +143,29 @@ def build_data_menu_keyboard() -> Any:
     )
 
 
+def build_insights_menu_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("📈 Trends", "menu:insights:trends")],
+            [("🚨 Anomalies", "menu:insights:anomalies")],
+            [("🧮 What-if", "menu:insights:whatif")],
+            [("🔮 Forecast", "menu:insights:forecast")],
+            [("🧠 Explain", "menu:insights:explain")],
+            [(BTN_BACK, "menu:root")],
+        ]
+    )
+
+
+def build_insights_guidance_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("🔄 Refresh latest", "menu:data:refresh")],
+            [("📊 Звіти", "menu:reports")],
+            [(BTN_BACK, "menu:insights")],
+        ]
+    )
+
+
 def build_personalization_menu_keyboard() -> Any:
     return _build_rows(
         [

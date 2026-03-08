@@ -424,6 +424,107 @@ def test_menu_root_opens_after_onboarding(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_insights_opens_canonical_submenu(tmp_path: Path):
+    class StoreWithFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(facts={"totals": {"real_spend_total_uah": 456.0}})
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithFacts(),
+    )
+
+    cb_menu_insights = dp.callback_query.handlers["cb_menu_insights"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights", message=message)
+
+    asyncio.run(cb_menu_insights(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_insights_message()
+    assert _kb_dump(kb) == [
+        [("📈 Trends", "menu:insights:trends")],
+        [("🚨 Anomalies", "menu:insights:anomalies")],
+        [("🧮 What-if", "menu:insights:whatif")],
+        [("🔮 Forecast", "menu:insights:forecast")],
+        [("🧠 Explain", "menu:insights:explain")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_insight_section_guides_when_prepared_facts_missing(tmp_path: Path):
+    class EmptyStore:
+        def load(self, telegram_user_id: int, period_key: str):
+            return None
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=EmptyStore(),
+    )
+
+    cb_menu_insight_sections = dp.callback_query.handlers["cb_menu_insight_sections"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights:forecast", message=message)
+
+    asyncio.run(cb_menu_insight_sections(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_insights_needs_data_message("🔮 *Forecast*")
+    assert _kb_dump(kb) == [
+        [("🔄 Refresh latest", "menu:data:refresh")],
+        [("📊 Звіти", "menu:reports")],
+        [("⬅️ Назад", "menu:insights")],
+    ]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_reports_run_det_uses_existing_report_engine_without_ai(tmp_path: Path):
     captured: dict[str, object] = {}
 
