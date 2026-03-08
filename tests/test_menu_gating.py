@@ -476,6 +476,125 @@ def test_menu_insights_opens_canonical_submenu(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_menu_insight_trends_renders_existing_deterministic_block(tmp_path: Path):
+    class StoreWithTrendsFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "trends": {
+                        "window_days": 7,
+                        "growing": [{"label": "mcd", "delta_uah": 200.0, "pct": 50.0}],
+                        "declining": [{"label": "atb", "delta_uah": -100.0, "pct": -20.0}],
+                    }
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithTrendsFacts(),
+    )
+
+    cb_menu_insight_sections = dp.callback_query.handlers["cb_menu_insight_sections"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights:trends", message=message)
+
+    asyncio.run(cb_menu_insight_sections(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "📈 *Trends*" in text
+    assert "Детермінований зріз" in text
+    assert "Тренди" in text
+    assert "Зростання" in text
+    assert "Падіння" in text
+    assert "mcd" in text
+    assert "atb" in text
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:insights")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
+def test_menu_insight_anomalies_renders_existing_deterministic_block(tmp_path: Path):
+    class StoreWithAnomalyFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "anomalies": [
+                        {
+                            "label": "new_merchant",
+                            "last_day_uah": 500.0,
+                            "baseline_median_uah": 0.0,
+                            "reason": "first_time_large",
+                        }
+                    ]
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    tx_store.update_coverage_window(
+        1,
+        "acc1",
+        coverage_from_ts=1_699_900_000,
+        coverage_to_ts=1_700_000_000,
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        store=StoreWithAnomalyFacts(),
+    )
+
+    cb_menu_insight_sections = dp.callback_query.handlers["cb_menu_insight_sections"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="menu:insights:anomalies", message=message)
+
+    asyncio.run(cb_menu_insight_sections(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "🚨 *Anomalies*" in text
+    assert "Детермінований зріз" in text
+    assert "Аномалії" in text
+    assert "new\\_merchant" in text
+    assert "вперше велика сума за період" in text
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:insights")]]
+    assert query.answer_calls[-1] == (None, False, None)
+
+
 def test_menu_insight_section_guides_when_prepared_facts_missing(tmp_path: Path):
     class EmptyStore:
         def load(self, telegram_user_id: int, period_key: str):

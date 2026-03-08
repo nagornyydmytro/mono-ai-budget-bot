@@ -5,6 +5,7 @@ from aiogram.types import CallbackQuery
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.reports.config import ReportsConfig, build_reports_preset
+from mono_ai_budget_bot.reports.renderer import _render_anomalies_block, _render_trends_block
 from mono_ai_budget_bot.settings.activity import (
     get_activity_toggles,
     normalize_activity_settings,
@@ -354,6 +355,22 @@ def _has_ready_insights_data(ctx: HandlerContext, tg_id: int) -> bool:
     return isinstance(facts, dict) and bool(facts)
 
 
+def _load_month_facts(ctx: HandlerContext, tg_id: int) -> dict | None:
+    stored = ctx.store.load(tg_id, "month")
+    if stored is None:
+        return None
+    facts = getattr(stored, "facts", None)
+    return facts if isinstance(facts, dict) else None
+
+
+def _render_insight_body(section_key: str, facts: dict) -> str | None:
+    if section_key == "menu:insights:trends":
+        return _render_trends_block(facts.get("trends") or {})
+    if section_key == "menu:insights:anomalies":
+        return _render_anomalies_block(facts)
+    return None
+
+
 def _load_alias_terms(tax: dict | None) -> dict[str, list[str]]:
     if not isinstance(tax, dict):
         return {}
@@ -514,7 +531,33 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         }
         section_label = label_map.get(str(query.data or ""), "✨ *Insights*")
 
-        if not _has_ready_insights_data(ctx, tg_id):
+        facts = _load_month_facts(ctx, tg_id)
+        if not isinstance(facts, dict) or not facts:
+            await render_menu_screen(
+                query,
+                text=templates.menu_insights_needs_data_message(section_label),
+                reply_markup=build_insights_guidance_keyboard(),
+            )
+            return
+
+        rendered = _render_insight_body(str(query.data or ""), facts)
+        if rendered:
+            intro_map = {
+                "menu:insights:trends": "Детермінований зріз на основі вже підготовлених trends facts за місячним контекстом.",
+                "menu:insights:anomalies": "Детермінований зріз на основі вже підготовлених anomaly facts без вигадування нових даних.",
+            }
+            await render_menu_screen(
+                query,
+                text=templates.menu_insight_result_message(
+                    section_label,
+                    intro_map.get(str(query.data or ""), "Детермінований insights-зріз."),
+                    rendered,
+                ),
+                reply_markup=build_back_keyboard("menu:insights"),
+            )
+            return
+
+        if str(query.data or "") in {"menu:insights:trends", "menu:insights:anomalies"}:
             await render_menu_screen(
                 query,
                 text=templates.menu_insights_needs_data_message(section_label),

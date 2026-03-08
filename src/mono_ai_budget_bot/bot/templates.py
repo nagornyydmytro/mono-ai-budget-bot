@@ -951,6 +951,18 @@ def menu_insight_placeholder_message(section_label: str) -> str:
     ).strip()
 
 
+def menu_insight_result_message(section_label: str, intro: str, body: str) -> str:
+    return "\n".join(
+        [
+            section_label,
+            "",
+            intro,
+            "",
+            body.strip(),
+        ]
+    ).strip()
+
+
 def menu_categories_action_placeholder_message(action_label: str = "ця дія") -> str:
     return f"🗂️ *Категорії*\n\n🚧 Зараз недоступно: {action_label}."
 
