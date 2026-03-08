@@ -1858,6 +1858,192 @@ def test_menu_uncat_shows_empty_state_when_queue_is_empty(tmp_path: Path):
     assert query.answer_calls[-1] == (None, False, None)
 
 
+def test_uncat_suggest_rejects_pid_mismatch_and_keeps_state(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    uncat_store = DummyUncatStore(
+        items=[
+            UncatItem(
+                tx_id="tx1",
+                time=1_700_000_100,
+                account_id="acc1",
+                amount=-12345,
+                description="Aston express",
+                mcc=5812,
+                reason="purchase_without_rule",
+            )
+        ]
+    )
+    rules_store = DummyRulesStore()
+    uncat_pending_store = DummyUncatPendingStore(
+        pending=UncatPending(
+            pending_id="real-pid",
+            created_ts=int(time.time()),
+            ttl_sec=900,
+            stage="review",
+            tx_id="tx1",
+            used=False,
+        )
+    )
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        uncat_store=uncat_store,
+        uncat_pending_store=uncat_pending_store,
+        rules_store=rules_store,
+    )
+
+    cb_uncat_suggest = dp.callback_query.handlers["cb_uncat_suggest"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="uncat_suggest:wrong-pid:cafe", message=message)
+
+    asyncio.run(cb_uncat_suggest(query))
+
+    assert message.answers == []
+    assert query.answer_calls[-1] == (templates.stale_button_message(), True, None)
+    assert len(uncat_store.load(1)) == 1
+    assert rules_store.load(1) == []
+    cur = uncat_pending_store.load(1)
+    assert cur is not None
+    assert cur.pending_id == "real-pid"
+    assert cur.used is False
+
+
+def test_uncat_choose_rejects_expired_pending_and_keeps_state(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    uncat_store = DummyUncatStore(
+        items=[
+            UncatItem(
+                tx_id="tx1",
+                time=1_700_000_100,
+                account_id="acc1",
+                amount=-12345,
+                description="Aston express",
+                mcc=5812,
+                reason="purchase_without_rule",
+            )
+        ]
+    )
+    expired_pending = UncatPending(
+        pending_id="pid123",
+        created_ts=int(time.time()) - 10_000,
+        ttl_sec=10,
+        stage="review",
+        tx_id="tx1",
+        used=False,
+    )
+    uncat_pending_store = DummyUncatPendingStore(pending=expired_pending)
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        uncat_store=uncat_store,
+        uncat_pending_store=uncat_pending_store,
+    )
+
+    cb_uncat_choose = dp.callback_query.handlers["cb_uncat_choose"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="uncat_choose:pid123", message=message)
+
+    asyncio.run(cb_uncat_choose(query))
+
+    assert message.answers == []
+    assert query.answer_calls[-1] == (templates.stale_button_message(), True, None)
+    assert len(uncat_store.load(1)) == 1
+    cur = uncat_pending_store.load(1)
+    assert cur is not None
+    assert cur.stage == "review"
+    assert cur.used is False
+
+
+def test_uncat_pick_rejects_used_pending_and_keeps_state(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    uncat_store = DummyUncatStore(
+        items=[
+            UncatItem(
+                tx_id="tx1",
+                time=1_700_000_100,
+                account_id="acc1",
+                amount=-12345,
+                description="Aston express",
+                mcc=5812,
+                reason="purchase_without_rule",
+            )
+        ]
+    )
+    rules_store = DummyRulesStore()
+    used_pending = UncatPending(
+        pending_id="pid123",
+        created_ts=int(time.time()),
+        ttl_sec=900,
+        stage="pick_leaf",
+        tx_id="tx1",
+        used=True,
+    )
+    uncat_pending_store = DummyUncatPendingStore(pending=used_pending)
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        uncat_store=uncat_store,
+        uncat_pending_store=uncat_pending_store,
+        rules_store=rules_store,
+    )
+
+    cb_uncat_pick = dp.callback_query.handlers["cb_uncat_pick"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(user_id=1, data="uncat_pick:pid123:cafe", message=message)
+
+    asyncio.run(cb_uncat_pick(query))
+
+    assert message.answers == []
+    assert query.answer_calls[-1] == (templates.stale_button_message(), True, None)
+    assert len(uncat_store.load(1)) == 1
+    assert rules_store.load(1) == []
+    cur = uncat_pending_store.load(1)
+    assert cur is not None
+    assert cur.used is True
+
+
 def test_menu_categories_action_placeholder_renders_consistent_screen(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     dp = _build_dispatcher(
