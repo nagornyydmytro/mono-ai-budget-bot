@@ -72,6 +72,20 @@ def test_router_threshold_count_over():
     assert parsed["threshold_uah"] == 200.0
 
 
+def test_router_threshold_count_under():
+    parsed = parse_nlq_intent("Скільки витрат було менше 60 грн за 30 днів?")
+    assert parsed["intent"] == "count_under"
+    assert parsed["entity_kind"] == "spend"
+    assert parsed["threshold_uah"] == 60.0
+
+
+def test_router_threshold_query_without_count_phrasing():
+    parsed = parse_nlq_intent("Які витрати були більше 100 грн за 30 днів?")
+    assert parsed["intent"] == "threshold_query"
+    assert parsed["entity_kind"] == "spend"
+    assert parsed["threshold_uah"] == 100.0
+
+
 def test_router_last_time_merchant():
     parsed = parse_nlq_intent("Коли востаннє я витрачав на силпо?")
     assert parsed["intent"] == "last_time"
@@ -117,6 +131,17 @@ def test_executor_extended_intents(monkeypatch):
         1, {"intent": "count_over", "days": 30, "threshold_uah": 200.0, "entity_kind": "spend"}
     )
     assert "було 1 операцій більше 200.00 грн" in msg
+
+    msg = execute_intent(
+        1, {"intent": "count_under", "days": 30, "threshold_uah": 60.0, "entity_kind": "spend"}
+    )
+    assert "було 3 операцій менше 60.00 грн" in msg
+
+    msg = execute_intent(
+        1, {"intent": "threshold_query", "days": 30, "threshold_uah": 100.0, "entity_kind": "spend"}
+    )
+    assert "було 2 операцій більше 100.00 грн" in msg
+    assert "Найбільша сума" in msg
 
     msg = execute_intent(
         1, {"intent": "last_time", "days": 30, "entity_kind": "spend", "merchant_contains": "силпо"}
