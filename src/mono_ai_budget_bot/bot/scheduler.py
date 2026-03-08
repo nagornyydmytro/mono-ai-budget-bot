@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from mono_ai_budget_bot.bot.formatting import format_money_uah_pretty
 from mono_ai_budget_bot.bot.ui import build_uncat_prompt_keyboard
 from mono_ai_budget_bot.settings.activity import is_activity_enabled
 from mono_ai_budget_bot.storage.profile_store import ProfileStore
@@ -112,6 +113,112 @@ async def safe_send(bot, chat_id: int, text: str, logger: logging.Logger) -> Non
         logger.warning("Failed to send message to chat_id=%s: %s", chat_id, e)
 
 
+def build_activity_proactive_messages(profile: dict, facts: dict | None) -> list[str]:
+    if not isinstance(profile, dict) or not isinstance(facts, dict) or not facts:
+        return []
+
+    messages: list[str] = []
+
+    if is_activity_enabled(profile, "trends_alerts"):
+        trends = facts.get("trends") or {}
+        if isinstance(trends, dict):
+            growing = trends.get("growing") or []
+            declining = trends.get("declining") or []
+
+            grow_item = next((x for x in growing if isinstance(x, dict)), None)
+            fall_item = next((x for x in declining if isinstance(x, dict)), None)
+
+            if isinstance(grow_item, dict):
+                label = str(grow_item.get("label") or "—").strip() or "—"
+                delta = float(grow_item.get("delta_uah") or 0.0)
+                messages.append(
+                    f"📈 Trends nudge\nНайпомітніше зростання: {label} (+{format_money_uah_pretty(delta)})."
+                )
+            elif isinstance(fall_item, dict):
+                label = str(fall_item.get("label") or "—").strip() or "—"
+                delta = abs(float(fall_item.get("delta_uah") or 0.0))
+                messages.append(
+                    f"📈 Trends nudge\nНайпомітніше падіння: {label} (-{format_money_uah_pretty(delta)})."
+                )
+
+    if is_activity_enabled(profile, "anomalies_alerts"):
+        anomalies_raw = facts.get("anomalies")
+        anomalies: list[dict] = []
+        if isinstance(anomalies_raw, list):
+            anomalies = [x for x in anomalies_raw if isinstance(x, dict)]
+        elif isinstance(anomalies_raw, dict):
+            items = anomalies_raw.get("items")
+            if isinstance(items, list):
+                anomalies = [x for x in items if isinstance(x, dict)]
+
+        if anomalies:
+            item = anomalies[0]
+            label = str(item.get("label") or "—").strip() or "—"
+            fact_uah = float(item.get("last_day_uah") or 0.0)
+            base_uah = float(item.get("baseline_median_uah") or 0.0)
+            messages.append(
+                f"🚨 Anomaly nudge\n{label}: факт {format_money_uah_pretty(fact_uah)} при базі ~{format_money_uah_pretty(base_uah)}."
+            )
+
+    if is_activity_enabled(profile, "forecast_alerts"):
+        totals = facts.get("totals") or {}
+        if isinstance(totals, dict):
+            spend_uah = float(totals.get("real_spend_total_uah") or 0.0)
+            if spend_uah > 0:
+                messages.append(
+                    "\n".join(
+                        [
+                            "🔮 Forecast nudge",
+                            f"Поточна deterministic projection на 30 днів: ~{format_money_uah_pretty(spend_uah)} реальних витрат.",
+                            "Це механічна проєкція, а не prediction magic.",
+                        ]
+                    )
+                )
+
+    if is_activity_enabled(profile, "coach_nudges"):
+        whatifs = facts.get("whatif_suggestions") or []
+        if isinstance(whatifs, list) and whatifs:
+            item = next((x for x in whatifs if isinstance(x, dict)), None)
+            if isinstance(item, dict):
+                title = str(item.get("title") or "—").strip() or "—"
+                scenarios = item.get("scenarios") or []
+                scenario = next((x for x in scenarios if isinstance(x, dict)), None)
+                if isinstance(scenario, dict):
+                    pct = int(scenario.get("pct") or 0)
+                    savings = float(scenario.get("monthly_savings_uah") or 0.0)
+                    if pct > 0 and savings > 0:
+                        messages.append(
+                            f"🧮 Coach nudge\nСпробуй сценарій -{pct}% для '{title}': потенційна економія ~{format_money_uah_pretty(savings)}/міс."
+                        )
+
+    return messages
+
+
+async def maybe_send_activity_proactive_messages(
+    u,
+    *,
+    bot,
+    profile_store: ProfileStore,
+    report_store,
+    logger: logging.Logger,
+) -> None:
+    if not getattr(u, "autojobs_enabled", True):
+        return
+    if not getattr(u, "chat_id", None):
+        return
+
+    prof = profile_store.load(u.telegram_user_id) or {}
+    stored = report_store.load(u.telegram_user_id, "month")
+    facts = (
+        stored.facts
+        if stored is not None and isinstance(getattr(stored, "facts", None), dict)
+        else None
+    )
+
+    for text in build_activity_proactive_messages(prof, facts):
+        await safe_send(bot, u.chat_id, text, logger)
+
+
 def start_jobs(
     scheduler: AsyncIOScheduler,
     *,
@@ -200,6 +307,13 @@ def start_jobs(
             if ok:
                 refreshed += 1
             await maybe_send_uncat_prompt(u, mode="refresh")
+            await maybe_send_activity_proactive_messages(
+                u,
+                bot=bot,
+                profile_store=profile_store,
+                report_store=report_store,
+                logger=logger,
+            )
         logger.info(
             "Scheduler: refresh_all_users done. scanned=%s refreshed=%s (days_back=%s)",
             scanned,
