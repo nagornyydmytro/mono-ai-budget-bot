@@ -22,6 +22,20 @@ from .onboarding_flow import submit_manual_token
 from .ui import build_back_keyboard, build_coverage_cta_keyboard, build_nlq_clarify_keyboard
 
 
+def _is_standard_nlq_clarify_kind(kind: str | None) -> bool:
+    return kind in {"merchant", "recipient", "category", "alias", "category_alias"}
+
+
+def _nlq_other_manual_mode(kind: str | None) -> tuple[str, str]:
+    if kind == "recipient":
+        return "recipient", templates.manual_mode_hint_recipient()
+    if kind == "category":
+        return "category", templates.manual_mode_hint_default()
+    if kind == "category_alias":
+        return "merchant_or_recipient", templates.manual_mode_hint_category_alias()
+    return "merchant_or_recipient", templates.manual_mode_hint_default()
+
+
 def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
     @dp.callback_query(lambda c: bool(c.data) and c.data.startswith("nlq_pick:"))
     async def cb_nlq_pick(query: CallbackQuery) -> None:
@@ -87,16 +101,7 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
 
         mem = memory_store.load_memory(tg_id)
         kind = mem.get("pending_kind") if isinstance(mem.get("pending_kind"), str) else None
-
-        if kind == "recipient":
-            expected = "recipient"
-            hint = templates.manual_mode_hint_recipient()
-        elif kind == "category_alias":
-            expected = "merchant_or_recipient"
-            hint = templates.manual_mode_hint_category_alias()
-        else:
-            expected = "merchant_or_recipient"
-            hint = templates.manual_mode_hint_default()
+        expected, hint = _nlq_other_manual_mode(kind)
 
         memory_store.set_pending_manual_mode(
             tg_id,
@@ -466,21 +471,27 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                         return
                 kind = mem.get("pending_kind")
                 opts = mem.get("pending_options")
+                pending_id = (
+                    mem.get("pending_id") if isinstance(mem.get("pending_id"), str) else None
+                )
 
-                if (
-                    kind in {"recipient", "category_alias", "paging"}
-                    and isinstance(opts, list)
-                    and opts
-                ):
+                if _is_standard_nlq_clarify_kind(kind) and isinstance(opts, list) and opts:
                     kb = build_nlq_clarify_keyboard(
                         opts,
-                        pending_id=(
-                            mem.get("pending_id")
-                            if isinstance(mem.get("pending_id"), str)
-                            else None
-                        ),
+                        pending_id=pending_id,
                         limit=8,
-                        include_other=(kind != "paging"),
+                        include_other=True,
+                        include_cancel=True,
+                    )
+                    await message.answer(resp.result.text, reply_markup=kb)
+                    return
+
+                if kind == "paging" and isinstance(opts, list) and opts:
+                    kb = build_nlq_clarify_keyboard(
+                        opts,
+                        pending_id=pending_id,
+                        limit=8,
+                        include_other=False,
                         include_cancel=True,
                     )
                     await message.answer(resp.result.text, reply_markup=kb)

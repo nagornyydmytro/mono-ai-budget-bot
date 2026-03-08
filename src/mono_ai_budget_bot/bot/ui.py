@@ -12,7 +12,7 @@ except Exception:
 
 
 BTN_BACK = "⬅️ Назад"
-BTN_OTHER = "✍️ Інший варіант"
+BTN_OTHER = "✍️ Інше"
 BTN_CANCEL = "❌ Скасувати"
 BTN_CONFIRM = "✅ Підтвердити"
 BTN_REFRESH = "🔄 Оновити"
@@ -400,7 +400,7 @@ def build_nlq_clarify_keyboard(
         text = opt
         if len(text) > 32:
             text = text[:29].rstrip() + "…"
-        rows.append([(f"{i}) {text}", f"{pick_prefix}{i}")])
+        rows.append([(f"{i}. {text}", f"{pick_prefix}{i}")])
 
     if include_other:
         rows.append([(BTN_OTHER, other_data)])
