@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.nlq.types import NLQRequest
-from mono_ai_budget_bot.taxonomy.models import add_category
+from mono_ai_budget_bot.taxonomy.models import add_category, add_subcategory, is_leaf, rename_node
 from mono_ai_budget_bot.taxonomy.presets import build_taxonomy_preset
 from mono_ai_budget_bot.taxonomy.rules import Rule
 
@@ -219,6 +219,99 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
             now_ts=now_ts,
         )
         if handled_custom_report:
+            return
+
+        if manual is not None and str(manual.get("expected") or "") == "categories_name":
+            value = " ".join(text_raw.split()).strip()
+            if not value or len(value) > 60:
+                await message.answer(
+                    "❌ Некоректна назва. Спробуй ще раз (1–60 символів).",
+                    reply_markup=build_back_keyboard("menu:categories"),
+                )
+                return
+
+            mem = memory_store.load_memory(user_id)
+            state = mem.get("categories_ui")
+            if not isinstance(state, dict):
+                memory_store.pop_pending_manual_mode(user_id)
+                await message.answer("Немає активної дії для категорій.")
+                return
+
+            tax = ctx.taxonomy_store.load(user_id)
+            if tax is None:
+                tax = build_taxonomy_preset("min")
+
+            mode = str(state.get("mode") or "")
+            try:
+                if mode == "add_category":
+                    root_kind = str(state.get("root_kind") or "").strip()
+                    add_category(tax, root_kind=root_kind, name=value)
+                    ctx.taxonomy_store.save(user_id, tax)
+                    text_out = f"✅ Категорію збережено: *{value}*"
+                elif mode == "add_subcategory":
+                    parent_id = str(state.get("parent_id") or "").strip()
+                    parent_name = str(state.get("parent_name") or "").strip() or parent_id
+                    parent_was_leaf = is_leaf(tax, parent_id)
+                    new_leaf_id = add_subcategory(tax, parent_id=parent_id, name=value)
+                    if parent_was_leaf:
+                        rules = ctx.rules_store.load(user_id)
+                        updated_rules = []
+                        changed = False
+                        for rule in rules:
+                            if str(getattr(rule, "leaf_id", "") or "").strip() == parent_id:
+                                updated_rules.append(
+                                    Rule(
+                                        id=rule.id,
+                                        leaf_id=new_leaf_id,
+                                        merchant_contains=rule.merchant_contains,
+                                        recipient_contains=rule.recipient_contains,
+                                    )
+                                )
+                                changed = True
+                            else:
+                                updated_rules.append(rule)
+                        if changed:
+                            ctx.rules_store.save(user_id, updated_rules)
+
+                        alias_terms = tax.get("alias_terms")
+                        if not isinstance(alias_terms, dict):
+                            alias_terms = {}
+                        moved_terms = list(alias_terms.get(parent_id) or [])
+                        if moved_terms:
+                            current = [
+                                str(x).strip()
+                                for x in alias_terms.get(new_leaf_id, [])
+                                if isinstance(x, str) and str(x).strip()
+                            ]
+                            for term in moved_terms:
+                                if term not in current:
+                                    current.append(term)
+                            alias_terms[new_leaf_id] = current
+                            alias_terms.pop(parent_id, None)
+                            tax["alias_terms"] = alias_terms
+
+                    ctx.taxonomy_store.save(user_id, tax)
+                    text_out = f"✅ Підкатегорію збережено: *{parent_name} → {value}*"
+                elif mode == "rename":
+                    node_id = str(state.get("node_id") or "").strip()
+                    rename_node(tax, node_id=node_id, new_name=value)
+                    ctx.taxonomy_store.save(user_id, tax)
+                    text_out = f"✅ Категорію перейменовано: *{value}*"
+                else:
+                    memory_store.pop_pending_manual_mode(user_id)
+                    await message.answer("Невідома дія для категорій.")
+                    return
+            except Exception:
+                await message.answer(
+                    "❌ Не вдалося зберегти категорію. Перевір назву або вибір батьківської категорії.",
+                    reply_markup=build_back_keyboard("menu:categories"),
+                )
+                return
+
+            memory_store.pop_pending_manual_mode(user_id)
+            mem.pop("categories_ui", None)
+            memory_store.save_memory(user_id, mem)
+            await message.answer(text_out, reply_markup=build_back_keyboard("menu:categories"))
             return
 
         if manual is not None and str(manual.get("expected") or "") == "categories_rules_term":

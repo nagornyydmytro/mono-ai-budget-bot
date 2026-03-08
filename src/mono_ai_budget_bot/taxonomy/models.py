@@ -372,6 +372,78 @@ def leaf_ids(tax: dict[str, Any], *, root_kind: TaxKind) -> list[str]:
     return out
 
 
+def rename_node(tax: dict[str, Any], *, node_id: str, new_name: str) -> str:
+    nid = (node_id or "").strip()
+    if not nid:
+        raise ValueError("missing node_id")
+
+    node = _node(tax, nid)
+    if bool(node.get("is_root")):
+        raise ValueError("root cannot be renamed")
+
+    nm = _norm_name(new_name)
+    if not nm or len(nm) > 60:
+        raise ValueError("invalid category name")
+
+    pid = node.get("parent_id")
+    if not isinstance(pid, str) or not pid:
+        raise ValueError("missing parent_id")
+
+    parent = _node(tax, pid)
+    siblings = parent.get("children")
+    if not isinstance(siblings, list):
+        siblings = []
+
+    nodes = tax.get("nodes")
+    if not isinstance(nodes, dict):
+        raise ValueError("taxonomy.nodes is missing")
+
+    for sid in siblings:
+        if sid == nid:
+            continue
+        sibling = nodes.get(sid)
+        if not isinstance(sibling, dict):
+            continue
+        if _norm_name(str(sibling.get("name") or "")).lower() == nm.lower():
+            raise ValueError("duplicate category name")
+
+    node["name"] = nm
+    validate_taxonomy(tax)
+    return nid
+
+
+def delete_node(tax: dict[str, Any], *, node_id: str) -> str:
+    nid = (node_id or "").strip()
+    if not nid:
+        raise ValueError("missing node_id")
+
+    node = _node(tax, nid)
+    if bool(node.get("is_root")):
+        raise ValueError("root cannot be deleted")
+
+    children = node.get("children")
+    if isinstance(children, list) and children:
+        raise ValueError("cannot delete category with children")
+
+    pid = node.get("parent_id")
+    if not isinstance(pid, str) or not pid:
+        raise ValueError("missing parent_id")
+
+    parent = _node(tax, pid)
+    parent_children = parent.get("children")
+    if not isinstance(parent_children, list):
+        parent_children = []
+    parent["children"] = [cid for cid in parent_children if cid != nid]
+
+    nodes = tax.get("nodes")
+    if not isinstance(nodes, dict):
+        raise ValueError("taxonomy.nodes is missing")
+    nodes.pop(nid, None)
+
+    validate_taxonomy(tax)
+    return nid
+
+
 def ensure_leaf_target(tax: dict[str, Any], *, node_id: str) -> None:
     nid = (node_id or "").strip()
     if not nid:

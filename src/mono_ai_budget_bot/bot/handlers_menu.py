@@ -13,7 +13,7 @@ from mono_ai_budget_bot.settings.activity import (
 )
 from mono_ai_budget_bot.settings.onboarding import apply_onboarding_settings
 from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
-from mono_ai_budget_bot.taxonomy.models import ensure_leaf_target
+from mono_ai_budget_bot.taxonomy.models import delete_node, ensure_leaf_target
 from mono_ai_budget_bot.taxonomy.rules import Rule
 
 from . import templates
@@ -254,6 +254,94 @@ def _leaf_name_by_id(tax: dict | None, leaf_id: str) -> str:
         return name
     parent_name = str(parent.get("name") or "").strip()
     return f"{parent_name} → {name}" if parent_name else name
+
+
+def _taxonomy_category_items(tax: dict | None) -> list[tuple[str, str]]:
+    if not isinstance(tax, dict):
+        return []
+
+    roots = tax.get("roots")
+    nodes = tax.get("nodes")
+    if not isinstance(roots, dict) or not isinstance(nodes, dict):
+        return []
+
+    out: list[tuple[str, str]] = []
+    for root_kind, root_label in (("expense", "Витрати"), ("income", "Доходи")):
+        rid = roots.get(root_kind)
+        if not isinstance(rid, str):
+            continue
+        root = nodes.get(rid)
+        if not isinstance(root, dict):
+            continue
+        for cid in list(root.get("children") or []):
+            node = nodes.get(cid)
+            if not isinstance(node, dict):
+                continue
+            name = str(node.get("name") or "").strip()
+            if not name:
+                continue
+            out.append((cid, f"{root_label} → {name}"))
+    return out
+
+
+def _taxonomy_editable_items(tax: dict | None) -> list[tuple[str, str]]:
+    if not isinstance(tax, dict):
+        return []
+
+    roots = tax.get("roots")
+    nodes = tax.get("nodes")
+    if not isinstance(roots, dict) or not isinstance(nodes, dict):
+        return []
+
+    out: list[tuple[str, str]] = []
+    for root_kind, root_label in (("expense", "Витрати"), ("income", "Доходи")):
+        rid = roots.get(root_kind)
+        if not isinstance(rid, str):
+            continue
+        root = nodes.get(rid)
+        if not isinstance(root, dict):
+            continue
+        for cid in list(root.get("children") or []):
+            node = nodes.get(cid)
+            if not isinstance(node, dict):
+                continue
+            name = str(node.get("name") or "").strip()
+            if not name:
+                continue
+            out.append((cid, f"{root_label} → {name}"))
+            for sid in list(node.get("children") or []):
+                sub = nodes.get(sid)
+                if not isinstance(sub, dict):
+                    continue
+                sub_name = str(sub.get("name") or "").strip()
+                if not sub_name:
+                    continue
+                out.append((sid, f"{root_label} → {name} → {sub_name}"))
+    return out
+
+
+def _categories_picker_keyboard(
+    items: list[tuple[str, str]], *, callback_prefix: str, back_callback: str
+):
+    rows = [[(label, f"{callback_prefix}:{node_id}")] for node_id, label in items]
+    rows.append([("⬅️ Назад", back_callback)])
+    return build_rows_keyboard(rows)
+
+
+def _categories_manual_state_save(tg_id: int, *, state: dict) -> None:
+    mem = memory_store.load_memory(tg_id)
+    mem["categories_ui"] = dict(state)
+    memory_store.save_memory(tg_id, mem)
+
+
+def _rules_or_aliases_reference_leaf(
+    ctx: HandlerContext, tg_id: int, *, leaf_id: str, tax: dict | None
+) -> bool:
+    for rule in ctx.rules_store.load(tg_id):
+        if str(getattr(rule, "leaf_id", "") or "").strip() == leaf_id:
+            return True
+    alias_terms = _load_alias_terms(tax)
+    return bool(alias_terms.get(leaf_id))
 
 
 def _load_alias_terms(tax: dict | None) -> dict[str, list[str]]:
@@ -1364,18 +1452,263 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             reply_markup=build_categories_menu_keyboard(),
         )
 
-    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:"))
-    async def cb_menu_categories_placeholders(query: CallbackQuery) -> None:
-        if not await ctx.gate_menu_dependencies(
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories:add")
+    async def cb_menu_categories_add(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+        await render_menu_screen(
             query,
-            require_token=True,
-            require_accounts=True,
-        ):
+            text="🗂️ *Додати категорію*\n\nОбери розділ.",
+            reply_markup=build_rows_keyboard(
+                [
+                    [("💸 Витрати", "menu:categories:addpick:expense")],
+                    [("💰 Доходи", "menu:categories:addpick:income")],
+                    [("⬅️ Назад", "menu:categories")],
+                ]
+            ),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data in {"menu:categories:addpick:expense", "menu:categories:addpick:income"}
+    )
+    async def cb_menu_categories_add_pick(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
             return
 
-        action_label = _categories_action_label(str(query.data or ""))
-        await render_placeholder_screen(
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        root_kind = str(query.data or "").rsplit(":", 1)[1]
+        _categories_manual_state_save(
+            tg_id,
+            state={"mode": "add_category", "root_kind": root_kind},
+        )
+        memory_store.set_pending_manual_mode(
+            tg_id,
+            expected="categories_name",
+            hint="Введи назву категорії (1–60 символів).",
+            source="categories",
+        )
+        await render_menu_screen(
             query,
-            text=templates.menu_categories_action_placeholder_message(action_label),
+            text="🗂️ *Додати категорію*\n\nВведи назву нової категорії вручну.",
+            reply_markup=build_back_keyboard("menu:categories"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str) and c.data == "menu:categories:add_subcategory"
+    )
+    async def cb_menu_categories_add_subcategory(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        tax = ctx.taxonomy_store.load(tg_id)
+        items = _taxonomy_category_items(tax)
+        await render_menu_screen(
+            query,
+            text="🗂️ *Додати підкатегорію*\n\nОбери батьківську категорію.",
+            reply_markup=_categories_picker_keyboard(
+                items,
+                callback_prefix="menu:categories:add_subcategory:pick",
+                back_callback="menu:categories",
+            ),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data.startswith("menu:categories:add_subcategory:pick:")
+    )
+    async def cb_menu_categories_add_subcategory_pick(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        parent_id = str(query.data or "").rsplit(":", 1)[1]
+        tax = ctx.taxonomy_store.load(tg_id)
+        if not isinstance(tax, dict):
+            await query.answer("Таксономія ще не налаштована", show_alert=True)
+            return
+
+        parent_name = _leaf_name_by_id(tax, parent_id)
+        _categories_manual_state_save(
+            tg_id,
+            state={
+                "mode": "add_subcategory",
+                "parent_id": parent_id,
+                "parent_name": parent_name,
+            },
+        )
+        memory_store.set_pending_manual_mode(
+            tg_id,
+            expected="categories_name",
+            hint="Введи назву підкатегорії (1–60 символів).",
+            source="categories",
+        )
+        await render_menu_screen(
+            query,
+            text=f"🗂️ *Додати підкатегорію*\n\nБатьківська категорія: *{parent_name}*\n\nВведи назву підкатегорії вручну.",
+            reply_markup=build_back_keyboard("menu:categories"),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories:rename")
+    async def cb_menu_categories_rename(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        items = _taxonomy_editable_items(ctx.taxonomy_store.load(tg_id))
+        await render_menu_screen(
+            query,
+            text="🗂️ *Перейменувати категорію*\n\nОбери категорію або підкатегорію.",
+            reply_markup=_categories_picker_keyboard(
+                items,
+                callback_prefix="menu:categories:rename:pick",
+                back_callback="menu:categories",
+            ),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:rename:pick:")
+    )
+    async def cb_menu_categories_rename_pick(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        node_id = str(query.data or "").rsplit(":", 1)[1]
+        tax = ctx.taxonomy_store.load(tg_id)
+        if not isinstance(tax, dict):
+            await query.answer("Таксономія ще не налаштована", show_alert=True)
+            return
+
+        node_name = _leaf_name_by_id(tax, node_id)
+        _categories_manual_state_save(
+            tg_id,
+            state={"mode": "rename", "node_id": node_id, "node_name": node_name},
+        )
+        memory_store.set_pending_manual_mode(
+            tg_id,
+            expected="categories_name",
+            hint="Введи нову назву (1–60 символів).",
+            source="categories",
+        )
+        await render_menu_screen(
+            query,
+            text=f"🗂️ *Перейменувати категорію*\n\nПоточна категорія: *{node_name}*\n\nВведи нову назву вручну.",
+            reply_markup=build_back_keyboard("menu:categories"),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:categories:delete")
+    async def cb_menu_categories_delete(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        items = _taxonomy_editable_items(ctx.taxonomy_store.load(tg_id))
+        await render_menu_screen(
+            query,
+            text="🗂️ *Видалити категорію*\n\nОбери категорію або підкатегорію.",
+            reply_markup=_categories_picker_keyboard(
+                items,
+                callback_prefix="menu:categories:delete:pick",
+                back_callback="menu:categories",
+            ),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:delete:pick:")
+    )
+    async def cb_menu_categories_delete_pick(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        node_id = str(query.data or "").rsplit(":", 1)[1]
+        tax = ctx.taxonomy_store.load(tg_id)
+        if not isinstance(tax, dict):
+            await query.answer("Таксономія ще не налаштована", show_alert=True)
+            return
+
+        node_name = _leaf_name_by_id(tax, node_id)
+        try:
+            if _rules_or_aliases_reference_leaf(ctx, tg_id, leaf_id=node_id, tax=tax):
+                raise ValueError("Категорія використовується в rules / aliases")
+            delete_node({**tax, "nodes": dict(tax.get("nodes") or {})}, node_id=node_id)
+        except Exception as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+
+        await render_menu_screen(
+            query,
+            text=f"🗂️ *Видалити категорію*\n\nПідтвердити видалення: *{node_name}*?",
+            reply_markup=build_rows_keyboard(
+                [
+                    [("✅ Видалити", f"menu:categories:delete:confirm:{node_id}")],
+                    [("❌ Скасувати", "menu:categories:delete")],
+                ]
+            ),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str) and c.data.startswith("menu:categories:delete:confirm:")
+    )
+    async def cb_menu_categories_delete_confirm(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        node_id = str(query.data or "").rsplit(":", 1)[1]
+        tax = ctx.taxonomy_store.load(tg_id)
+        if not isinstance(tax, dict):
+            await query.answer("Таксономія ще не налаштована", show_alert=True)
+            return
+
+        node_name = _leaf_name_by_id(tax, node_id)
+        if _rules_or_aliases_reference_leaf(ctx, tg_id, leaf_id=node_id, tax=tax):
+            await query.answer("Категорія використовується в rules / aliases", show_alert=True)
+            return
+
+        try:
+            delete_node(tax, node_id=node_id)
+        except Exception as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+
+        ctx.taxonomy_store.save(tg_id, tax)
+        await render_menu_screen(
+            query,
+            text=f"✅ Категорію видалено: *{node_name}*",
             reply_markup=build_back_keyboard("menu:categories"),
         )

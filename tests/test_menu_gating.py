@@ -2242,39 +2242,6 @@ def test_uncat_pick_rejects_used_pending_and_keeps_state(tmp_path: Path):
     assert cur.used is True
 
 
-def test_menu_categories_action_placeholder_renders_consistent_screen(tmp_path: Path):
-    tx_store = TxStore(tmp_path / "tx")
-    dp = _build_dispatcher(
-        cfg=UserConfig(
-            telegram_user_id=1,
-            mono_token="token",
-            selected_account_ids=["acc1"],
-            chat_id=None,
-            autojobs_enabled=False,
-            updated_at=0.0,
-        ),
-        profile={
-            "onboarding_completed": True,
-            "activity_mode": "balanced",
-            "uncategorized_prompt_frequency": "always",
-            "persona": "neutral",
-        },
-        tx_store=tx_store,
-    )
-
-    cb_menu_categories_placeholders = dp.callback_query.handlers["cb_menu_categories_placeholders"]
-    message = DummyMessage(user_id=1)
-    query = DummyCallbackQuery(user_id=1, data="menu:categories:add_subcategory", message=message)
-
-    asyncio.run(cb_menu_categories_placeholders(query))
-
-    assert len(message.answers) == 1
-    text, kb = message.answers[0]
-    assert text == templates.menu_categories_action_placeholder_message("додати підкатегорію")
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:categories")]]
-    assert query.answer_calls[-1] == (None, False, None)
-
-
 def test_menu_categories_rules_opens_canonical_submenu_with_summary(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     taxonomy = {
