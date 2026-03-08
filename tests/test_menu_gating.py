@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -121,9 +122,10 @@ class DummyUncatPendingStore:
         self.pending = pending
 
     def create(self, telegram_user_id: int, *, tx_id: str, stage: str, ttl_sec: int = 900):
+        now_ts = int(time.time())
         self.pending = UncatPending(
             pending_id="pid123",
-            created_ts=1_700_000_000,
+            created_ts=now_ts,
             ttl_sec=ttl_sec,
             stage=stage,
             tx_id=tx_id,
@@ -1701,11 +1703,121 @@ def test_menu_uncat_opens_first_queue_item_instead_of_placeholder(tmp_path: Path
     text, kb = message.answers[0]
     assert text == templates.uncat_purchase_prompt("Aston express", "123.45 грн")
     assert _kb_dump(kb) == [
-        [("Кафе", "uncat_pick:pid123:cafe")],
-        [("➕ Створити категорію", "uncat_create:pid123")],
-        [("❌ Скасувати", "uncat_cancel:pid123")],
+        [("✅ Призначити: Кафе", "uncat_suggest:pid123:cafe")],
+        [("📂 Обрати категорію", "uncat_choose:pid123")],
+        [("✍️ Ввести вручну", "uncat_create:pid123")],
+        [("⏭️ Skip", "uncat_skip:pid123")],
+        [("⬅️ Назад", "menu:root")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
+    assert uncat_pending_store.load(1) is not None
+    assert uncat_pending_store.load(1).stage == "review"
+
+
+def test_menu_uncat_choose_category_opens_leaf_picker(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    uncat_store = DummyUncatStore(
+        items=[
+            UncatItem(
+                tx_id="tx1",
+                time=1_700_000_100,
+                account_id="acc1",
+                amount=-12345,
+                description="Aston express",
+                mcc=5812,
+                reason="purchase_without_rule",
+            )
+        ]
+    )
+    taxonomy = {
+        "version": 1,
+        "roots": {"income": "income", "expense": "expense"},
+        "nodes": {
+            "income": {
+                "id": "income",
+                "name": "Доходи",
+                "parent_id": None,
+                "kind": "income",
+                "children": [],
+                "is_root": True,
+            },
+            "expense": {
+                "id": "expense",
+                "name": "Витрати",
+                "parent_id": None,
+                "kind": "expense",
+                "children": ["food"],
+                "is_root": True,
+            },
+            "food": {
+                "id": "food",
+                "name": "Їжа",
+                "parent_id": "expense",
+                "kind": "expense",
+                "children": ["cafe", "taxi"],
+                "is_root": False,
+            },
+            "cafe": {
+                "id": "cafe",
+                "name": "Кафе",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+            "taxi": {
+                "id": "taxi",
+                "name": "Таксі",
+                "parent_id": "food",
+                "kind": "expense",
+                "children": [],
+                "is_root": False,
+            },
+        },
+    }
+    uncat_pending_store = DummyUncatPendingStore()
+
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=1,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "balanced",
+            "uncategorized_prompt_frequency": "always",
+            "persona": "neutral",
+        },
+        tx_store=tx_store,
+        taxonomy_store=DummyTaxonomyStore(taxonomy),
+        uncat_store=uncat_store,
+        uncat_pending_store=uncat_pending_store,
+    )
+
+    cb_menu_uncat = dp.callback_query.handlers["cb_menu_uncat"]
+    cb_uncat_choose = dp.callback_query.handlers["cb_uncat_choose"]
+    message = DummyMessage(user_id=1)
+
+    query_open = DummyCallbackQuery(user_id=1, data="menu:uncat", message=message)
+    asyncio.run(cb_menu_uncat(query_open))
+
+    query_choose = DummyCallbackQuery(user_id=1, data="uncat_choose:pid123", message=message)
+    asyncio.run(cb_uncat_choose(query_choose))
+
+    assert len(message.answers) == 2
+    text, kb = message.answers[1]
+    assert text == "📂 Обери категорію вручну:"
+    assert _kb_dump(kb) == [
+        [("Кафе", "uncat_pick:pid123:cafe")],
+        [("Таксі", "uncat_pick:pid123:taxi")],
+        [("➕ Створити категорію", "uncat_create:pid123")],
+        [("⬅️ Назад", "menu:uncat")],
+    ]
+    assert query_choose.answer_calls[-1] == (None, False, None)
     assert uncat_pending_store.load(1) is not None
     assert uncat_pending_store.load(1).stage == "pick_leaf"
 
@@ -1742,7 +1854,7 @@ def test_menu_uncat_shows_empty_state_when_queue_is_empty(tmp_path: Path):
     assert len(message.answers) == 1
     text, kb = message.answers[0]
     assert text == templates.uncat_empty_message()
-    assert kb is None
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:root")]]
     assert query.answer_calls[-1] == (None, False, None)
 
 

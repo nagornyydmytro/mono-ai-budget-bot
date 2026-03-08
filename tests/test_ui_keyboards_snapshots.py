@@ -15,7 +15,10 @@ from mono_ai_budget_bot.bot.ui import (
     build_reports_preset_keyboard,
     build_rows_keyboard,
     build_taxonomy_migration_keyboard,
+    build_uncat_empty_keyboard,
     build_uncat_frequency_keyboard,
+    build_uncat_leaf_picker_keyboard,
+    build_uncat_review_keyboard,
 )
 
 
@@ -137,6 +140,39 @@ def test_uncat_frequency_keyboard_snapshot():
         [("✅ Перед звітом", "menu:personalization:uncat:before_report")],
         [("⬅️ Назад", "menu:personalization")],
     ]
+
+
+def test_uncat_review_keyboard_snapshot():
+    kb = build_uncat_review_keyboard(
+        pending_id="pid123",
+        suggested_leaf=("Кафе", "cafe"),
+    )
+    assert _kb_dump(kb) == [
+        [("✅ Призначити: Кафе", "uncat_suggest:pid123:cafe")],
+        [("📂 Обрати категорію", "uncat_choose:pid123")],
+        [("✍️ Ввести вручну", "uncat_create:pid123")],
+        [("⏭️ Skip", "uncat_skip:pid123")],
+        [("⬅️ Назад", "menu:root")],
+    ]
+
+
+def test_uncat_leaf_picker_keyboard_snapshot():
+    kb = build_uncat_leaf_picker_keyboard(
+        pending_id="pid123",
+        leaves=[("Кафе", "cafe"), ("Таксі", "taxi")],
+        back_callback="menu:uncat",
+    )
+    assert _kb_dump(kb) == [
+        [("Кафе", "uncat_pick:pid123:cafe")],
+        [("Таксі", "uncat_pick:pid123:taxi")],
+        [("➕ Створити категорію", "uncat_create:pid123")],
+        [("⬅️ Назад", "menu:uncat")],
+    ]
+
+
+def test_uncat_empty_keyboard_snapshot():
+    kb = build_uncat_empty_keyboard()
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:root")]]
 
 
 def test_categories_menu_keyboard_snapshot():

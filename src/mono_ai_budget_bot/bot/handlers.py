@@ -35,7 +35,8 @@ from .ui import (
     build_main_menu_keyboard,
     build_onboarding_resume_keyboard,
     build_start_menu_keyboard,
-    build_uncat_leaf_picker_keyboard,
+    build_uncat_empty_keyboard,
+    build_uncat_review_keyboard,
     build_vertical_options_keyboard,
 )
 
@@ -235,20 +236,26 @@ def register_handlers(
 
         items = uncat_store.load(tg_id)
         if not items:
-            await message.answer(templates.uncat_empty_message())
+            await message.answer(
+                templates.uncat_empty_message(),
+                reply_markup=build_uncat_empty_keyboard(),
+            )
             return
 
         item = items[0]
-        pending = uncat_pending_store.create(
-            tg_id, tx_id=item.tx_id, stage="pick_leaf", ttl_sec=900
-        )
+        pending = uncat_pending_store.create(tg_id, tx_id=item.tx_id, stage="review", ttl_sec=900)
 
         leaves = list_leaf_options(tax, root_kind="expense")
         leaves = leaves[:8]
 
-        kb = build_uncat_leaf_picker_keyboard(
+        suggested = None
+        if len(leaves) == 1:
+            opt = leaves[0]
+            suggested = (opt.name, opt.leaf_id)
+
+        kb = build_uncat_review_keyboard(
             pending_id=pending.pending_id,
-            leaves=[(opt.name, opt.leaf_id) for opt in leaves],
+            suggested_leaf=suggested,
         )
 
         amount_uah = abs(int(item.amount)) / 100.0

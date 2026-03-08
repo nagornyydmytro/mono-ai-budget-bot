@@ -475,19 +475,48 @@ def build_bootstrap_history_keyboard() -> Any:
     )
 
 
+def build_uncat_review_keyboard(
+    *,
+    pending_id: str,
+    suggested_leaf: tuple[str, str] | None,
+) -> Any:
+    rows: list[list[tuple[str, str]]] = []
+    if suggested_leaf is not None:
+        suggested_label, suggested_leaf_id = suggested_leaf
+        rows.append(
+            [
+                (
+                    f"✅ Призначити: {suggested_label}",
+                    f"uncat_suggest:{pending_id}:{suggested_leaf_id}",
+                )
+            ]
+        )
+
+    rows.append([("📂 Обрати категорію", f"uncat_choose:{pending_id}")])
+    rows.append([("✍️ Ввести вручну", f"uncat_create:{pending_id}")])
+    rows.append([("⏭️ Skip", f"uncat_skip:{pending_id}")])
+    rows.append([(BTN_BACK, "menu:root")])
+    return _build_rows(rows)
+
+
 def build_uncat_leaf_picker_keyboard(
     *,
     pending_id: str,
     leaves: Iterable[tuple[str, str]],
+    back_callback: str = "menu:uncat",
 ) -> Any:
     rows: list[list[tuple[str, str]]] = []
     for name, leaf_id in leaves:
         rows.append([(name, f"uncat_pick:{pending_id}:{leaf_id}")])
 
     rows.append([("➕ Створити категорію", f"uncat_create:{pending_id}")])
-    rows.append([(BTN_CANCEL, f"uncat_cancel:{pending_id}")])
+    rows.append([(BTN_BACK, back_callback)])
 
     return _build_rows(rows)
+
+
+def build_uncat_empty_keyboard() -> Any:
+    return _build_rows([[(BTN_BACK, "menu:root")]])
 
 
 def build_paging_keyboard(
