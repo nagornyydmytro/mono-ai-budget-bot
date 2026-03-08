@@ -366,11 +366,8 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             reply_markup=build_main_menu_keyboard(),
         )
 
-    @dp.callback_query(
-        lambda c: isinstance(c.data, str) and c.data in {"menu:ask", "menu:insights"}
-    )
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:insights")
     async def cb_menu_placeholder_sections(query: CallbackQuery) -> None:
-        data = str(query.data or "")
         if not await ctx.gate_menu_dependencies(
             query,
             require_token=True,
@@ -379,14 +376,9 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         ):
             return
 
-        title_map = {
-            "menu:ask": "💬 *Ask*",
-            "menu:insights": "✨ *Insights*",
-        }
-
         await render_placeholder_screen(
             query,
-            text=templates.menu_section_placeholder_message(title_map.get(data, "🚧 *Розділ*")),
+            text=templates.menu_section_placeholder_message("✨ *Insights*"),
             reply_markup=build_back_keyboard("menu:root"),
         )
 

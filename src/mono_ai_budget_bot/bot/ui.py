@@ -28,7 +28,6 @@ MENU_MONTH = "📅 Month"
 MENU_HELP = "📘 Help"
 MENU_UNCAT = "🧩 Uncat"
 MENU_CURRENCY = "💱 Курси"
-MENU_ASK = "💬 Ask"
 MENU_INSIGHTS = "✨ Insights"
 MENU_PERSONALIZATION = "🎛️ Персоналізація"
 MENU_MY_DATA = "⚙️ Мої дані"
@@ -64,7 +63,7 @@ def build_rows_keyboard(rows: Sequence[Sequence[tuple[str, str]]]) -> Any:
 
 def build_main_menu_keyboard(*, uncat_enabled: bool = True) -> Any:
     rows = [
-        [("📊 Звіти", "menu:reports"), (MENU_ASK, "menu:ask")],
+        [("📊 Звіти", "menu:reports")],
         [(MENU_UNCAT, "menu:uncat"), ("🗂️ Категорії", "menu:categories")],
         [(MENU_INSIGHTS, "menu:insights"), (MENU_PERSONALIZATION, "menu:personalization")],
         [(MENU_MY_DATA, "menu:mydata")],

@@ -29,7 +29,7 @@ def _kb_dump(kb) -> list[list[tuple[str, str]]]:
 def test_main_menu_keyboard_snapshot():
     kb = build_main_menu_keyboard()
     assert _kb_dump(kb) == [
-        [("📊 Звіти", "menu:reports"), ("💬 Ask", "menu:ask")],
+        [("📊 Звіти", "menu:reports")],
         [("🧩 Uncat", "menu:uncat"), ("🗂️ Категорії", "menu:categories")],
         [("✨ Insights", "menu:insights"), ("🎛️ Персоналізація", "menu:personalization")],
         [("⚙️ Мої дані", "menu:mydata")],

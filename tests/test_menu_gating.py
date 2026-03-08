@@ -415,7 +415,7 @@ def test_menu_root_opens_after_onboarding(tmp_path: Path):
     text, kb = message.answers[0]
     assert text == templates.menu_root_message()
     assert _kb_dump(kb) == [
-        [("📊 Звіти", "menu:reports"), ("💬 Ask", "menu:ask")],
+        [("📊 Звіти", "menu:reports")],
         [("🧩 Uncat", "menu:uncat"), ("🗂️ Категорії", "menu:categories")],
         [("✨ Insights", "menu:insights"), ("🎛️ Персоналізація", "menu:personalization")],
         [("⚙️ Мої дані", "menu:mydata")],
@@ -753,37 +753,6 @@ def test_menu_root_blocked_before_onboarding(tmp_path: Path):
     assert _kb_dump(kb) == [
         [("➡️ Продовжити онбординг", "onb_resume")],
         [("⬅️ Назад", "onb_back_main")],
-    ]
-    assert query.answer_calls[-1] == (None, False, None)
-
-
-def test_menu_ask_guides_to_refresh_when_ledger_missing(tmp_path: Path):
-    tx_store = TxStore(tmp_path / "tx")
-    dp = _build_dispatcher(
-        cfg=UserConfig(
-            telegram_user_id=1,
-            mono_token="token",
-            selected_account_ids=["acc1"],
-            chat_id=None,
-            autojobs_enabled=False,
-            updated_at=0.0,
-        ),
-        profile={"onboarding_completed": True},
-        tx_store=tx_store,
-    )
-
-    cb_menu_placeholder_sections = dp.callback_query.handlers["cb_menu_placeholder_sections"]
-    message = DummyMessage(user_id=1)
-    query = DummyCallbackQuery(user_id=1, data="menu:ask", message=message)
-
-    asyncio.run(cb_menu_placeholder_sections(query))
-
-    assert len(message.answers) == 1
-    text, kb = message.answers[0]
-    assert text == templates.menu_missing_ledger_message()
-    assert _kb_dump(kb) == [
-        [("🔄 Refresh latest", "menu:data:refresh")],
-        [("⬅️ Назад", "menu:root")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
 
