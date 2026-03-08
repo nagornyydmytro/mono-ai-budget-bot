@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
+from typing import Literal
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
@@ -69,6 +71,22 @@ def _is_out_of_scope_for_llm(text: str) -> bool:
 
 _LLM_LAST_TS: dict[int, int] = {}
 
+RouteStrategy = Literal["deterministic", "planner", "tool_mode", "none"]
+
+_TOOL_MODE_HINT_RE = re.compile(
+    r"\b("
+    r"топ|top|"
+    r"розбий|розклади|break\s*down|"
+    r"покажи\s+останні|show\s+last|last\s+\d+|"
+    r"по\s+категоріях\s+і\s+мерчантах|"
+    r"по\s+категоріях\s+та\s+мерчантах|"
+    r"по\s+категоріях\s+і\s+магазинах|"
+    r"список|list|"
+    r"найбільші|найкрупніші|largest"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _ALLOWED_PLANNER_KEYS = {
     "intent",
     "days",
@@ -129,6 +147,26 @@ def _planner_slots_to_dict(raw: object) -> dict | None:
     return dict(data)
 
 
+def _is_tool_mode_candidate(text: str) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return False
+    return _TOOL_MODE_HINT_RE.search(s) is not None
+
+
+def _select_execution_route(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> RouteStrategy:
+    if deterministic_intent is not None:
+        return "deterministic"
+    if _is_out_of_scope_for_llm(req.text):
+        return "none"
+    if _is_tool_mode_candidate(req.text):
+        return "tool_mode"
+    return "planner"
+
+
 def _llm_cooldown_ok(user_id: int, now_ts: int, seconds: int = 10) -> bool:
     seconds = max(5, min(int(seconds), 120))
     last = int(_LLM_LAST_TS.get(int(user_id), 0))
@@ -136,6 +174,10 @@ def _llm_cooldown_ok(user_id: int, now_ts: int, seconds: int = 10) -> bool:
         return False
     _LLM_LAST_TS[int(user_id)] = int(now_ts)
     return True
+
+
+def _llm_tool_mode_intent(req: NLQRequest) -> NLQIntent | None:
+    return None
 
 
 def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
@@ -579,11 +621,23 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 clarification=None,
             )
 
-    intent = route(req)
-    if not intent:
+    deterministic_intent = route(req)
+    strategy = _select_execution_route(req, deterministic_intent)
+
+    intent: NLQIntent | None
+    if strategy == "deterministic":
+        intent = deterministic_intent
+    elif strategy == "tool_mode":
+        intent = _llm_tool_mode_intent(req)
+        if intent is None:
+            intent = _llm_plan_intent(req)
+    elif strategy == "planner":
         intent = _llm_plan_intent(req)
-        if not intent:
-            return NLQResponse(result=None, clarification=None)
+    else:
+        intent = None
+
+    if not intent:
+        return NLQResponse(result=None, clarification=None)
 
     intent = resolve(req, intent)
     text = execute_intent(req.telegram_user_id, intent.slots)
