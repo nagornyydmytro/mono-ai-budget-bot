@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import math
 import time
+from statistics import median
 from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
-from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
+from mono_ai_budget_bot.analytics.compare import (
+    WindowBaselineCompareResult,
+    compare_window_to_baseline,
+)
 from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
 from mono_ai_budget_bot.analytics.refunds import detect_refund_pairs, refund_ignore_ids
 from mono_ai_budget_bot.bot import templates
@@ -19,6 +23,7 @@ from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.currency import MonobankPublicClient, alpha_to_numeric, convert_amount
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.memory_store import (
+    DEFAULT_MERCHANT_ALIASES,
     load_memory,
     resolve_merchant_filters,
     save_memory,
@@ -216,6 +221,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return templates.nlq_profile_refreshed()
 
     if intent == "compare_to_baseline":
+        recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
+        entity_kind = str(intent_payload.get("entity_kind") or "spend").strip()
+
         merchant_filter = (
             resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains"))
             or []
@@ -235,6 +243,26 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
         category = str(intent_payload.get("category") or "").strip() or None
 
+        recipient_match: str | None = None
+        if recipient_alias:
+            ra = mem.get("recipient_aliases") or {}
+            if not isinstance(ra, dict) or recipient_alias not in ra:
+                kind_prefix = "transfer_in" if entity_kind == "transfer_in" else "transfer_out"
+                options = _top_recipient_candidates(rows, kind_prefix=kind_prefix, limit=5)
+                set_pending_intent(
+                    telegram_user_id, intent_payload, kind="recipient", options=options
+                )
+
+                if options:
+                    return templates.nlq_recipient_ambiguous_with_options(
+                        alias=recipient_alias, options=options
+                    )
+                return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
+
+            v = ra.get(recipient_alias)
+            if isinstance(v, str) and v.strip():
+                recipient_match = v.strip().lower()
+
         window_days = max(1, int((ts_to - ts_from + 86399) // 86400))
         lookback_days = max(28, min(180, window_days * 6))
 
@@ -245,14 +273,24 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             ts_to=ts_to,
         )
 
-        r = compare_window_to_baseline(
-            rows_hist,
-            start_ts=ts_from,
-            end_ts=ts_to,
-            merchant_contains=merchant_filter,
-            category=category,
-            lookback_days=lookback_days,
-        )
+        if recipient_match:
+            r = _compare_recipient_window_to_baseline(
+                rows_hist,
+                start_ts=ts_from,
+                end_ts=ts_to,
+                recipient_contains=recipient_match,
+                kind=entity_kind,
+                lookback_days=lookback_days,
+            )
+        else:
+            r = compare_window_to_baseline(
+                rows_hist,
+                start_ts=ts_from,
+                end_ts=ts_to,
+                merchant_contains=merchant_filter,
+                category=category,
+                lookback_days=lookback_days,
+            )
 
         if spec is not None:
             prefix = spec.window.label
@@ -292,8 +330,8 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
             return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
 
-    merchant_filter = (
-        resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains")) or []
+    merchant_filter = _merchant_filters_for_payload(
+        telegram_user_id, intent_payload.get("merchant_contains")
     )
 
     recipient_match: str | None = None
@@ -305,11 +343,13 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             if isinstance(v, str) and v.strip():
                 recipient_match = v.strip().lower()
 
+    filter_intent = _filter_intent_for_payload(intent, intent_payload)
+
     engine = QueryEngine()
     filtered = engine.filter_rows(
         rows,
         QueryFilter(
-            intent=intent,
+            intent=filter_intent,
             category=(
                 spec.category
                 if spec is not None
@@ -320,7 +360,13 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         ),
     )
     alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
-    if intent.startswith("spend_") and alias_raw and _should_clarify_alias(mem, alias_raw):
+    if (
+        filter_intent.startswith("spend_")
+        and intent
+        not in {"last_time", "recurrence_summary", "threshold_query", "count_over", "count_under"}
+        and alias_raw
+        and _should_clarify_alias(mem, alias_raw)
+    ):
         if merchant_filter and not filtered:
             candidates = suggest_merchant_candidates_detailed(rows, limit=8)
             candidates = _maybe_llm_rank_alias(alias_raw, candidates)
@@ -349,6 +395,55 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if coverage_warning:
             return f"{coverage_warning}\n\n{text}"
         return text
+
+    if intent in {"threshold_query", "count_over", "count_under"}:
+        threshold_uah = float(intent_payload.get("threshold_uah") or 0.0)
+        threshold_cents = max(1, int(round(threshold_uah * 100)))
+        want_over = intent != "count_under"
+
+        matched = [
+            r
+            for r in filtered
+            if (
+                abs(int(r.amount)) > threshold_cents
+                if want_over
+                else abs(int(r.amount)) < threshold_cents
+            )
+        ]
+        amount_text = format_money_grn(threshold_cents / 100)
+        cmp_text = "більше" if want_over else "менше"
+
+        if intent == "threshold_query":
+            if matched:
+                peak = max(abs(int(r.amount)) for r in matched)
+                return _with_cov(
+                    f"{prefix} було {len(matched)} операцій {cmp_text} {amount_text}. Найбільша сума — {format_money_grn(peak / 100)}."
+                )
+            return _with_cov(f"{prefix} операцій {cmp_text} {amount_text} не було.")
+
+        return _with_cov(f"{prefix} було {len(matched)} операцій {cmp_text} {amount_text}.")
+
+    if intent == "last_time":
+        if not filtered:
+            return _with_cov("Не знайшов жодної операції для такого запиту.")
+        last_row = max(filtered, key=lambda r: int(r.time))
+        return _with_cov(
+            f"Остання операція була {format_ts_local(int(last_row.time))[:16]}: {last_row.description} — {format_money_grn(abs(int(last_row.amount)) / 100)}."
+        )
+
+    if intent == "recurrence_summary":
+        if not filtered:
+            return _with_cov(f"{prefix}: збігів не знайшов.")
+
+        recurring = _recurring_rows_only(filtered)
+        rows_for_summary = recurring if recurring else filtered
+
+        day_keys = sorted({int(r.time) // 86400 for r in rows_for_summary})
+        gaps = [int(day_keys[i] - day_keys[i - 1]) for i in range(1, len(day_keys))]
+        median_gap = int(median(gaps)) if gaps else 0
+        return _with_cov(
+            f"{prefix}: {len(rows_for_summary)} операцій у {len(day_keys)} активних днях. Медіанний інтервал — {median_gap} дн."
+        )
 
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
@@ -425,6 +520,154 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return _with_cov(templates.nlq_transfer_in_count_line(prefix, len(filtered)))
 
     return templates.nlq_not_implemented_yet()
+
+
+def _filter_intent_for_payload(intent: str, intent_payload: dict[str, Any]) -> str:
+    if intent in {
+        "threshold_query",
+        "count_over",
+        "count_under",
+        "last_time",
+        "recurrence_summary",
+    }:
+        entity_kind = str(intent_payload.get("entity_kind") or "spend").strip()
+        mapping = {
+            "spend": "spend_sum",
+            "income": "income_sum",
+            "transfer_out": "transfer_out_sum",
+            "transfer_in": "transfer_in_sum",
+        }
+        return mapping.get(entity_kind, "spend_sum")
+    return intent
+
+
+def _compare_recipient_window_to_baseline(
+    rows,
+    *,
+    start_ts: int,
+    end_ts: int,
+    recipient_contains: str,
+    kind: str,
+    lookback_days: int = 90,
+    max_windows: int = 12,
+) -> WindowBaselineCompareResult:
+    start_ts = int(start_ts)
+    end_ts = int(end_ts)
+    if end_ts <= start_ts:
+        return WindowBaselineCompareResult(current_cents=0, baseline_median_cents=0, delta_cents=0)
+
+    lookback_days = max(7, min(int(lookback_days), 180))
+    max_windows = max(3, min(int(max_windows), 24))
+    needle = str(recipient_contains or "").strip().lower()
+    target_kind = "transfer_in" if kind == "transfer_in" else "transfer_out"
+
+    start_day0 = (start_ts // 86400) * 86400
+    end_day0 = (end_ts // 86400) * 86400
+    window_days = max(1, int((end_day0 - start_day0) // 86400) or 1)
+    window_sec = window_days * 86400
+    hist_start = start_day0 - lookback_days * 86400
+
+    daily: dict[int, int] = {}
+    for r in rows:
+        t = int(r.time)
+        if t < hist_start or t >= end_ts:
+            continue
+
+        row_kind = classify_kind(int(r.amount), r.mcc, r.description)
+        if row_kind != target_kind:
+            continue
+
+        desc = str(r.description or "").lower()
+        if needle and needle not in desc:
+            continue
+
+        d = t // 86400
+        daily[d] = daily.get(d, 0) + abs(int(r.amount))
+
+    def sum_window(day_start: int, day_end: int) -> int:
+        total = 0
+        for d in range(day_start // 86400, day_end // 86400):
+            total += int(daily.get(d, 0))
+        return int(total)
+
+    cur = sum_window(start_day0, end_day0 if end_day0 > start_day0 else start_day0 + 86400)
+
+    if window_days == 1:
+        target_d = start_day0 // 86400
+        target_wd = (int(target_d) + 4) % 7
+
+        vals = []
+        wd_vals = []
+        for d, cents in daily.items():
+            if int(d) >= int(target_d):
+                continue
+            vals.append(int(cents))
+            wd = (int(d) + 4) % 7
+            if wd == target_wd:
+                wd_vals.append(int(cents))
+
+        overall = int(median(vals)) if vals else 0
+        base = int(median(wd_vals)) if len(wd_vals) >= 3 else overall
+        return WindowBaselineCompareResult(
+            current_cents=int(cur),
+            baseline_median_cents=int(base),
+            delta_cents=int(cur - base),
+        )
+
+    prev_sums: list[int] = []
+    w_end = start_day0
+    for _ in range(max_windows):
+        w_start = w_end - window_sec
+        if w_start < hist_start:
+            break
+        prev_sums.append(sum_window(w_start, w_end))
+        w_end = w_start
+
+    base = int(median(prev_sums)) if prev_sums else 0
+    return WindowBaselineCompareResult(
+        current_cents=int(cur),
+        baseline_median_cents=int(base),
+        delta_cents=int(cur - base),
+    )
+
+
+def _recurring_rows_only(rows) -> list[Any]:
+    buckets: dict[str, list[Any]] = {}
+    for row in rows:
+        key = norm(str(getattr(row, "description", "") or ""))
+        if not key:
+            continue
+        buckets.setdefault(key, []).append(row)
+
+    out: list[Any] = []
+    for group in buckets.values():
+        if len(group) >= 2:
+            out.extend(group)
+    return out
+
+
+def _merchant_filters_for_payload(
+    telegram_user_id: int,
+    merchant_contains: str | None,
+) -> list[str]:
+    out = resolve_merchant_filters(telegram_user_id, merchant_contains) or []
+
+    raw = norm(str(merchant_contains or ""))
+    if raw:
+        mapped = DEFAULT_MERCHANT_ALIASES.get(raw)
+        if isinstance(mapped, str):
+            mapped_norm = norm(mapped)
+            if mapped_norm and mapped_norm not in out:
+                out.append(mapped_norm)
+        if raw not in out:
+            out.append(raw)
+
+    dedup: list[str] = []
+    for item in out:
+        v = norm(str(item or ""))
+        if v and v not in dedup:
+            dedup.append(v)
+    return dedup
 
 
 def _has_spend_match(rows, merchant_terms: list[str]) -> bool:

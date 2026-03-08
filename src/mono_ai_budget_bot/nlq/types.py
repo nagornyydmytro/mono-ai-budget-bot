@@ -13,6 +13,11 @@ IntentName = Literal[
     "transfer_in_sum",
     "transfer_in_count",
     "compare_to_baseline",
+    "threshold_query",
+    "count_over",
+    "count_under",
+    "last_time",
+    "recurrence_summary",
     "what_if",
     "currency_convert",
 ]

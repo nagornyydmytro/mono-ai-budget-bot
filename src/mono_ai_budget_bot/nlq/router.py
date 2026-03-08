@@ -71,6 +71,39 @@ _MERCHANT_NA_SEGMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_LAST_TIME_RE = re.compile(
+    r"\b(коли\s+останн(ій|є)|коли\s+востаннє|last\s+time|when\s+was\s+the\s+last)\b",
+    re.IGNORECASE,
+)
+_RECURRENCE_RE = re.compile(
+    r"\b(як\s+часто|наскільки\s+регулярно|regularly|recurr|регулярно)\b",
+    re.IGNORECASE,
+)
+_THRESHOLD_RE = re.compile(
+    r"\b(більше|более|more\s+than|over|понад|вище|дорожче|менше|меньше|less\s+than|under|дешевше|до)\s*(\d+(?:[.,]\d+)?)\s*(?:грн|uah|₴)?\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_threshold_uah(text: str) -> tuple[str | None, float | None]:
+    m = _THRESHOLD_RE.search(text or "")
+    if m is None:
+        return None, None
+
+    raw_mode = str(m.group(1) or "").strip().lower()
+    raw_value = str(m.group(2) or "").strip().replace(",", ".")
+    try:
+        value = float(raw_value)
+    except Exception:
+        return None, None
+
+    if value <= 0:
+        return None, None
+
+    under_markers = {"менше", "меньше", "less than", "under", "дешевше", "до"}
+    mode = "under" if raw_mode in under_markers else "over"
+    return mode, value
+
 
 def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any]:
     text = (user_text or "").strip()
@@ -87,6 +120,8 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "recipient_alias": None,
             "period_label": None,
             "category": None,
+            "entity_kind": "spend",
+            "threshold_uah": None,
         }
 
     t = text.lower()
@@ -191,8 +226,12 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
 
     is_count = _COUNT_RE.search(t) is not None
     want_compare = _COMPARE_RE.search(t) is not None and _BASELINE_RE.search(t) is not None
+    want_last_time = _LAST_TIME_RE.search(t) is not None
+    want_recurrence = _RECURRENCE_RE.search(t) is not None
+    threshold_mode, threshold_uah = _parse_threshold_uah(t)
 
     intent: str | None = None
+    entity_kind = "spend"
     want_sum = bool(
         re.search(
             r"\b(скільки|сколько|how\s+much|на\s+суму|сума|сумма|amount|sum)\b",
@@ -201,6 +240,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         )
     )
     if _INCOME_RE.search(t):
+        entity_kind = "income"
         if _INCOME_COUNT_PHRASING_RE.search(t):
             intent = "income_count"
         elif want_sum:
@@ -208,6 +248,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         else:
             intent = "income_count"
     if _TRANSFER_OUT_RE.search(t):
+        entity_kind = "transfer_out"
         if _COUNT_PHRASING_RE.search(t) and re.search(r"\b(переказ(ів)?|транзакц(ій|ии))\b", t):
             intent = "transfer_out_count"
         elif want_sum:
@@ -215,6 +256,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         else:
             intent = "transfer_out_count"
     if _TRANSFER_IN_RE.search(t):
+        entity_kind = "transfer_in"
         if _COUNT_PHRASING_RE.search(t) and re.search(r"\b(переказ(ів)?|транзакц(ій|ии))\b", t):
             intent = "transfer_in_count"
         elif want_sum:
@@ -223,6 +265,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             intent = "transfer_in_count"
 
     if intent is None:
+        entity_kind = "spend"
         count_markers = [
             "транзакц",
             "операц",
@@ -231,9 +274,7 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "кількість витрат",
             "скільки витрат було",
         ]
-        if want_compare:
-            intent = "compare_to_baseline"
-        elif any(mk in t for mk in count_markers) or is_count:
+        if any(mk in t for mk in count_markers) or is_count:
             intent = "spend_count"
         elif "скільки" in t or "витратив" in t or "витрати" in t or "spent" in t:
             intent = "spend_sum"
@@ -275,6 +316,27 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         elif intent in ("transfer_out_sum", "transfer_out_count"):
             intent = "transfer_out_count"
 
+    if want_compare:
+        intent = "compare_to_baseline"
+    elif want_last_time:
+        intent = "last_time"
+    elif want_recurrence:
+        intent = "recurrence_summary"
+    elif (
+        threshold_mode == "over"
+        and threshold_uah is not None
+        and (is_count or str(intent or "").endswith("_count"))
+    ):
+        intent = "count_over"
+    elif (
+        threshold_mode == "under"
+        and threshold_uah is not None
+        and (is_count or str(intent or "").endswith("_count"))
+    ):
+        intent = "count_under"
+    elif threshold_mode is not None and threshold_uah is not None:
+        intent = "threshold_query"
+
     return {
         "intent": intent,
         "days": days,
@@ -284,6 +346,8 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "recipient_alias": recipient_alias,
         "period_label": period_label,
         "category": category,
+        "entity_kind": entity_kind,
+        "threshold_uah": threshold_uah,
     }
 
 
