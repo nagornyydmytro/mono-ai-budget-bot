@@ -10,6 +10,7 @@ from test_menu_gating import (
     _kb_dump,
 )
 
+import mono_ai_budget_bot.nlq.memory_store as ms
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserConfig
 from mono_ai_budget_bot.taxonomy.models import add_category, new_taxonomy
@@ -66,6 +67,9 @@ def test_menu_categories_add_subcategory_via_manual_text(tmp_path: Path):
     tx_store = TxStore(tmp_path / "tx")
     tax = new_taxonomy()
     parent_id = add_category(tax, root_kind="expense", name="Подарунки")
+    from mono_ai_budget_bot.taxonomy.models import add_subcategory
+
+    add_subcategory(tax, parent_id=parent_id, name="Іграшки")
     taxonomy_store = DummyTaxonomyStore(tax)
     dp = _build_dispatcher(
         cfg=_base_cfg(),
@@ -91,7 +95,7 @@ def test_menu_categories_add_subcategory_via_manual_text(tmp_path: Path):
     saved = taxonomy_store.load(1)
     parent = saved["nodes"][parent_id]
     child_names = [saved["nodes"][cid]["name"] for cid in parent["children"]]
-    assert child_names == ["Квіти"]
+    assert child_names == ["Іграшки", "Квіти"]
     assert msg.answers[-1][0] == "✅ Підкатегорію збережено: *Подарунки → Квіти*"
 
 
@@ -390,3 +394,220 @@ def test_menu_categories_delete_confirmation_has_cancel_button(tmp_path: Path):
         [("✅ Видалити", f"menu:categories:delete:confirm:{node_id}")],
         [("❌ Скасувати", "menu:categories:delete")],
     ]
+
+
+def test_menu_categories_add_subcategory_to_leaf_prompts_explicit_migration_without_mutation(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tax = new_taxonomy()
+    parent_id = add_category(tax, root_kind="expense", name="Подарунки")
+    tax["alias_terms"] = {parent_id: ["gift", "present"]}
+    rules_store = DummyRulesStore(
+        rules=[
+            Rule(id="r1", leaf_id=parent_id, merchant_contains="gift shop", recipient_contains=None)
+        ]
+    )
+    taxonomy_store = DummyTaxonomyStore(tax)
+    dp = _build_dispatcher(
+        cfg=_base_cfg(),
+        profile=_base_profile(),
+        tx_store=tx_store,
+        taxonomy_store=taxonomy_store,
+        rules_store=rules_store,
+    )
+
+    pick = dp.callback_query.handlers["cb_menu_categories_add_subcategory_pick"]
+    plain = dp.message.handlers["handle_plain_text"]
+
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data=f"menu:categories:add_subcategory:pick:{parent_id}",
+        message=message,
+    )
+    asyncio.run(pick(query))
+
+    before = taxonomy_store.load(1)
+    assert before["nodes"][parent_id]["children"] == []
+
+    msg = DummyMessage(user_id=1, text="Квіти")
+    asyncio.run(plain(msg))
+
+    saved = taxonomy_store.load(1)
+    assert saved["nodes"][parent_id]["children"] == []
+    assert "c11d" not in "".join(saved["nodes"].keys())
+    assert rules_store.load(1)[0].leaf_id == parent_id
+    assert saved["alias_terms"][parent_id] == ["gift", "present"]
+
+    assert len(msg.answers) == 1
+    text, kb = msg.answers[0]
+    assert "⚠️ *Потрібна міграція категорії*" in text
+    assert "Категорія *Подарунки* зараз є leaf." in text
+    assert "підкатегорію *Квіти*" in text
+    assert _kb_dump(kb) == [
+        [("➡️ Перенести в Квіти", "menu:categories:add_subcategory:migrate:apply")],
+        [("❌ Скасувати", "menu:categories:add_subcategory:migrate:cancel")],
+    ]
+
+
+def test_menu_categories_add_subcategory_migration_apply_moves_rules_and_aliases(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tax = new_taxonomy()
+    parent_id = add_category(tax, root_kind="expense", name="Подарунки")
+    tax["alias_terms"] = {parent_id: ["gift", "present"]}
+    rules_store = DummyRulesStore(
+        rules=[
+            Rule(id="r1", leaf_id=parent_id, merchant_contains="gift shop", recipient_contains=None)
+        ]
+    )
+    taxonomy_store = DummyTaxonomyStore(tax)
+    dp = _build_dispatcher(
+        cfg=_base_cfg(),
+        profile=_base_profile(),
+        tx_store=tx_store,
+        taxonomy_store=taxonomy_store,
+        rules_store=rules_store,
+    )
+
+    pick = dp.callback_query.handlers["cb_menu_categories_add_subcategory_pick"]
+    plain = dp.message.handlers["handle_plain_text"]
+    apply_cb = dp.callback_query.handlers["cb_menu_categories_add_subcategory_migrate_apply"]
+
+    setup_message = DummyMessage(user_id=1)
+    setup_query = DummyCallbackQuery(
+        user_id=1,
+        data=f"menu:categories:add_subcategory:pick:{parent_id}",
+        message=setup_message,
+    )
+    asyncio.run(pick(setup_query))
+    asyncio.run(plain(DummyMessage(user_id=1, text="Квіти")))
+
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:categories:add_subcategory:migrate:apply",
+        message=message,
+    )
+    asyncio.run(apply_cb(query))
+
+    saved = taxonomy_store.load(1)
+    parent = saved["nodes"][parent_id]
+    assert len(parent["children"]) == 1
+    new_leaf_id = parent["children"][0]
+    assert saved["nodes"][new_leaf_id]["name"] == "Квіти"
+    assert rules_store.load(1)[0].leaf_id == new_leaf_id
+    assert parent_id not in saved.get("alias_terms", {})
+    assert saved["alias_terms"][new_leaf_id] == ["gift", "present"]
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert "✅ Міграцію підтверджено: Подарунки → Квіти" in text
+    assert "✅ Підкатегорію збережено: *Подарунки → Квіти*" in text
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:categories")]]
+
+
+def test_menu_categories_add_subcategory_migration_cancel_keeps_state_unchanged(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tax = new_taxonomy()
+    parent_id = add_category(tax, root_kind="expense", name="Подарунки")
+    tax["alias_terms"] = {parent_id: ["gift"]}
+    rules_store = DummyRulesStore(
+        rules=[
+            Rule(id="r1", leaf_id=parent_id, merchant_contains="gift shop", recipient_contains=None)
+        ]
+    )
+    taxonomy_store = DummyTaxonomyStore(tax)
+    dp = _build_dispatcher(
+        cfg=_base_cfg(),
+        profile=_base_profile(),
+        tx_store=tx_store,
+        taxonomy_store=taxonomy_store,
+        rules_store=rules_store,
+    )
+
+    pick = dp.callback_query.handlers["cb_menu_categories_add_subcategory_pick"]
+    plain = dp.message.handlers["handle_plain_text"]
+    cancel_cb = dp.callback_query.handlers["cb_menu_categories_add_subcategory_migrate_cancel"]
+
+    setup_message = DummyMessage(user_id=1)
+    setup_query = DummyCallbackQuery(
+        user_id=1,
+        data=f"menu:categories:add_subcategory:pick:{parent_id}",
+        message=setup_message,
+    )
+    asyncio.run(pick(setup_query))
+    asyncio.run(plain(DummyMessage(user_id=1, text="Квіти")))
+
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:categories:add_subcategory:migrate:cancel",
+        message=message,
+    )
+    asyncio.run(cancel_cb(query))
+
+    saved = taxonomy_store.load(1)
+    assert saved["nodes"][parent_id]["children"] == []
+    assert rules_store.load(1)[0].leaf_id == parent_id
+    assert saved["alias_terms"][parent_id] == ["gift"]
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == "Ок, міграцію скасовано."
+    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:categories")]]
+
+
+def test_menu_categories_add_subcategory_migration_apply_rejects_invalid_target(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    tx_store = TxStore(tmp_path / "tx")
+    tax = new_taxonomy()
+    parent_id = add_category(tax, root_kind="expense", name="Подарунки")
+    taxonomy_store = DummyTaxonomyStore(tax)
+    dp = _build_dispatcher(
+        cfg=_base_cfg(),
+        profile=_base_profile(),
+        tx_store=tx_store,
+        taxonomy_store=taxonomy_store,
+    )
+
+    mem = ms.load_memory(1)
+    mem["categories_ui"] = {
+        "mode": "add_subcategory_migration",
+        "parent_id": parent_id,
+        "parent_name": "Подарунки",
+        "new_subcategory_name": "Квіти",
+        "migrate_to_leaf_id": "wrong-target",
+    }
+    ms.save_memory(1, mem)
+
+    apply_cb = dp.callback_query.handlers["cb_menu_categories_add_subcategory_migrate_apply"]
+    message = DummyMessage(user_id=1)
+    query = DummyCallbackQuery(
+        user_id=1,
+        data="menu:categories:add_subcategory:migrate:apply",
+        message=message,
+    )
+    asyncio.run(apply_cb(query))
+
+    saved = taxonomy_store.load(1)
+    assert saved["nodes"][parent_id]["children"] == []
+    assert message.answers == []
+    assert query.answer_calls[-1] == (
+        "explicit migration target required before converting leaf to parent",
+        True,
+        None,
+    )

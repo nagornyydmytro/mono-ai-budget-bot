@@ -17,7 +17,11 @@ from mono_ai_budget_bot.settings.activity import (
 )
 from mono_ai_budget_bot.settings.onboarding import apply_onboarding_settings
 from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
-from mono_ai_budget_bot.taxonomy.models import delete_node, ensure_leaf_target
+from mono_ai_budget_bot.taxonomy.models import (
+    apply_subcategory_migration_choice,
+    delete_node,
+    ensure_leaf_target,
+)
 from mono_ai_budget_bot.taxonomy.rules import Rule
 
 from . import templates
@@ -340,6 +344,12 @@ def _categories_picker_keyboard(
 def _categories_manual_state_save(tg_id: int, *, state: dict) -> None:
     mem = memory_store.load_memory(tg_id)
     mem["categories_ui"] = dict(state)
+    memory_store.save_memory(tg_id, mem)
+
+
+def _categories_manual_state_clear(tg_id: int) -> None:
+    mem = memory_store.load_memory(tg_id)
+    mem.pop("categories_ui", None)
     memory_store.save_memory(tg_id, mem)
 
 
@@ -1931,6 +1941,129 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         await render_menu_screen(
             query,
             text=f"🗂️ *Додати підкатегорію*\n\nБатьківська категорія: *{parent_name}*\n\nВведи назву підкатегорії вручну.",
+            reply_markup=build_back_keyboard("menu:categories"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data == "menu:categories:add_subcategory:migrate:apply"
+    )
+    async def cb_menu_categories_add_subcategory_migrate_apply(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        mem = memory_store.load_memory(tg_id)
+        state = mem.get("categories_ui")
+        if (
+            not isinstance(state, dict)
+            or str(state.get("mode") or "") != "add_subcategory_migration"
+        ):
+            await query.answer("Немає активної міграції", show_alert=True)
+            return
+
+        tax = ctx.taxonomy_store.load(tg_id)
+        if not isinstance(tax, dict):
+            await query.answer("Таксономія ще не налаштована", show_alert=True)
+            return
+
+        parent_id = str(state.get("parent_id") or "").strip()
+        parent_name = str(state.get("parent_name") or "").strip() or parent_id
+        new_name = str(state.get("new_subcategory_name") or "").strip()
+        migrate_to_leaf_id = str(state.get("migrate_to_leaf_id") or "").strip()
+
+        try:
+            new_leaf_id, decision = apply_subcategory_migration_choice(
+                tax,
+                parent_id=parent_id,
+                name=new_name,
+                migrate_to_leaf_id=migrate_to_leaf_id,
+            )
+        except Exception as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+
+        if decision is not None:
+            rules = ctx.rules_store.load(tg_id)
+            updated_rules = []
+            changed = False
+            for rule in rules:
+                if str(getattr(rule, "leaf_id", "") or "").strip() == decision.source_leaf_id:
+                    updated_rules.append(
+                        Rule(
+                            id=rule.id,
+                            leaf_id=decision.target_leaf_id,
+                            merchant_contains=rule.merchant_contains,
+                            recipient_contains=rule.recipient_contains,
+                        )
+                    )
+                    changed = True
+                else:
+                    updated_rules.append(rule)
+            if changed:
+                ctx.rules_store.save(tg_id, updated_rules)
+
+            alias_terms = tax.get("alias_terms")
+            if not isinstance(alias_terms, dict):
+                alias_terms = {}
+            moved_terms = list(alias_terms.get(decision.source_leaf_id) or [])
+            if moved_terms:
+                current = [
+                    str(x).strip()
+                    for x in alias_terms.get(decision.target_leaf_id, [])
+                    if isinstance(x, str) and str(x).strip()
+                ]
+                for term in moved_terms:
+                    if term not in current:
+                        current.append(term)
+                alias_terms[decision.target_leaf_id] = current
+                alias_terms.pop(decision.source_leaf_id, None)
+                tax["alias_terms"] = alias_terms
+
+        ctx.taxonomy_store.save(tg_id, tax)
+        _categories_manual_state_clear(tg_id)
+        memory_store.pop_pending_manual_mode(tg_id)
+
+        lines = []
+        if decision is not None:
+            lines.append(
+                templates.taxonomy_migration_applied_message(
+                    source_name=decision.source_leaf_name,
+                    target_name=decision.target_leaf_name,
+                )
+            )
+            lines.append("")
+        lines.append(f"✅ Підкатегорію збережено: *{parent_name} → {new_name}*")
+
+        await render_menu_screen(
+            query,
+            text="\n".join(lines),
+            reply_markup=build_back_keyboard("menu:categories"),
+        )
+
+    @dp.callback_query(
+        lambda c: isinstance(c.data, str)
+        and c.data == "menu:categories:add_subcategory:migrate:cancel"
+    )
+    async def cb_menu_categories_add_subcategory_migrate_cancel(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_dependencies(query, require_token=True, require_accounts=True):
+            return
+
+        tg_id = query.from_user.id if query.from_user else None
+        if tg_id is None:
+            await query.answer("Немає tg id", show_alert=True)
+            return
+
+        _categories_manual_state_clear(tg_id)
+        memory_store.pop_pending_manual_mode(tg_id)
+
+        await render_menu_screen(
+            query,
+            text="Ок, міграцію скасовано.",
             reply_markup=build_back_keyboard("menu:categories"),
         )
 

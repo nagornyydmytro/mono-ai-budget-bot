@@ -8,7 +8,12 @@ from aiogram.types import CallbackQuery, Message
 
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.nlq.types import NLQRequest
-from mono_ai_budget_bot.taxonomy.models import add_category, add_subcategory, is_leaf, rename_node
+from mono_ai_budget_bot.taxonomy.models import (
+    add_category,
+    apply_subcategory_migration_choice,
+    build_subcategory_migration_prompt,
+    rename_node,
+)
 from mono_ai_budget_bot.taxonomy.presets import build_taxonomy_preset
 from mono_ai_budget_bot.taxonomy.rules import Rule
 
@@ -19,7 +24,12 @@ from .errors import map_monobank_error
 from .handlers_common import HandlerContext
 from .handlers_reports import handle_reports_custom_manual_input
 from .onboarding_flow import submit_manual_token
-from .ui import build_back_keyboard, build_coverage_cta_keyboard, build_nlq_clarify_keyboard
+from .ui import (
+    build_back_keyboard,
+    build_coverage_cta_keyboard,
+    build_nlq_clarify_keyboard,
+    build_taxonomy_migration_keyboard,
+)
 
 
 def _is_standard_nlq_clarify_kind(kind: str | None) -> bool:
@@ -256,45 +266,39 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                 elif mode == "add_subcategory":
                     parent_id = str(state.get("parent_id") or "").strip()
                     parent_name = str(state.get("parent_name") or "").strip() or parent_id
-                    parent_was_leaf = is_leaf(tax, parent_id)
-                    new_leaf_id = add_subcategory(tax, parent_id=parent_id, name=value)
-                    if parent_was_leaf:
-                        rules = ctx.rules_store.load(user_id)
-                        updated_rules = []
-                        changed = False
-                        for rule in rules:
-                            if str(getattr(rule, "leaf_id", "") or "").strip() == parent_id:
-                                updated_rules.append(
-                                    Rule(
-                                        id=rule.id,
-                                        leaf_id=new_leaf_id,
-                                        merchant_contains=rule.merchant_contains,
-                                        recipient_contains=rule.recipient_contains,
-                                    )
-                                )
-                                changed = True
-                            else:
-                                updated_rules.append(rule)
-                        if changed:
-                            ctx.rules_store.save(user_id, updated_rules)
 
-                        alias_terms = tax.get("alias_terms")
-                        if not isinstance(alias_terms, dict):
-                            alias_terms = {}
-                        moved_terms = list(alias_terms.get(parent_id) or [])
-                        if moved_terms:
-                            current = [
-                                str(x).strip()
-                                for x in alias_terms.get(new_leaf_id, [])
-                                if isinstance(x, str) and str(x).strip()
-                            ]
-                            for term in moved_terms:
-                                if term not in current:
-                                    current.append(term)
-                            alias_terms[new_leaf_id] = current
-                            alias_terms.pop(parent_id, None)
-                            tax["alias_terms"] = alias_terms
+                    prompt = build_subcategory_migration_prompt(
+                        tax,
+                        parent_id=parent_id,
+                        name=value,
+                    )
+                    if prompt.migration_required:
+                        state["mode"] = "add_subcategory_migration"
+                        state["new_subcategory_name"] = prompt.new_subcategory_name
+                        state["migrate_to_leaf_id"] = prompt.new_subcategory_id
+                        mem["categories_ui"] = state
+                        memory_store.save_memory(user_id, mem)
+                        memory_store.pop_pending_manual_mode(user_id)
 
+                        await message.answer(
+                            templates.taxonomy_migration_prompt_message(
+                                parent_name=prompt.parent_name,
+                                new_subcategory_name=prompt.new_subcategory_name,
+                            ),
+                            reply_markup=build_taxonomy_migration_keyboard(
+                                target_label=prompt.new_subcategory_name,
+                                apply_callback="menu:categories:add_subcategory:migrate:apply",
+                                cancel_callback="menu:categories:add_subcategory:migrate:cancel",
+                            ),
+                        )
+                        return
+
+                    apply_subcategory_migration_choice(
+                        tax,
+                        parent_id=parent_id,
+                        name=value,
+                        migrate_to_leaf_id=prompt.new_subcategory_id,
+                    )
                     ctx.taxonomy_store.save(user_id, tax)
                     text_out = f"✅ Підкатегорію збережено: *{parent_name} → {value}*"
                 elif mode == "rename":
