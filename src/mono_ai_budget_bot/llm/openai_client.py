@@ -53,10 +53,35 @@ class NLQPlanV1(BaseModel):
     threshold_uah: Optional[float] = None
 
 
+class ToolCallV1(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    tool: str = Field(min_length=1)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolModeEnvelopeV1(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    tool_calls: list[ToolCallV1] = Field(min_length=1)
+
+
 @dataclass(frozen=True)
-class ToolModeResult:
+class ToolCall:
     tool: str
     args: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolModeResult:
+    tool_calls: list[ToolCall]
+
+
+ALLOWED_TOOL_NAMES = {
+    "query_facts",
+    "query_safe_view",
+    "query_primitive",
+}
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -212,16 +237,17 @@ class OpenAIClient:
         }
         resp = self._post(payload)
         raw = self._extract_text(resp)
-        data = _parse_llm_json(raw)
+        envelope = _parse_llm_json_strict(raw, ToolModeEnvelopeV1)
 
-        if any(
-            k in data
-            for k in ("intent", "days", "merchant_contains", "recipient_alias", "category")
-        ):
+        tool_calls: list[ToolCall] = []
+        for item in envelope.tool_calls:
+            tool = str(item.tool or "").strip()
+            if tool not in ALLOWED_TOOL_NAMES:
+                raise ValidationError.from_exception_data("ToolMode", [])
+            args = item.args if isinstance(item.args, dict) else {}
+            tool_calls.append(ToolCall(tool=tool, args=args))
+
+        if not tool_calls:
             raise ValidationError.from_exception_data("ToolMode", [])
 
-        tool = str(data.get("tool") or "").strip()
-        args = data.get("args") or {}
-        if not tool or not isinstance(args, dict):
-            raise ValidationError.from_exception_data("ToolMode", [])
-        return ToolModeResult(tool=tool, args=args)
+        return ToolModeResult(tool_calls=tool_calls)
