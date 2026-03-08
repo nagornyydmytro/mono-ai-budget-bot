@@ -324,6 +324,18 @@ def build_handler_runtime(
 
         coverage_status = CoverageStatus.missing
         facts_cov = stored.facts.get("coverage") if isinstance(stored.facts, dict) else None
+
+        if not isinstance(facts_cov, dict):
+            from .app import refresh_period_for_user
+
+            await refresh_period_for_user(period, cfg, store)
+            stored = store.load(tg_id, period)
+            facts_cov = (
+                stored.facts.get("coverage")
+                if stored is not None and isinstance(stored.facts, dict)
+                else None
+            )
+
         if isinstance(facts_cov, dict):
             try:
                 cov_from = int(facts_cov["coverage_from_ts"])

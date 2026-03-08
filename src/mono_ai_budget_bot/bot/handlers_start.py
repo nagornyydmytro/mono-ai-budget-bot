@@ -126,7 +126,7 @@ def register_start_handlers(dp, *, ctx: HandlerContext) -> None:
                 kb = build_back_keyboard("onb_back_main")
                 await query.message.edit_text(templates.help_message(), reply_markup=kb)
             else:
-                kb = build_main_menu_keyboard(uncat_enabled=True)
+                kb = build_back_keyboard("menu:root")
                 await query.message.edit_text(templates.help_message(), reply_markup=kb)
 
         await query.answer()

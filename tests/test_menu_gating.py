@@ -3347,6 +3347,7 @@ def test_menu_personalization_activity_opens_mode_screen(tmp_path: Path):
         [("⬜️ Loud", "menu:personalization:activity:loud")],
         [("✅ Quiet", "menu:personalization:activity:quiet")],
         [("⬜️ Custom", "menu:personalization:activity:custom")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
@@ -3432,6 +3433,7 @@ def test_menu_personalization_activity_quiet_preserves_custom_flags(tmp_path: Pa
         [("❌ Anomaly nudges", "menu:personalization:activity:toggle:anomalies_alerts")],
         [("✅ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")],
         [("❌ Coach nudges", "menu:personalization:activity:toggle:coach_nudges")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:activity")],
     ]
 
@@ -3542,6 +3544,7 @@ def test_menu_personalization_uncat_opens_frequency_screen(tmp_path: Path):
         [("⬜️ Раз на день", "menu:personalization:uncat:daily")],
         [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
         [("✅ Перед звітом", "menu:personalization:uncat:before_report")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
@@ -3593,6 +3596,7 @@ def test_menu_personalization_uncat_frequency_updates_shared_profile_setting(tmp
         [("✅ Раз на день", "menu:personalization:uncat:daily")],
         [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
         [("⬜️ Перед звітом", "menu:personalization:uncat:before_report")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
@@ -3636,9 +3640,10 @@ def test_menu_personalization_reports_opens_preset_screen(tmp_path: Path):
     text, kb = message.answers[0]
     assert text == templates.menu_reports_preset_message("Max")
     assert _kb_dump(kb) == [
-        [("⚡ Min", "menu:personalization:reports:min")],
-        [("🧠 Max", "menu:personalization:reports:max")],
-        [("🛠️ Custom", "menu:personalization:reports:custom")],
+        [("⬜️ Min", "menu:personalization:reports:min")],
+        [("✅ Max", "menu:personalization:reports:max")],
+        [("⬜️ Custom", "menu:personalization:reports:custom")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
@@ -3692,9 +3697,10 @@ def test_menu_personalization_reports_max_updates_store_and_profile(tmp_path: Pa
     text, kb = message.answers[0]
     assert text == templates.menu_reports_preset_message("Max")
     assert _kb_dump(kb) == [
-        [("⚡ Min", "menu:personalization:reports:min")],
-        [("🧠 Max", "menu:personalization:reports:max")],
-        [("🛠️ Custom", "menu:personalization:reports:custom")],
+        [("⬜️ Min", "menu:personalization:reports:min")],
+        [("✅ Max", "menu:personalization:reports:max")],
+        [("⬜️ Custom", "menu:personalization:reports:custom")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
@@ -3773,6 +3779,7 @@ def test_menu_personalization_reports_custom_opens_block_toggles(tmp_path: Path)
         [("✅ Тренди", "menu:personalization:reports:toggle:monthly:trends")],
         [("✅ Аномалії", "menu:personalization:reports:toggle:monthly:anomalies")],
         [("✅ What-if", "menu:personalization:reports:toggle:monthly:what_if")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:reports:custom")],
     ]
 
@@ -3801,5 +3808,6 @@ def test_menu_personalization_reports_custom_opens_block_toggles(tmp_path: Path)
         [("✅ Тренди", "menu:personalization:reports:toggle:monthly:trends")],
         [("❌ Аномалії", "menu:personalization:reports:toggle:monthly:anomalies")],
         [("✅ What-if", "menu:personalization:reports:toggle:monthly:what_if")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:reports:custom")],
     ]

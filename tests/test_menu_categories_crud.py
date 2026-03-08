@@ -63,7 +63,9 @@ def test_menu_categories_add_root_category_via_manual_text(tmp_path: Path):
     assert msg.answers[-1][0] == "✅ Категорію збережено: *Подарунки*"
 
 
-def test_menu_categories_add_subcategory_via_manual_text(tmp_path: Path):
+def test_menu_categories_add_subcategory_via_manual_text(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
     tx_store = TxStore(tmp_path / "tx")
     tax = new_taxonomy()
     parent_id = add_category(tax, root_kind="expense", name="Подарунки")

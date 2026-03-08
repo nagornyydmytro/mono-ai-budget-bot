@@ -219,6 +219,7 @@ def build_activity_mode_keyboard(current_mode: str) -> Any:
                 "menu:personalization:activity:custom",
             )
         ],
+        [(BTN_DONE, "menu:personalization:done")],
         [(BTN_BACK, "menu:personalization")],
     ]
     return _build_rows(rows)
@@ -247,6 +248,7 @@ def build_activity_custom_toggles_keyboard(enabled: dict[str, bool]) -> Any:
         mark = "✅" if enabled.get(key, False) else "❌"
         rows.append([(f"{mark} {labels[key]}", f"menu:personalization:activity:toggle:{key}")])
 
+    rows.append([(BTN_DONE, "menu:personalization:done")])
     rows.append([(BTN_BACK, "menu:personalization:activity")])
     return _build_rows(rows)
 
@@ -277,28 +279,61 @@ def build_uncat_frequency_keyboard(current_value: str) -> Any:
                 "menu:personalization:uncat:before_report",
             )
         ],
+        [(BTN_DONE, "menu:personalization:done")],
         [(BTN_BACK, "menu:personalization")],
     ]
     return _build_rows(rows)
 
 
-def build_reports_preset_keyboard() -> Any:
+def build_reports_preset_keyboard(current_preset: str = "min") -> Any:
     return _build_rows(
         [
-            [("⚡ Min", "menu:personalization:reports:min")],
-            [("🧠 Max", "menu:personalization:reports:max")],
-            [("🛠️ Custom", "menu:personalization:reports:custom")],
+            [
+                (
+                    "✅ Min" if current_preset == "min" else "⬜️ Min",
+                    "menu:personalization:reports:min",
+                )
+            ],
+            [
+                (
+                    "✅ Max" if current_preset == "max" else "⬜️ Max",
+                    "menu:personalization:reports:max",
+                )
+            ],
+            [
+                (
+                    "✅ Custom" if current_preset == "custom" else "⬜️ Custom",
+                    "menu:personalization:reports:custom",
+                )
+            ],
+            [(BTN_DONE, "menu:personalization:done")],
             [(BTN_BACK, "menu:personalization")],
         ]
     )
 
 
-def build_reports_custom_period_menu_keyboard() -> Any:
+def build_reports_custom_period_menu_keyboard(current_period: str | None = None) -> Any:
     return _build_rows(
         [
-            [("🗓️ Daily", "menu:personalization:reports:period:daily")],
-            [("📅 Weekly", "menu:personalization:reports:period:weekly")],
-            [("🗓️ Monthly", "menu:personalization:reports:period:monthly")],
+            [
+                (
+                    "✅ Daily" if current_period == "daily" else "⬜️ Daily",
+                    "menu:personalization:reports:period:daily",
+                )
+            ],
+            [
+                (
+                    "✅ Weekly" if current_period == "weekly" else "⬜️ Weekly",
+                    "menu:personalization:reports:period:weekly",
+                )
+            ],
+            [
+                (
+                    "✅ Monthly" if current_period == "monthly" else "⬜️ Monthly",
+                    "menu:personalization:reports:period:monthly",
+                )
+            ],
+            [(BTN_DONE, "menu:personalization:done")],
             [(BTN_BACK, "menu:personalization:reports")],
         ]
     )
@@ -329,6 +364,7 @@ def build_reports_custom_blocks_menu_keyboard(period: str, enabled: dict[str, bo
             ]
         )
 
+    rows.append([(BTN_DONE, "menu:personalization:done")])
     rows.append([(BTN_BACK, "menu:personalization:reports:custom")])
     return _build_rows(rows)
 
@@ -619,3 +655,11 @@ def build_reports_custom_blocks_keyboard(period: str, enabled: dict[str, bool]) 
 
 def build_uncat_prompt_keyboard() -> Any:
     return build_vertical_options_keyboard([("🧩 Розкласти по категоріях", "menu:uncat")])
+
+
+def build_saved_to_root_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("🧭 Головне меню", "menu:root")],
+        ]
+    )

@@ -24,6 +24,7 @@ from .ui import (
     build_bootstrap_picker_keyboard,
     build_reports_custom_blocks_keyboard,
     build_reports_custom_period_keyboard,
+    build_saved_to_root_keyboard,
     build_vertical_options_keyboard,
 )
 
@@ -197,7 +198,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             if query.message:
                 await query.message.edit_text(
                     templates.data_accounts_saved_message(count),
-                    reply_markup=build_back_keyboard("menu:mydata"),
+                    reply_markup=build_saved_to_root_keyboard(),
                 )
             await query.answer()
             return

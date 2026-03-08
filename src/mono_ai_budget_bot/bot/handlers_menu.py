@@ -52,11 +52,17 @@ from .ui import (
     build_reports_menu_keyboard,
     build_reports_preset_keyboard,
     build_rows_keyboard,
+    build_saved_to_root_keyboard,
     build_uncat_frequency_keyboard,
 )
 
 
 def _reports_preset_label_from_profile_or_store(ctx: HandlerContext, tg_id: int, prof: dict) -> str:
+    preset = _reports_preset_key_from_profile_or_store(ctx, tg_id, prof)
+    return {"min": "Min", "max": "Max", "custom": "Custom"}.get(preset, "Min")
+
+
+def _reports_preset_key_from_profile_or_store(ctx: HandlerContext, tg_id: int, prof: dict) -> str:
     preset = str(prof.get("reports_preset") or "").strip()
     if preset not in {"min", "max", "custom"}:
         cfg = ctx.reports_store.load(tg_id)
@@ -66,7 +72,7 @@ def _reports_preset_label_from_profile_or_store(ctx: HandlerContext, tg_id: int,
         if preset not in {"min", "max", "custom"}:
             preset = "min"
         prof["reports_preset"] = preset
-    return {"min": "Min", "max": "Max", "custom": "Custom"}.get(preset, "Min")
+    return preset
 
 
 def _ensure_personalization_profile(ctx: HandlerContext, tg_id: int) -> dict:
@@ -924,10 +930,11 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             )
             return
         elif data == "menu:personalization:reports":
+            preset_key = _reports_preset_key_from_profile_or_store(ctx, tg_id, prof)
             await render_menu_screen(
                 query,
                 text=templates.menu_reports_preset_message(reports_label),
-                reply_markup=build_reports_preset_keyboard(),
+                reply_markup=build_reports_preset_keyboard(preset_key),
             )
             return
         elif data == "menu:personalization:uncat":
@@ -1076,7 +1083,7 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
                 text=templates.menu_reports_preset_message(
                     {"min": "Min", "max": "Max"}.get(preset, "Min")
                 ),
-                reply_markup=build_reports_preset_keyboard(),
+                reply_markup=build_reports_preset_keyboard(preset),
             )
             return
 
@@ -1173,6 +1180,17 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
             query,
             text=templates.menu_reports_custom_blocks_message(period),
             reply_markup=build_reports_custom_blocks_menu_keyboard(period, enabled_map),
+        )
+
+    @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:personalization:done")
+    async def cb_menu_personalization_done(query: CallbackQuery) -> None:
+        if not await ctx.gate_menu_query_or_resume(query):
+            return
+
+        await render_menu_screen(
+            query,
+            text=templates.menu_settings_saved_message(),
+            reply_markup=build_saved_to_root_keyboard(),
         )
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:new_token")

@@ -148,6 +148,7 @@ def test_activity_mode_keyboard_snapshot():
         [("⬜️ Loud", "menu:personalization:activity:loud")],
         [("✅ Quiet", "menu:personalization:activity:quiet")],
         [("⬜️ Custom", "menu:personalization:activity:custom")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
 
@@ -170,6 +171,7 @@ def test_activity_custom_toggles_keyboard_snapshot():
         [("❌ Anomaly nudges", "menu:personalization:activity:toggle:anomalies_alerts")],
         [("❌ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")],
         [("✅ Coach nudges", "menu:personalization:activity:toggle:coach_nudges")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:activity")],
     ]
 
@@ -181,6 +183,7 @@ def test_uncat_frequency_keyboard_snapshot():
         [("⬜️ Раз на день", "menu:personalization:uncat:daily")],
         [("⬜️ Раз на тиждень", "menu:personalization:uncat:weekly")],
         [("✅ Перед звітом", "menu:personalization:uncat:before_report")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
 
@@ -245,9 +248,10 @@ def test_taxonomy_migration_keyboard_snapshot():
 def test_reports_preset_keyboard_snapshot():
     kb = build_reports_preset_keyboard()
     assert _kb_dump(kb) == [
-        [("⚡ Min", "menu:personalization:reports:min")],
-        [("🧠 Max", "menu:personalization:reports:max")],
-        [("🛠️ Custom", "menu:personalization:reports:custom")],
+        [("✅ Min", "menu:personalization:reports:min")],
+        [("⬜️ Max", "menu:personalization:reports:max")],
+        [("⬜️ Custom", "menu:personalization:reports:custom")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization")],
     ]
 
@@ -255,9 +259,10 @@ def test_reports_preset_keyboard_snapshot():
 def test_reports_custom_period_menu_keyboard_snapshot():
     kb = build_reports_custom_period_menu_keyboard()
     assert _kb_dump(kb) == [
-        [("🗓️ Daily", "menu:personalization:reports:period:daily")],
-        [("📅 Weekly", "menu:personalization:reports:period:weekly")],
-        [("🗓️ Monthly", "menu:personalization:reports:period:monthly")],
+        [("⬜️ Daily", "menu:personalization:reports:period:daily")],
+        [("⬜️ Weekly", "menu:personalization:reports:period:weekly")],
+        [("⬜️ Monthly", "menu:personalization:reports:period:monthly")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:reports")],
     ]
 
@@ -284,6 +289,7 @@ def test_reports_custom_blocks_menu_keyboard_snapshot():
         [("✅ Тренди", "menu:personalization:reports:toggle:monthly:trends")],
         [("❌ Аномалії", "menu:personalization:reports:toggle:monthly:anomalies")],
         [("✅ What-if", "menu:personalization:reports:toggle:monthly:what_if")],
+        [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:reports:custom")],
     ]
 

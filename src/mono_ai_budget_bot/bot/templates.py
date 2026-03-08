@@ -1062,9 +1062,13 @@ def data_accounts_saved_message(count: int) -> str:
             "",
             f"Вибрано карток: {count}",
             "",
-            "Тепер можеш повернутись у розділ «Мої дані» або окремо запустити bootstrap history.",
+            "Повертаю в головне меню.",
         ]
     ).strip()
+
+
+def menu_settings_saved_message() -> str:
+    return "✅ Налаштування збережено."
 
 
 def connect_token_validation_progress() -> str:
