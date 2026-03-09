@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
-from dataclasses import asdict, is_dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from mono_ai_budget_bot.analytics.categories import category_from_mcc
-from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.llm.tooling import execute_tool_call
@@ -25,7 +21,6 @@ from mono_ai_budget_bot.nlq.memory_store import (
 )
 from mono_ai_budget_bot.nlq.resolver import resolve
 from mono_ai_budget_bot.nlq.router import route
-from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.nlq.types import (
     CanonicalQuerySchema,
     NLQIntent,
@@ -39,8 +34,48 @@ from mono_ai_budget_bot.settings.ai_features import (
 )
 from mono_ai_budget_bot.storage.profile_store import ProfileStore
 from mono_ai_budget_bot.storage.report_store import ReportStore
-from mono_ai_budget_bot.storage.tx_store import TxRecord, TxStore
+from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
+
+from .pipeline_followups import (
+    extract_recipient_alias as _extract_recipient_alias,
+)
+from .pipeline_followups import (
+    is_paging_continue as _is_paging_continue,
+)
+from .pipeline_followups import (
+    manual_entry_try_resolve as _manual_entry_try_resolve,
+)
+from .pipeline_followups import (
+    parse_multi_select as _parse_multi_select,
+)
+from .pipeline_followups import (
+    recipient_has_ledger_evidence as _recipient_has_ledger_evidence,
+)
+from .pipeline_followups import (
+    resolve_followup_value as _resolve_followup_value,
+)
+from .pipeline_tool_mode import (
+    build_tool_mode_prompt_user as _tool_mode_prompt_user_external,
+)
+from .pipeline_tool_mode import (
+    coerce_tool_mode_result as _coerce_tool_mode_result,
+)
+from .pipeline_tool_mode import (
+    render_tool_payload as _render_tool_payload,
+)
+from .pipeline_tool_mode import (
+    tool_call_is_safe as _tool_call_is_safe,
+)
+from .pipeline_tool_mode import (
+    tool_mode_empty_text as _tool_mode_empty_text,
+)
+from .pipeline_tool_mode import (
+    tool_mode_invalid_text as _tool_mode_invalid_text,
+)
+from .pipeline_tool_mode import (
+    tool_payload_has_data as _tool_payload_has_data,
+)
 
 
 @lru_cache(maxsize=1)
@@ -516,225 +551,7 @@ def _tool_mode_prompt_system() -> str:
 
 def _tool_mode_prompt_user(req: NLQRequest) -> str:
     schema = _schema_to_payload(_build_canonical_query_schema(req, None))
-    return (
-        f"user_text={req.text}\n"
-        f"now_ts={int(req.now_ts)}\n"
-        f"canonical_schema={json.dumps(schema, ensure_ascii=False, sort_keys=True)}"
-    )
-
-
-def _coerce_tool_mode_result(raw: object) -> list[tuple[str, dict[str, Any]]] | None:
-    if is_dataclass(raw):
-        data = asdict(raw)
-    elif hasattr(raw, "model_dump") and callable(raw.model_dump):
-        data = raw.model_dump()
-    else:
-        data = raw
-
-    if isinstance(data, dict):
-        raw_calls = data.get("tool_calls")
-    else:
-        raw_calls = getattr(data, "tool_calls", None)
-
-    if not isinstance(raw_calls, list) or not raw_calls:
-        return None
-
-    out: list[tuple[str, dict[str, Any]]] = []
-    for item in raw_calls:
-        if is_dataclass(item):
-            item_data = asdict(item)
-        elif hasattr(item, "model_dump") and callable(item.model_dump):
-            item_data = item.model_dump()
-        elif isinstance(item, dict):
-            item_data = item
-        else:
-            tool = getattr(item, "tool", None)
-            args = getattr(item, "args", None)
-            item_data = {"tool": tool, "args": args}
-
-        tool = str(item_data.get("tool") or "").strip()
-        args = item_data.get("args")
-        if not isinstance(args, dict):
-            return None
-        out.append((tool, dict(args)))
-    return out
-
-
-def _allowed_tool_arg_keys(tool: str) -> set[str]:
-    if tool == "query_facts":
-        return {"period", "keys"}
-    if tool == "query_safe_view":
-        return {
-            "intent",
-            "days",
-            "start_ts",
-            "end_ts",
-            "category",
-            "merchant_contains",
-            "recipient_contains",
-            "recipient_alias",
-            "limit",
-        }
-    if tool == "query_primitive":
-        return {
-            "primitive",
-            "intent",
-            "days",
-            "start_ts",
-            "end_ts",
-            "category",
-            "merchant_contains",
-            "recipient_contains",
-            "recipient_alias",
-            "limit",
-        }
-    return set()
-
-
-def _tool_call_is_safe(tool: str, args: dict[str, Any]) -> bool:
-    allowed = _allowed_tool_arg_keys(tool)
-    if not allowed:
-        return False
-    if not set(args.keys()).issubset(allowed):
-        return False
-
-    if tool == "query_facts":
-        period = str(args.get("period") or "").strip().lower()
-        if period not in {"today", "week", "month"}:
-            return False
-        keys = args.get("keys")
-        if keys is not None and not isinstance(keys, list):
-            return False
-        return True
-
-    if tool == "query_safe_view":
-        if "limit" in args and not isinstance(args.get("limit"), int):
-            return False
-        return True
-
-    if tool == "query_primitive":
-        primitive = str(args.get("primitive") or "").strip().lower()
-        if primitive not in {"count", "sum", "last_time", "top_categories", "top_merchants"}:
-            return False
-        if "limit" in args and not isinstance(args.get("limit"), int):
-            return False
-        return True
-
-    return False
-
-
-def _format_tool_money(value: object) -> str:
-    try:
-        return f"{float(value):.2f} грн"
-    except Exception:
-        return "0.00 грн"
-
-
-def _render_tool_payload(payload: dict[str, Any]) -> list[str]:
-    tool = str(payload.get("tool") or "").strip()
-    if tool == "query_facts":
-        facts = payload.get("facts") if isinstance(payload.get("facts"), dict) else {}
-        lines: list[str] = []
-        period = str(payload.get("period") or "").strip()
-        if period:
-            lines.append(f"• query_facts / period={period}")
-        requested = facts.get("requested_period_label")
-        if isinstance(requested, str) and requested.strip():
-            lines.append(f"Період: {requested.strip()}")
-        totals = facts.get("totals")
-        if isinstance(totals, dict) and "real_spend_total_uah" in totals:
-            lines.append(f"Витрати: {_format_tool_money(totals.get('real_spend_total_uah'))}")
-        if isinstance(facts.get("transactions_count"), int):
-            lines.append(f"Транзакцій: {facts['transactions_count']}")
-        top_categories = facts.get("top_categories_named_real_spend")
-        if isinstance(top_categories, list) and top_categories:
-            parts = []
-            for item in top_categories[:3]:
-                if isinstance(item, dict):
-                    name = str(item.get("name") or "—")
-                    parts.append(f"{name} {_format_tool_money(item.get('amount_uah'))}")
-            if parts:
-                lines.append("Топ категорії: " + "; ".join(parts))
-        top_merchants = facts.get("top_merchants_real_spend")
-        if isinstance(top_merchants, list) and top_merchants:
-            parts = []
-            for item in top_merchants[:3]:
-                if isinstance(item, dict):
-                    name = str(item.get("counterparty_hint") or item.get("name") or "—")
-                    parts.append(f"{name} {_format_tool_money(item.get('amount_uah'))}")
-            if parts:
-                lines.append("Топ мерчанти: " + "; ".join(parts))
-        return lines
-
-    if tool == "query_safe_view":
-        rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
-        lines = [f"• query_safe_view / знайдено: {int(payload.get('count') or 0)}"]
-        for row in rows[:5]:
-            if not isinstance(row, dict):
-                continue
-            lines.append(
-                f"- {row.get('date') or '—'} · {row.get('counterparty_hint') or '—'} · {row.get('category') or '—'} · {_format_tool_money(row.get('amount_uah'))}"
-            )
-        return lines
-
-    if tool == "query_primitive":
-        primitive = str(payload.get("primitive") or "").strip()
-        lines = [f"• query_primitive / {primitive}"]
-        if primitive == "count":
-            lines.append(f"Кількість: {int(payload.get('count') or 0)}")
-        elif primitive == "sum":
-            lines.append(f"Сума: {_format_tool_money(payload.get('amount_uah'))}")
-        elif primitive == "last_time":
-            match = payload.get("match") if isinstance(payload.get("match"), dict) else None
-            if match is None:
-                lines.append("Нічого не знайдено")
-            else:
-                lines.append(
-                    f"Остання подія: {match.get('date') or '—'} · {match.get('counterparty_hint') or '—'} · {_format_tool_money(match.get('amount_uah'))}"
-                )
-        else:
-            items = payload.get("items") if isinstance(payload.get("items"), list) else []
-            for item in items[:5]:
-                if not isinstance(item, dict):
-                    continue
-                name = item.get("category") or item.get("counterparty_hint") or "—"
-                lines.append(f"- {name} · {_format_tool_money(item.get('amount_uah'))}")
-        return lines
-
-    return []
-
-
-def _tool_payload_has_data(payload: dict[str, Any]) -> bool:
-    tool = str(payload.get("tool") or "").strip()
-    if tool == "query_facts":
-        facts = payload.get("facts")
-        return isinstance(facts, dict) and bool(facts)
-    if tool == "query_safe_view":
-        return bool(payload.get("rows"))
-    if tool == "query_primitive":
-        primitive = str(payload.get("primitive") or "").strip()
-        if primitive == "count":
-            return int(payload.get("count") or 0) > 0
-        if primitive == "sum":
-            return float(payload.get("amount_uah") or 0.0) > 0
-        if primitive == "last_time":
-            return isinstance(payload.get("match"), dict)
-        return bool(payload.get("items"))
-    return False
-
-
-def _tool_mode_invalid_text() -> str:
-    return (
-        "Не зміг безпечно виконати AI-assisted tool path для цього запиту. "
-        "Спробуй переформулювати запит простіше або явно вкажи період / сутність / тип зрізу."
-    )
-
-
-def _tool_mode_empty_text() -> str:
-    return (
-        "Я спробував safe AI-assisted tool path, але дозволені інструменти не знайшли достатньо даних. "
-        "Уточни період або спочатку онови дані / підготуй звіт за потрібний період."
-    )
+    return _tool_mode_prompt_user_external(req, schema)
 
 
 def _llm_tool_mode_intent(req: NLQRequest) -> NLQIntent | NLQResponse | None:
@@ -962,93 +779,7 @@ def _llm_narrative_response(
     return None
 
 
-def _resolve_followup_value(user_text: str, options: list[str] | None) -> str:
-    s = (user_text or "").strip()
-    if not s:
-        return ""
-
-    if options and s.isdigit():
-        idx = int(s)
-        if 1 <= idx <= len(options):
-            return options[idx - 1].strip()
-
-    return s
-
-
-def _extract_recipient_alias(pending: dict) -> str:
-    for k in ("recipient_alias", "recipient_contains", "recipient", "alias"):
-        v = pending.get(k)
-        if isinstance(v, str) and v.strip():
-            return v.strip().lower()
-    return ""
-
-
-def _is_paging_continue(user_text: str) -> bool:
-    s = (user_text or "").strip().lower()
-    if not s:
-        return False
-    if s.isdigit():
-        return int(s) == 1
-    return s in {"далі", "ще", "дальше", "next", "more", ">", ">>"}
-
-
-def _parse_multi_select(user_text: str, options: list[str]) -> list[str]:
-    s = (user_text or "").strip().lower()
-    if not s:
-        return []
-
-    if s in {"0", "ні", "нет", "cancel", "скасувати"}:
-        return []
-
-    normalized_options = [o.strip() for o in options if isinstance(o, str) and o.strip()]
-    if not normalized_options:
-        return []
-
-    if s in {"всі", "усі", "all"}:
-        return list(normalized_options)
-
-    if s.startswith("всі крім") or s.startswith("усі крім"):
-        tail = s.split("крім", 1)[1].strip()
-        excluded = _parse_multi_select(tail, options)
-        return [o for o in normalized_options if o not in excluded]
-
-    tokens = []
-    for part in s.replace(";", ",").split(","):
-        part = part.strip()
-        if part:
-            tokens.append(part)
-
-    picked: set[str] = set()
-
-    for t in tokens:
-        if "-" in t:
-            a, b = t.split("-", 1)
-            if a.strip().isdigit() and b.strip().isdigit():
-                x, y = int(a), int(b)
-                if x > y:
-                    x, y = y, x
-                for i in range(x, y + 1):
-                    if 1 <= i <= len(normalized_options):
-                        picked.add(normalized_options[i - 1])
-            continue
-
-        if t.isdigit():
-            i = int(t)
-            if 1 <= i <= len(normalized_options):
-                picked.add(normalized_options[i - 1])
-            continue
-
-    for t in tokens:
-        if t.isdigit() or "-" in t:
-            continue
-        for o in normalized_options:
-            if t in o.lower():
-                picked.add(o)
-
-    return list(picked)
-
-
-def _load_validation_rows(user_id: int, now_ts: int, days: int = 180) -> list[TxRecord]:
+def _load_validation_rows(user_id: int, now_ts: int, days: int = 180):
     days = max(7, min(int(days), 365))
     cfg = UserStore().load(int(user_id))
     if cfg is None or not cfg.mono_token:
@@ -1065,156 +796,6 @@ def _load_validation_rows(user_id: int, now_ts: int, days: int = 180) -> list[Tx
         ts_from=ts_from,
         ts_to=ts_to,
     )
-
-
-def _top_merchants(rows: list[TxRecord], query: str, limit: int = 8) -> list[str]:
-    q = norm(query)
-    if not q:
-        return []
-    qk = q.replace(" ", "")
-    scores: dict[str, int] = {}
-
-    for r in rows:
-        kind = classify_kind(r.amount, r.mcc, r.description)
-        if kind != "spend":
-            continue
-        desc = (r.description or "").strip()
-        if not desc:
-            continue
-        dk = norm(desc).replace(" ", "")
-        if qk not in dk:
-            continue
-        scores[desc] = scores.get(desc, 0) + abs(int(r.amount))
-
-    items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    return [k for k, _ in items[: max(1, min(int(limit), 15))]]
-
-
-def _top_recipients(
-    rows: list[TxRecord], query: str, *, kind_prefix: str | None, limit: int = 8
-) -> list[str]:
-    q = norm(query)
-    if not q:
-        return []
-    qk = q.replace(" ", "")
-    scores: dict[str, int] = {}
-
-    for r in rows:
-        kind = classify_kind(r.amount, r.mcc, r.description)
-        if kind_prefix == "transfer_out" and kind != "transfer_out":
-            continue
-        if kind_prefix == "transfer_in" and kind != "transfer_in":
-            continue
-        if kind_prefix is None and kind not in {"transfer_out", "transfer_in"}:
-            continue
-
-        desc = (r.description or "").strip()
-        if not desc:
-            continue
-        dk = norm(desc).replace(" ", "")
-        if qk not in dk:
-            continue
-        scores[desc] = scores.get(desc, 0) + abs(int(r.amount))
-
-    items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    return [k for k, _ in items[: max(1, min(int(limit), 15))]]
-
-
-def _seen_categories(rows: list[TxRecord]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for r in rows:
-        if r.mcc is None:
-            continue
-        c = category_from_mcc(r.mcc)
-        if not c:
-            continue
-        key = c.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(c)
-    return out
-
-
-def _recipient_has_ledger_evidence(
-    rows: list[TxRecord],
-    *,
-    value: str,
-    pending_intent: dict | None,
-) -> bool:
-    s = norm(value)
-    if not s:
-        return False
-
-    kind_prefix: str | None = None
-    if isinstance(pending_intent, dict):
-        intent_name = str(pending_intent.get("intent") or "")
-        if intent_name.startswith("transfer_out"):
-            kind_prefix = "transfer_out"
-        elif intent_name.startswith("transfer_in"):
-            kind_prefix = "transfer_in"
-
-    for cand in _top_recipients(rows, value, kind_prefix=kind_prefix, limit=50):
-        cand_norm = norm(cand)
-        if cand_norm == s or s in cand_norm:
-            return True
-    return False
-
-
-def _manual_entry_try_resolve(
-    *,
-    expected: str,
-    user_text: str,
-    pending_intent: dict | None,
-    pending_options: list[str] | None,
-    rows: list[TxRecord],
-) -> tuple[str | None, list[str] | None, str | None]:
-    s = (user_text or "").strip()
-    if not s:
-        return None, None, "Порожнє значення."
-
-    if pending_options and s.isdigit():
-        idx = int(s)
-        if 1 <= idx <= len(pending_options):
-            return pending_options[idx - 1].strip(), None, None
-
-    expected = (expected or "").strip()
-
-    if expected == "category":
-        cats = _seen_categories(rows)
-        low = s.lower()
-        for c in cats:
-            if c.lower() == low:
-                return c, None, None
-        sugg = [c for c in cats if norm(low) and norm(low) in norm(c)]
-        sugg = sugg[:8]
-        return None, (sugg or None), "Не знайшов таку категорію в твоїх транзакціях."
-
-    kind_prefix: str | None = None
-    if isinstance(pending_intent, dict):
-        intent_name = str(pending_intent.get("intent") or "")
-        if intent_name.startswith("transfer_out"):
-            kind_prefix = "transfer_out"
-        elif intent_name.startswith("transfer_in"):
-            kind_prefix = "transfer_in"
-
-    if expected == "recipient":
-        for cand in _top_recipients(rows, s, kind_prefix=kind_prefix, limit=15):
-            if cand.lower() == s.lower():
-                return cand, None, None
-        sugg = _top_recipients(rows, s, kind_prefix=kind_prefix, limit=8)
-        return None, (sugg or None), "Не знайшов такого отримувача в виписці."
-
-    for cand in _top_merchants(rows, s, limit=15):
-        if cand.lower() == s.lower():
-            return cand, None, None
-
-    sugg = _top_merchants(rows, s, limit=8)
-    if not sugg and kind_prefix is not None:
-        sugg = _top_recipients(rows, s, kind_prefix=kind_prefix, limit=8)
-
-    return None, (sugg or None), "Не знайшов таку назву в твоїх транзакціях."
 
 
 def handle_nlq(req: NLQRequest) -> NLQResponse:
