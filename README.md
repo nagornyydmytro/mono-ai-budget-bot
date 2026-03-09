@@ -1,548 +1,812 @@
-# Mono AI Budget Bot
+# SpendLens (`mono-ai-budget-bot`)
 
-Telegram-бот для аналітики витрат Monobank з контрольованою AI-надбудовою.
+> **Telegram-бот для персональної фінансової аналітики Monobank** з **deterministic-first** архітектурою та **контрольованим AI-шаром**.
 
-Ідея: бот підключається до Monobank Personal API (per-user token), синхронізує транзакції по обраним рахункам/карткам, рахує метрики за період (детерміновано кодом) і формує структурований звіт.
+SpendLens підключається до **Monobank Personal API** через персональний токен користувача, синхронізує транзакції по обраних картках/рахунках, **детерміновано обчислює факти кодом** і вже поверх цих фактів формує:
 
-AI (LLM) отримує лише агреговані facts (JSON) і генерує текстові інсайти, не маючи доступу до сирих транзакцій.
+- звіти;
+- відповіді на NLQ-запити;
+- insights;
+- категоризацію;
+- uncategorized flow;
+- AI-пояснення у дозволених межах.
 
-Проєкт створено як тестове завдання на AI-інтернатуру з акцентом на:
-- архітектуру
-- стабільність
-- контроль над AI
-- безпеку даних
-- UX
-- роботу з обмеженнями Monobank API
+Ключовий принцип системи:
 
-AI застосовувався не лише для генерації тексту, а як інженерний інструмент:
-проєктування архітектури, формування LLM-структур, guardrails, NLQ-обробка, рефакторинг, оптимізація API-взаємодії.
+> **Code computes facts — AI writes text.**
 
-Мета — продемонструвати системну, безпечну та контрольовану інтеграцію AI в реальний продукт.
+---
 
-## What it does (MVP)
+## Зміст
 
-### 1️⃣ Connect
-- `/connect <token>` — підключення Monobank (read-only)
-- `/status` — стан підключення + кеш звітів
+- [1. Що це за продукт](#1-що-це-за-продукт)
+- [2. Ключові принципи](#2-ключові-принципи)
+- [3. Поточний UX: button-first, а не slash-first](#3-поточний-ux-button-first-а-не-slash-first)
+- [4. Канонічний користувацький шлях](#4-канонічний-користувацький-шлях)
+- [5. Реально реалізований функціонал](#5-реально-реалізований-функціонал)
+- [6. NLQ: питання природною мовою](#6-nlq-питання-природною-мовою)
+- [7. Персоналізація](#7-персоналізація)
+- [8. Architecture overview](#8-architecture-overview)
+- [9. Data flow](#9-data-flow)
+- [10. Безпека та обмеження](#10-безпека-та-обмеження)
+- [11. Storage model](#11-storage-model)
+- [12. CLI та локальна розробка](#12-cli-та-локальна-розробка)
+- [13. Environment variables](#13-environment-variables)
+- [14. Команди для якості коду](#14-команди-для-якості-коду)
+- [15. Demo screenshots](#15-demo-screenshots)
+- [16. Поточний стан репозиторію](#16-поточний-стан-репозиторію)
 
-### 2️⃣ Accounts selection
-- `/accounts` — вибір рахунків/карток
-- після `Done` → bootstrap 1 або 3 місяці
-- далі інкрементальний sync
+---
 
-### 3️⃣ Reports
-- `/today`
-- `/week`
-- `/month`
-- порівняння з попереднім періодом
-- breakdown по картках
-- top categories / merchants
-- anomalies / spikes
-- AI insights (optional)
+## 1. Що це за продукт
 
-### 4️⃣ NLQ (Natural Language Queries)
-Можна просто написати:
-- "Скільки я вчора витратив на мак?"
-- "Скільки за січень було поповнень?"
-- "На скільки більше вчора витратив на бари ніж зазвичай?"
+SpendLens — це Telegram-бот, який поєднує:
 
-Router → deterministic engine → (optional) AI summary.
+- **Monobank Personal API**;
+- **локальний детермінований analytics engine**;
+- **button-first Telegram UX**;
+- **контрольований AI-шар** для safe summarization / explanation / tool-mode.
 
-### 5️⃣ Scheduler (optional)
-- weekly / monthly авто-звіти
-- фонова синхронізація
-- per-user locks
+Проєкт зібраний не як “генератор красивого тексту”, а як **інженерна фінансова система з AI-політиками**:
 
-## Architecture Overview
+- гроші та факти рахує код;
+- AI не має повноважень змінювати дані;
+- відповіді мають залишатись пояснюваними;
+- система повинна бути корисною навіть без AI.
 
-Принцип: **"Code computes facts — LLM writes text."**
+---
 
-### 1️⃣ Analytics Layer (deterministic)
-- ledger (транзакції)
-- категоризація
-- обчислення totals / counts
-- topN / breakdown
-- compare periods
-- baseline profile (median/avg)
-- anomaly detection
+## 2. Ключові принципи
 
-Усі суми рахуються кодом.
+### Deterministic first
+Усе, що стосується фактів і чисел, обчислюється **тільки кодом**:
 
-### 2️⃣ AI Layer (controlled)
-LLM отримує:
-- facts JSON
-- (optional) user_profile
+- суми;
+- кількість транзакцій;
+- періоди;
+- coverage;
+- compare/baseline;
+- розбивки по категоріях / мерчантах;
+- anomaly / trends / what-if inputs;
+- currency conversion.
 
-LLM повертає:
-- summary
-- changes
-- recommendations
-- next_step
+### Safe AI only
+AI у SpendLens **не**:
 
-LLM:
-- не рахує гроші
-- не має доступу до сирих транзакцій
-- не дає фінансових гарантій
+- рахує гроші;
+- бачить Monobank token;
+- бачить зайві raw транзакції;
+- пише напряму у storage;
+- дає інвестиційні / медичні / юридичні поради.
 
-### 3️⃣ Guardrails
-- structured JSON schema
-- strict validation
-- graceful fallback
-- no hallucinated numbers
+AI **може**:
 
-## Architecture Diagram
+- сформулювати пояснення поверх already computed facts;
+- працювати як semantic interpreter для open-ended запиту;
+- повертати strict JSON tool-calls у safe tool-mode;
+- працювати тільки через allowlisted deterministic tools.
+
+### Explainable product behavior
+Користувачеві має бути зрозуміло:
+
+- коли відповідь побудована повністю детерміновано;
+- коли використано AI-пояснення;
+- що AI не “вигадує” суми;
+- що факти походять з коду та локального ledger.
+
+---
+
+## 3. Поточний UX: button-first, а не slash-first
+
+Поточний продукт — це **button-first Telegram UX**.
+
+Канонічний вхід для користувача:
+
+- `/start`
+- onboarding через кнопки
+- main menu
+- submenu flows
+- plain-text NLQ у чаті
+
+Slash-команди можуть існувати в коді як:
+
+- технічні / dev entrypoints;
+- fallback paths;
+- допоміжні runtime-шляхи.
+
+Але **реальний користувацький продукт** побудований через меню, кнопки, guided flows та звичайні повідомлення в чаті.
+
+---
+
+## 4. Канонічний користувацький шлях
+
+### 4.1 Pre-onboarding
+Після `/start` користувач отримує базові entrypoints:
+
+- **Connect**
+- **Help**
+- **Currency**
+
+На цьому етапі вже доступні:
+
+- довідка;
+- огляд продукту;
+- екран валют;
+- початок підключення Monobank.
+
+### 4.2 Onboarding
+Онбординг вважається завершеним тільки коли користувач:
+
+1. підключив Monobank token;
+2. вибрав картки;
+3. зробив bootstrap history;
+4. пройшов персоналізацію;
+5. завершив persona step.
+
+### 4.3 Bootstrap history
+Стартова історія завантажується кнопками. У поточному коді доступні варіанти:
+
+- **1 місяць**
+- **3 місяці**
+- **6 місяців**
+- **12 місяців**
+
+Після первинного bootstrap далі використовується **інкрементальний sync**.
+
+### 4.4 Main menu
+Після завершення onboarding користувач потрапляє в головне меню.
+
+| Розділ | Призначення |
+|---|---|
+| **Звіти** | Reports by period + AI/facts mode |
+| **Uncat** | Робота з некатегоризованими покупками |
+| **Категорії** | Таксономія, rules, aliases |
+| **Insights** | Trends / anomalies / what-if / forecast / explain |
+| **Персоналізація** | Persona, activity, report blocks, uncategorized prompts, AI features |
+| **Мої дані** | Token, accounts, refresh, bootstrap, status, wipe |
+| **Курси** | Currency screen і conversion support |
+| **Help** | Довідка та базові підказки |
+
+### 4.5 NLQ entry
+Окремої кнопки **Ask** немає.
+
+**NLQ-вхід — це просто звичайне текстове повідомлення в чат.**
+
+---
+
+## 5. Реально реалізований функціонал
+
+### 5.1 Reports
+Підсистема звітів уже продуктово оформлена.
+
+Підтримуються періоди:
+
+- **Today**
+- **Last 7 days**
+- **Last 30 days**
+- **Custom**
+
+Що є в reports flow:
+
+- вибір періоду кнопками;
+- окремий вибір режиму побудови:
+  - **Лише звіт**
+  - **З AI-поясненням**
+- custom range з валідацією дат;
+- coverage-aware UX;
+- deterministic-first rendering;
+- optional AI block поверх already computed facts.
+
+#### Coverage behavior
+Якщо потрібний період ще не завантажено:
+
+- бот **не вигадує report**;
+- бот показує, що даних недостатньо;
+- бот направляє до refresh/bootstrap.
+
+#### Reports presets
+У personalization already implemented presets:
+
+- **Min**
+- **Max**
+- **Custom**
+
+Для custom можна керувати блоками окремо по:
+
+- **daily**
+- **weekly**
+- **monthly**
+
+Підтримувані report blocks у коді:
+
+- `totals`
+- `breakdowns`
+- `compare_baseline`
+- `trends`
+- `anomalies`
+- `what_if`
+
+---
+
+### 5.2 Uncategorized flow
+Окремий UX-контур для некатегоризованих покупок уже є.
+
+Реалізовано:
+
+- queue;
+- choose category;
+- skip;
+- stale click protection;
+- pending safety;
+- prompt frequency configuration.
+
+Це означає, що бот може:
+
+- знайти uncategorized purchase;
+- запропонувати категорію;
+- дозволити пропустити;
+- захиститись від повторного натискання на stale state;
+- керувати тим, коли нагадувати користувачу про cleanup.
+
+---
+
+### 5.3 Categories / taxonomy
+Підсистема категорій уже виділена як окремий menu-domain.
+
+Реалізовано:
+
+- add category;
+- add subcategory;
+- rename;
+- delete;
+- rules;
+- aliases;
+- short taxonomy tree preview;
+- explicit migration flow for leaf → parent conversion.
+
+#### Rules / aliases
+Користувач може працювати з:
+
+- merchant rules;
+- recipient rules;
+- alias mappings.
+
+#### Safe migration
+При спробі зробити leaf-категорію parent-категорією через додавання підкатегорії є **explicit migration prompt**, а не тиха мутація.
+
+При підтвердженні система може безпечно перенести:
+
+- rules;
+- aliases.
+
+---
+
+### 5.4 Insights
+Insights уже винесені в окремий menu-domain і доступні в main menu.
+
+Підтримуються секції:
+
+- **Trends**
+- **Anomalies**
+- **What-if**
+- **Forecast**
+- **Explain**
+
+#### Реальна модель роботи
+Insights у поточному коді не є “магією поверх нічого”. Вони працюють на основі вже підготовлених deterministic facts.
+
+При нестачі даних бот:
+
+- не вигадує insight;
+- показує дружнє повідомлення;
+- направляє до refresh / reports.
+
+---
+
+### 5.5 My Data
+Розділ **Мої дані** already implemented як окремий menu-domain.
+
+Доступні дії:
+
+- **Change token**
+- **Change accounts**
+- **Refresh latest**
+- **Bootstrap history**
+- **Status**
+- **Wipe cache**
+
+#### Що саме це дає
+- змінити Monobank token;
+- перевибрати картки;
+- оновити останні транзакції;
+- повторити bootstrap за більший період;
+- переглянути стан даних;
+- очистити локальний кеш без видалення базового user config.
+
+---
+
+### 5.6 Currency
+Currency subsystem already productized.
+
+Підтримується:
+
+- button-first currency screen;
+- cache/freshness/source UX;
+- refresh;
+- stale-cache fallback on fetch error;
+- currency normalization;
+- conversion from natural text.
+
+#### Приклади підтримуваних формулювань
+- `1500 грн в USD`
+- `$100 в грн`
+- `50 EUR у PLN`
+
+---
+
+### 5.7 Personalization
+Personalization уже реалізована як окрема product area.
+
+У меню є такі розділи:
+
+| Розділ | Що налаштовується |
+|---|---|
+| **Persona** | Тон і стиль формулювання |
+| **Activity mode** | Рівень proactive outputs |
+| **Report blocks** | Preset/custom blocks для reports |
+| **Uncategorized prompts** | Частота нагадувань про uncategorized |
+| **AI features** | Які AI-шари дозволені |
+
+---
+
+## 6. NLQ: питання природною мовою
+
+Користувач може просто писати запити в чат — без окремої команди.
+
+### Приклади запитів
+- `Скільки я витратив на Мак за 5 днів?`
+- `Скільки за січень було поповнень?`
+- `Коли востаннє я витрачав на Сільпо?`
+- `Скільки витрат було більше 200 грн за 30 днів?`
+- `Поясни мої витрати людською мовою`
+- `Що це говорить про мої звички витрат?`
+
+### Як це працює
+Канонічний flow:
 
 ```mermaid
-flowchart TD
-
-User[Telegram User] --> Bot[Telegram Bot Layer]
-
-Bot --> Router[NLQ Router]
-Router --> Engine[Deterministic Query Engine]
-
-Bot --> Reports[Report Generator]
-Reports --> Analytics[Analytics Layer]
-
-Analytics --> Ledger[Ledger Storage]
-Analytics --> Profiles[User Baseline Profile]
-
-Reports --> Facts[Facts JSON]
-
-Facts -->|Optional| LLM[LLM Layer]
-
-LLM --> Insights[AI Insights JSON]
-
-Insights --> Bot
-Engine --> Bot
-
-Bot --> User
+flowchart LR
+    U[User text] --> R[Router / Resolver]
+    R --> D[Deterministic path]
+    R --> C[Clarification]
+    R --> S[Safe LLM boundary]
+    D --> O[Rendered answer]
+    C --> O
+    S --> T[Planner / Tool-mode / Narrative]
+    T --> O
 ```
 
-## NLQ Engine
+### Поточні властивості NLQ stack
+У коді вже є:
 
-NLQ реалізований без LLM (regex-router + query engine).
+- deterministic router;
+- resolver;
+- executor;
+- clarify logic;
+- alias memory;
+- manual followups;
+- semantic boundary;
+- safe planner/tool-mode;
+- user-visible tool-mode flow.
 
-Підтримує:
-- spend_sum
-- spend_count
-- income_sum
-- transfer_in_count
-- compare_to_baseline
-- періоди: yesterday, N days, week, month, month-name
-- merchant filter
-- category keywords
-- alias memory
+### Tool-mode
+Tool-mode у поточному стані:
 
-Flow:
-User text → Intent parsing → Query JSON → Deterministic execution → Render → Optional AI summary
+- працює тільки через **allowlisted tools**;
+- очікує **strict JSON**;
+- не пише напряму у storage;
+- повертає користувачеві **explainable** відповідь;
+- чітко позначає, що AI лише вибрав tool path, а факти витягнув код.
 
-## Monobank API Constraints
+---
 
-### Rate limits
-- 1 request / 60 sec per endpoint
+## 7. Персоналізація
 
-### Statement range
-- максимум 31 день + 1 година за один запит
+### 7.1 Persona
+Persona editor уже продуктово оформлений.
 
-### Solution
-- локальний rate limiter
-- retry/backoff на 429
-- кешування
-- pagination по 31d блоках
-- інкрементальний sync
-- overlap-window для уникнення втрат
-- per-user locks
+Поточна модель persona в коді має 4 виміри:
 
-## Data Flow Model (MVP)
+| Поле | Значення |
+|---|---|
+| `style` | `supportive`, `rational`, `motivator` |
+| `verbosity` | `concise`, `balanced`, `detailed` |
+| `motivation` | `soft`, `balanced`, `strong` |
+| `emoji` | `minimal`, `normal` |
 
-### Data sources
-- **Monobank API**: client-info, statement
-- **User input**: NLQ text, account selection, aliases
+Persona:
+- впливає на wording;
+- не змінює суми, періоди, coverage, totals або інші deterministic facts.
 
-### Pipelines
-#### 1) Ingestion (Monobank → Ledger)
-1. Bot fetches `client-info` (accounts list)
-2. Bot fetches `statement(account, from, to)` in paginated windows
-3. Each transaction is normalized and stored in **ledger** (JSONL / cache)
-4. Dedup is applied (by tx id + overlap window)
+### 7.2 Activity mode
+Activity mode already implemented з такими режимами:
 
-Output:
-- `ledger_rows[]` — raw-ish transaction rows for deterministic analytics
+- `loud`
+- `quiet`
+- `custom`
 
-#### 2) Deterministic Analytics (Ledger → Facts)
-1. Ledger rows are filtered by:
-   - date range (yesterday / last N days / month name)
-   - kind (spend / income / transfers)
-   - merchant filter (aliases + normalized contains)
-   - category filter (keywords → MCC taxonomy)
-2. Aggregations are computed:
-   - sum / count
-   - top merchants / categories
-   - breakdown per day (optional)
-3. Baseline profile is built (median/avg, weekday-aware) for “than usual” comparisons
-4. Anomaly detection flags spikes by merchant/category
+#### Custom toggles
+У коді вже є canonical toggles:
 
-Output:
-- `facts.json` — **strict structured facts** (numbers computed by code)
+- `auto_reports`
+- `uncat_prompts`
+- `trends_alerts`
+- `anomalies_alerts`
+- `forecast_alerts`
+- `coach_nudges`
 
-#### 3) AI Insight Layer (Facts → Text)
-Input to LLM:
-- `facts.json` only (aggregated, no raw transactions)
-- optional `profile.json` (baseline summaries)
+### 7.3 AI features
+AI features editor already implemented.
 
-LLM returns:
-- short textual insights
-- anomalies explanation
-- suggested next steps inside the bot (non-financial advice)
+Canonical allowlist feature flags:
 
-Hard constraints:
-- LLM does **not** compute totals
-- LLM output is validated (schema / required fields)
-- if LLM fails → facts-only report
+- `report_explanations`
+- `ai_summaries`
+- `ai_insights_wording`
+- `semantic_fallback`
+- `tool_mode`
 
-#### 4) Rendering (Facts + Optional AI → Telegram)
-- Report templates render:
-  - Facts
-  - Trends
-  - Anomalies
-  - AI insights (optional)
-- Cached reports are stored for `/today|week|month`
+Ці прапорці реально впливають на runtime behavior.
 
-### Data minimization
-- Raw transaction rows stay local in ledger/cache
-- LLM sees only aggregated facts
+### 7.4 Uncategorized prompt frequency
+Поточні режими в коді:
 
-## Data Storage (Local Mode)
+- `immediate`
+- `daily`
+- `weekly`
+- `before_report`
 
-До хостингу дані зберігаються локально:
+---
 
-.cache/
-- users (config + encrypted token)
-- ledger (JSONL)
-- reports (cached)
-- profiles (baseline)
-- meta (last_sync)
+## 8. Architecture overview
 
-Очистити для чистого тесту:
-- видалити директорію .cache
+### 8.1 High-level layers
 
-## Security Model
+| Layer | Призначення |
+|---|---|
+| **Monobank / sync** | Підключення, accounts, statement sync, pagination, retry/backoff |
+| **Storage** | Users, profiles, reports, taxonomy, rules, uncat, tx ledger |
+| **Analytics** | Totals, counts, compare, coverage, trends, anomalies, what-if |
+| **Taxonomy** | Categories, rules, aliases, migration logic |
+| **NLQ** | Router, resolver, executor, followups, safe tool bridge |
+| **Bot UX** | Menus, onboarding, reports, personalization, uncategorized, insights |
+| **LLM safety layer** | Explanation, narrative, planner, tool-mode |
+| **Currency** | Client, normalize, convert, UI rendering |
 
-### Token Security
-- Monobank token — read-only
-- Зберігається зашифрованим (Fernet + MASTER_KEY)
-- Ніколи не логуються
+### 8.2 Deterministic categorization pipeline
+У коді є taxonomy pipeline та categorization logic, яка спирається на:
 
-### Data Minimization
-- LLM не отримує сирі транзакції
-- Передаються лише агреговані facts JSON
+- rules;
+- aliases;
+- fallback logic;
+- deterministic assignment;
+- explicit clarify/uncategorized handling when needed.
 
-### AI Guardrails
-- Structured output schema
-- Strict validation
-- No financial guarantees
-- No hallucinated numbers
-- Graceful fallback при помилці AI
+### 8.3 Oversized-file refactors already done
+Після останніх комітів репозиторій уже розбитий на профільні модулі:
 
-### Failure Safety
-- Якщо LLM недоступний → бот працює у facts-only режимі
-- Якщо Monobank 429 → retry/backoff
-- Якщо кеш відсутній → дружні підказки користувачу
+- menu/settings split;
+- persona handlers;
+- ai settings handlers;
+- categories menu handlers;
+- insights menu handlers;
+- data menu handlers;
+- NLQ helper split;
+- template domain split.
 
-## User Flow (Quickstart)
+---
 
-1️⃣ `/connect <token>`
-2️⃣ `/accounts` → обрати картки → Done
-3️⃣ Bootstrap 1м або 3м
-4️⃣ `/week` або `/month`
-5️⃣ Писати NLQ запити текстом
+## 9. Data flow
 
-Бот завжди підказує наступний крок.
+### 9.1 Monobank → ledger
 
-## Testing Strategy
-
-### Unit Tests
-- NLQ parsing
-- Period derivation
-- Intent routing
-- Merchant extraction
-- Category mapping
-- Analytics math
-- Report rendering
-
-### Integration Tests
-- Pagination logic
-- Rate limit handling
-- Retry/backoff
-- Memory store
-
-### Snapshot Tests
-- Report layout stability
-- Text block consistency
-
-### Failure Mode Tests
-- LLM timeout
-- Invalid AI schema
-- Missing cache
-- No accounts selected
-
-Мета: бот не падає у жодному сценарії.
-
-## Sequence Flow (MVP)
-
-### Bootstrap & Reports
 ```mermaid
 sequenceDiagram
-participant U as User
-participant B as Bot
-participant MB as Monobank API
-participant L as LedgerStore
-participant A as Analytics
-participant M as LLM
+    participant U as User
+    participant B as Bot
+    participant MB as Monobank API
+    participant L as Ledger / Stores
 
-U->>B: Bootstrap 1m / 3m
-loop Paginated statement sync
-  B->>MB: statement(account, from, to)
-  MB-->>B: tx batch (<=500)
-  B->>L: append + dedupe
-end
-B-->>U: Bootstrap complete
-
-U->>B: /week (or /month, /today)
-B->>L: load transactions (period)
-L-->>B: rows
-B->>A: compute facts (deterministic)
-A-->>B: facts JSON
-opt AI enabled
-  B->>M: send facts JSON
-  M-->>B: insights JSON
-end
-B-->>U: formatted report
+    U->>B: Connect + choose accounts
+    B->>MB: client-info
+    MB-->>B: accounts
+    U->>B: bootstrap / refresh
+    loop paginated statement windows
+        B->>MB: statement(account, from, to)
+        MB-->>B: tx batch
+        B->>L: normalize + dedupe + save
+    end
+    B-->>U: sync complete
 ```
 
-### NLQ (Natural Language Query)
+### 9.2 Ledger → facts → reports
+
 ```mermaid
 sequenceDiagram
-participant U as User
-participant B as Bot
-participant R as NLQ Router
-participant E as Query Engine
-participant L as LedgerStore
-participant A as Analytics
-participant M as LLM
+    participant U as User
+    participant B as Bot
+    participant L as Ledger
+    participant A as Analytics
+    participant AI as LLM
 
-U->>B: "Скільки вчора витратив на мак?"
-B->>R: parse intent + slots
-R-->>B: intent payload
-B->>E: build deterministic query
-E->>L: load filtered rows
-L-->>E: rows
-E->>A: aggregate (sum/count/topN)
-A-->>E: result
-E-->>B: rendered block
-opt AI enabled
-  B->>M: facts-only context
-  M-->>B: short insight text
-end
-B-->>U: answer
+    U->>B: Open Reports / choose period
+    B->>L: load period rows
+    L-->>B: rows
+    B->>A: deterministic computations
+    A-->>B: facts
+    opt AI mode enabled and allowed
+        B->>AI: aggregated facts only
+        AI-->>B: explanation text / structured JSON
+    end
+    B-->>U: report
 ```
 
-Core:
-- /start
-- /connect
-- /status
-- /accounts
-- /bootstrap
-- /refresh today|week|month
-- /today
-- /week
-- /month
+### 9.3 NLQ text → answer
 
-NLQ:
-- будь-яке текстове питання
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Bot
+    participant R as Router
+    participant E as Executor
+    participant AI as LLM
 
-Memory:
-- /aliases (якщо увімкнено)
+    U->>B: plain-text question
+    B->>R: parse + route
+    alt deterministic path
+        R->>E: canonical intent
+        E-->>B: deterministic answer
+    else clarify
+        R-->>B: clarification needed
+    else safe AI path
+        R->>AI: semantic / planner / tool-mode request
+        AI-->>B: safe structured output
+    end
+    B-->>U: final response
+```
 
-## Environment Variables
+---
 
-Required:
-- TELEGRAM_BOT_TOKEN
-- MASTER_KEY
+## 10. Безпека та обмеження
 
-Optional:
-- OPENAI_API_KEY
-- OPENAI_MODEL
-- CACHE_DIR
-- LOG_LEVEL
+### 10.1 Monobank token
+У коді є окремий security layer для token handling.
 
-Scheduler:
-- SCHED_TZ
-- SCHED_REFRESH_MINUTES
-- SCHED_WEEKLY_CRON
-- SCHED_MONTHLY_CRON
+Важливі властивості:
 
-## Local Setup (Poetry)
+- token є **read-only**;
+- token зберігається локально;
+- token шифрується через `cryptography`-based security layer;
+- token не повинен потрапляти в AI context.
 
-poetry install
-cp .env.example .env
-(згенерувати MASTER_KEY)
+### 10.2 Data minimization
+LLM не отримує повний сирий ledger. Замість цього в safe paths передаються:
 
-Запуск:
+- агреговані facts;
+- safe filtered payloads;
+- структуровані summary-like дані;
+- tool calls тільки з allowlist.
+
+### 10.3 Monobank API constraints
+Система явно побудована з урахуванням обмежень Monobank API:
+
+- retry/backoff;
+- pagination;
+- overlap-window;
+- safe refresh strategy;
+- user-facing guidance on rate limits.
+
+### 10.4 Failure behavior
+При збоях продукт не повинен “прикриватися магією”. Поточний код already contains guarded behavior для:
+
+- missing token;
+- missing accounts;
+- missing ledger;
+- stale buttons;
+- invalid tool schema;
+- AI disabled / no API key;
+- currency refresh failures;
+- cache/state problems.
+
+---
+
+## 11. Storage model
+
+Поточний стан репозиторію — **local storage mode**.
+
+Дані зберігаються під `CACHE_DIR` (за замовчуванням `.cache`).
+
+### Основні групи storage
+- users
+- profiles
+- reports
+- taxonomy
+- rules
+- uncat
+- tx ledger
+- meta / scheduler-related state
+
+### Що дає `reset-cache`
+CLI команда очищає cache directory і корисна для:
+
+- чистого локального тестування onboarding;
+- повторного sync/bootstrap;
+- перевірки NLQ/uncat/category flows на чистому state.
+
+---
+
+## 12. CLI та локальна розробка
+
+У поточному коді `monobot` підтримує такі команди:
+
+| Команда | Що робить |
+|---|---|
+| `health` | Простий health check |
+| `status-env` | Показує env-конфіг з mask для секретів |
+| `range` | Друкує діапазон для `today/week/month` |
+| `reset-cache` | Очищає локальний cache |
+| `bot` | Запускає Telegram bot runtime |
+
+### Запуск бота
+```bash
 poetry run monobot bot
+```
 
-Тести:
-poetry run pytest
+### Перевірка середовища
+```bash
+poetry run monobot status-env
+```
 
-Якщо OPENAI_API_KEY не задано → facts-only mode.
-
-### Developer workflow
-
-#### Enable repo-local git hooks (recommended)
-
-This repo uses a repo-local pre-commit hook that runs inside the Poetry environment.
-
-Run once after cloning the repository:
-
-git config core.hooksPath .githooks
-
-After this every `git commit` will automatically run formatting and lint checks.
+### Скидання кешу
+```bash
+poetry run monobot reset-cache
+```
 
 ---
 
-#### Reset local cache (clean testing)
+## 13. Environment variables
 
-The bot stores runtime data in `.cache/`.
+У поточному коді явно використовуються такі variables.
 
-To safely wipe it and start from a clean state:
+### Core app
+| Variable | Призначення |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `MASTER_KEY` | Ключ для шифрування |
+| `MONO_TOKEN` | Опціональний debug/default Monobank token |
+| `OPENAI_API_KEY` | Ключ для AI paths |
+| `OPENAI_MODEL` | OpenAI model name |
+| `LOG_LEVEL` | Рівень логування |
+| `CACHE_DIR` | Директорія для локального кешу |
 
-poetry run python -m mono_ai_budget_bot.cli reset-cache
+### Scheduler
+Scheduler також читає env values:
 
-This is useful before testing:
-
-- onboarding
-- bootstrap sync
-- NLQ flows
-- categorization flows
+| Variable | Призначення |
+|---|---|
+| `SCHED_TEST_MODE` | Dev/test scheduler mode |
+| `SCHED_TZ` | Timezone for scheduler |
+| `SCHED_REFRESH_MINUTES` | Refresh interval |
+| `SCHED_DAILY_REFRESH_CRON` | Daily refresh cron |
+| `SCHED_WEEKLY_CRON` | Weekly report cron |
+| `SCHED_MONTHLY_CRON` | Monthly report cron |
 
 ---
 
-#### Lint / format
+## 14. Команди для якості коду
 
+### Install
+```bash
+poetry install
+```
+
+### Format
+```bash
 poetry run ruff format .
+```
+
+### Lint
+```bash
 poetry run ruff check . --fix
+```
 
----
-
-#### Run tests
-
+### Tests
+```bash
 poetry run pytest
+```
+
+### Pre-commit
+```bash
+poetry run pre-commit install
+poetry run pre-commit run --all-files
+```
+
+### Git hooks path
+У репозиторії є `.githooks/`, тому локально можна увімкнути repo-level hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
 
 ---
 
-#### Monobank API rate limit (429)
+## 15. Demo screenshots
 
-If you see `429 Too Many Requests`, wait a few minutes and retry.
-
-For a clean local retest you can also reset the cache:
-
-poetry run python -m mono_ai_budget_bot.cli reset-cache
-
-## Demo Screenshots
+У репозиторії вже є demo-зображення.
 
 ### Start flow
 ![Start flow](docs/demo/start.png)
 
----
-
 ### Help flow
 ![Help flow](docs/demo/help.png)
-
----
 
 ### Connect flow
 ![Connect flow](docs/demo/connect.png)
 
----
-
 ### Accounts picker
 ![Accounts picker](docs/demo/accounts.png)
-
----
 
 ### Weekly report
 ![Weekly report](docs/demo/week.png)
 
----
-
 ### AI report
 ![AI report](docs/demo/week_ai.png)
 
----
+### No cache / guidance
+![No cache](docs/demo/no_info.png)
 
-### No cahce
-![No cahce](docs/demo/no_info.png)
-
----
-
-### NLQ example 1
+### NLQ examples
 ![NLQ example 1](docs/demo/nlq_1.png)
 
----
-
-### NLQ example 2
 ![NLQ example 2](docs/demo/nlq_2.png)
 
-## Roadmap
+---
 
-### Stretch (AI)
-- Smart tagging via LLM
-- Planner-based NLQ
-- Query Engine v3
-- Conversational tool mode
+## 16. Поточний стан репозиторію
 
-### Product
-- Custom categories
-- User rules engine
-- Gamification
-- Achievements
-- Streaks
+На поточному етапі репозиторій уже **не є раннім MVP з одним монолітним handler-файлом**.
 
-### Hosting
-- Cloudflare Workers
-- Persistent storage (D1 / KV)
-- Async HTTP client
-- Global refresh with jitter
+У коді вже є доменно орієнтоване розділення на модулі:
 
-## Deployment Model
+- `bot/`
+- `settings/`
+- `nlq/`
+- `taxonomy/`
+- `reports/`
+- `currency/`
+- `storage/`
+- `llm/`
+- `analytics/`
+- `monobank/`
+- `uncat/`
 
-### Local Mode (MVP)
-- JSON storage
-- File-based rate limiting
-- Per-user locks
+### Що це означає practically
+- menu handlers already split by domains;
+- settings/persona/AI features already split;
+- templates already split by domains;
+- NLQ helpers already extracted from oversized modules;
+- current repo state is much closer to productized architecture than to prototype bot.
 
-### Cloudflare (Planned)
-- Worker runtime
-- Persistent KV/D1 storage
-- Async HTTP client
-- Global refresh scheduler (jittered)
-- Centralized rate limit control
+---
 
-### Scaling Strategy
-- User-isolated data
-- Stateless bot layer
-- Storage abstraction (local vs cloud)
+## Підсумок
 
-## Why this project
+SpendLens у поточному коді — це:
 
-Це демонстрація:
+- **button-first Telegram product**;
+- **deterministic financial engine**;
+- **safe AI integration layer**;
+- **structured local-state application**;
+- **production-minded architecture**, навіть у локальному runtime режимі.
 
-- архітектурного мислення
-- роботи з AI як системним інструментом
-- контрольованої інтеграції LLM
-- production-підходу до API-обмежень
-- безпеки
-- UX-дизайну
-- чистої структури комітів
-
-AI тут — не “магiя”, а керований компонент в інженерній системі.
+AI тут не замінює бізнес-логіку і не підміняє собою факти. Він працює як **контрольований шар поверх already computed data**.
