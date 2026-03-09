@@ -32,6 +32,71 @@ IntentName = Literal[
     "currency_convert",
 ]
 
+FactsScope = Literal[
+    "amount",
+    "count",
+    "comparison",
+    "ranking",
+    "share",
+    "threshold",
+    "recurrence",
+    "recent_event",
+    "summary",
+    "explanation",
+    "simulation",
+    "conversion",
+    "unknown",
+]
+
+EntityScope = Literal[
+    "spend",
+    "income",
+    "transfer_out",
+    "transfer_in",
+    "merchant",
+    "recipient",
+    "category",
+    "mixed",
+    "unknown",
+]
+
+ComparisonMode = Literal[
+    "none",
+    "baseline",
+    "previous_period",
+    "threshold_over",
+    "threshold_under",
+    "simulation",
+]
+
+OutputMode = Literal[
+    "numeric",
+    "list",
+    "summary",
+    "explanation",
+    "conversion",
+    "unknown",
+]
+
+ToneStyle = Literal[
+    "neutral",
+    "brief",
+    "analytical",
+    "coach",
+    "human",
+    "unknown",
+]
+
+
+@dataclass(frozen=True)
+class CanonicalQuerySchema:
+    facts_scope: FactsScope
+    entity_scope: EntityScope
+    period: dict[str, Any]
+    comparison_mode: ComparisonMode
+    output_mode: OutputMode
+    tone_style: ToneStyle
+
 
 @dataclass(frozen=True)
 class NLQRequest:

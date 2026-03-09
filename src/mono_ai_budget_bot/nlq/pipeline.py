@@ -22,7 +22,13 @@ from mono_ai_budget_bot.nlq.memory_store import (
 from mono_ai_budget_bot.nlq.resolver import resolve
 from mono_ai_budget_bot.nlq.router import route
 from mono_ai_budget_bot.nlq.text_norm import norm
-from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest, NLQResponse, NLQResult
+from mono_ai_budget_bot.nlq.types import (
+    CanonicalQuerySchema,
+    NLQIntent,
+    NLQRequest,
+    NLQResponse,
+    NLQResult,
+)
 from mono_ai_budget_bot.storage.tx_store import TxRecord, TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -72,6 +78,41 @@ def _is_out_of_scope_for_llm(text: str) -> bool:
 _LLM_LAST_TS: dict[int, int] = {}
 
 RouteStrategy = Literal["deterministic", "planner", "tool_mode", "none"]
+
+_OPEN_ENDED_FINANCE_RE = re.compile(
+    r"\b("
+    r"звичк|звички|"
+    r"поведінк|патерн|"
+    r"що\s+це\s+говорить|what\s+does\s+this\s+say|"
+    r"людськ\w*\s+мов|human\s+language|"
+    r"м'?які\s+висновк|soft\s+conclusion|"
+    r"як\s+коуч|as\s+coach|coach|"
+    r"підсумуй|опиши|describe|summari[sz]e|"
+    r"аналіз|analysis"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_HUMAN_TONE_RE = re.compile(
+    r"\b("
+    r"людськ\w*\s+мов|human\s+language|"
+    r"м'?яко|м'?які\s+висновк|soft|"
+    r"як\s+коуч|as\s+coach|coach"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_BRIEF_TONE_RE = re.compile(r"\b(коротко|brief|short)\b", re.IGNORECASE)
+
+_MULTI_CLAUSE_RE = re.compile(
+    r"\b(і|та|and)\b.*\b(що\s+це\s+говорить|поясни|опиши|підсумуй|summari[sz]e|describe)\b",
+    re.IGNORECASE,
+)
+
+_ABSTRACT_FINANCE_RE = re.compile(
+    r"\b(звичк|поведінк|патерн|інсайт|висновк|аналіз)\b",
+    re.IGNORECASE,
+)
 
 _TOOL_MODE_HINT_RE = re.compile(
     r"\b("
@@ -154,12 +195,197 @@ def _is_tool_mode_candidate(text: str) -> bool:
     return _TOOL_MODE_HINT_RE.search(s) is not None
 
 
+def _facts_scope_from_intent(intent_name: str | None) -> str:
+    name = str(intent_name or "").strip()
+    if name.endswith("_sum"):
+        return "amount"
+    if name.endswith("_count"):
+        return "count"
+    if name in {"compare_to_baseline", "compare_to_previous_period"}:
+        return "comparison"
+    if name in {
+        "top_merchants",
+        "top_categories",
+        "top_growth_categories",
+        "top_decline_categories",
+    }:
+        return "ranking"
+    if name == "category_share":
+        return "share"
+    if name in {"threshold_query", "count_over", "count_under"}:
+        return "threshold"
+    if name == "recurrence_summary":
+        return "recurrence"
+    if name == "last_time":
+        return "recent_event"
+    if name in {
+        "spend_summary_short",
+        "spend_insights_three",
+        "spend_unusual_summary",
+    }:
+        return "summary"
+    if name == "explain_growth":
+        return "explanation"
+    if name == "what_if":
+        return "simulation"
+    if name == "currency_convert":
+        return "conversion"
+    return "unknown"
+
+
+def _entity_scope_from_slots(slots: dict[str, object]) -> str:
+    has_category = isinstance(slots.get("category"), str) and bool(
+        str(slots.get("category") or "").strip()
+    )
+    has_merchant = isinstance(slots.get("merchant_contains"), str) and bool(
+        str(slots.get("merchant_contains") or "").strip()
+    )
+    has_recipient = isinstance(slots.get("recipient_alias"), str) and bool(
+        str(slots.get("recipient_alias") or "").strip()
+    )
+
+    scopes: list[str] = []
+    if has_category:
+        scopes.append("category")
+    if has_merchant:
+        scopes.append("merchant")
+    if has_recipient:
+        scopes.append("recipient")
+
+    if len(scopes) > 1:
+        return "mixed"
+    if scopes:
+        return scopes[0]
+
+    entity_kind = str(slots.get("entity_kind") or "").strip()
+    if entity_kind in {"spend", "income", "transfer_out", "transfer_in"}:
+        return entity_kind
+    return "unknown"
+
+
+def _comparison_mode_from_intent(intent_name: str | None) -> str:
+    name = str(intent_name or "").strip()
+    if name == "compare_to_baseline":
+        return "baseline"
+    if name == "compare_to_previous_period":
+        return "previous_period"
+    if name == "count_over":
+        return "threshold_over"
+    if name == "count_under":
+        return "threshold_under"
+    if name == "what_if":
+        return "simulation"
+    return "none"
+
+
+def _output_mode_from_schema(text: str, facts_scope: str) -> str:
+    s = text or ""
+    if facts_scope == "conversion":
+        return "conversion"
+    if facts_scope in {"summary", "ranking"} and re.search(
+        r"\b(список|list|топ|top|покажи\s+останні|show\s+last)\b",
+        s,
+        re.IGNORECASE,
+    ):
+        return "list"
+    if facts_scope == "ranking":
+        return "list"
+    if facts_scope == "explanation":
+        return "explanation"
+    if facts_scope == "summary":
+        return "summary"
+    if facts_scope in {
+        "amount",
+        "count",
+        "comparison",
+        "share",
+        "threshold",
+        "recurrence",
+        "recent_event",
+        "simulation",
+    }:
+        return "numeric"
+    return "unknown"
+
+
+def _tone_style_from_text(text: str) -> str:
+    s = text or ""
+    if _HUMAN_TONE_RE.search(s):
+        return "coach" if re.search(r"\b(коуч|coach)\b", s, re.IGNORECASE) else "human"
+    if _BRIEF_TONE_RE.search(s):
+        return "brief"
+    if re.search(r"\b(чому|why|поясни|explain|аналіз|analysis)\b", s, re.IGNORECASE):
+        return "analytical"
+    return "neutral"
+
+
+def _build_canonical_query_schema(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> CanonicalQuerySchema:
+    slots = deterministic_intent.slots if deterministic_intent is not None else {}
+    intent_name = deterministic_intent.name if deterministic_intent is not None else None
+    facts_scope = _facts_scope_from_intent(intent_name)
+    return CanonicalQuerySchema(
+        facts_scope=facts_scope,
+        entity_scope=_entity_scope_from_slots(slots),
+        period={
+            "days": slots.get("days"),
+            "start_ts": slots.get("start_ts"),
+            "end_ts": slots.get("end_ts"),
+            "label": slots.get("period_label"),
+        },
+        comparison_mode=_comparison_mode_from_intent(intent_name),
+        output_mode=_output_mode_from_schema(req.text, facts_scope),
+        tone_style=_tone_style_from_text(req.text),
+    )
+
+
+def _should_handoff_deterministic_intent(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent,
+    schema: CanonicalQuerySchema,
+) -> bool:
+    text = req.text or ""
+
+    if _OPEN_ENDED_FINANCE_RE.search(text):
+        return True
+
+    if _MULTI_CLAUSE_RE.search(text):
+        return True
+
+    if schema.entity_scope == "mixed":
+        return True
+
+    if schema.facts_scope == "unknown" or schema.output_mode == "unknown":
+        return True
+
+    if schema.facts_scope in {"summary", "explanation"} and schema.tone_style in {
+        "coach",
+        "human",
+    }:
+        return True
+
+    if schema.facts_scope in {"amount", "count"} and _ABSTRACT_FINANCE_RE.search(text):
+        return True
+
+    if deterministic_intent.name in {"spend_sum", "spend_count"} and schema.tone_style in {
+        "coach",
+        "human",
+    }:
+        return True
+
+    return False
+
+
 def _select_execution_route(
     req: NLQRequest,
     deterministic_intent: NLQIntent | None,
 ) -> RouteStrategy:
     if deterministic_intent is not None:
-        return "deterministic"
+        schema = _build_canonical_query_schema(req, deterministic_intent)
+        if not _should_handoff_deterministic_intent(req, deterministic_intent, schema):
+            return "deterministic"
     if _is_out_of_scope_for_llm(req.text):
         return "none"
     if _is_tool_mode_candidate(req.text):
