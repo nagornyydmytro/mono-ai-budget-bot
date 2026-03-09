@@ -8,6 +8,10 @@ from aiogram.types import CallbackQuery, Message
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.nlq.types import NLQRequest
+from mono_ai_budget_bot.settings.ai_features import (
+    ai_feature_enabled,
+    normalize_ai_features_settings,
+)
 from mono_ai_budget_bot.settings.persona import (
     build_persona_prompt_suffix,
     normalize_persona_settings,
@@ -61,7 +65,9 @@ async def _build_ai_block_from_facts(
 
     client = OpenAIClient(api_key=ctx.settings.openai_api_key, model=ctx.settings.openai_model)
     try:
-        profile = normalize_persona_settings(ctx.profile_store.load(tg_id) or {})
+        profile = normalize_ai_features_settings(
+            normalize_persona_settings(ctx.profile_store.load(tg_id) or {})
+        )
         system = (
             "Ти допомагаєш з персональною фінансовою аналітикою. "
             "Працюй лише на основі переданих фактів. "
@@ -219,6 +225,13 @@ async def handle_reports_custom_manual_input(
     await message.answer(templates.menu_reports_custom_building_message(start_date, date_label))
 
     ai_block = None
+    profile = normalize_ai_features_settings(
+        normalize_persona_settings(ctx.profile_store.load(user_id) or {})
+    )
+    if want_ai and not ai_feature_enabled(profile, "report_explanations"):
+        await message.answer(templates.ai_feature_disabled_message("AI explanations"))
+        want_ai = False
+
     if want_ai:
         if not ctx.settings.openai_api_key:
             await message.answer(templates.ai_disabled_missing_key_message())

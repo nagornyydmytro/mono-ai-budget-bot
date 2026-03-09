@@ -264,3 +264,33 @@ def test_handle_nlq_tries_tool_mode_then_falls_back_to_planner(monkeypatch):
     assert resp.result.text == "TOOL-FALLBACK"
     assert resp.clarification is None
     assert called == {"planner": 1, "tool": 1, "resolve": 1, "execute": 1}
+
+
+def test_select_answer_policy_returns_none_when_semantic_fallback_disabled(monkeypatch):
+    req = NLQRequest(
+        telegram_user_id=1,
+        text="підсумуй мої звички витрат за останній місяць",
+        now_ts=1000,
+    )
+    monkeypatch.setattr(
+        pl,
+        "_ai_feature_enabled_for_user",
+        lambda user_id, key: False if key == "semantic_fallback" else True,
+    )
+    assert pl._select_answer_policy(req, None) == "none"
+
+
+def test_select_execution_route_returns_none_when_tool_mode_and_semantic_fallback_disabled(
+    monkeypatch,
+):
+    req = NLQRequest(
+        telegram_user_id=1,
+        text="покажи топ категорій і мерчантів за місяць та останні 5 витрат",
+        now_ts=1000,
+    )
+    monkeypatch.setattr(
+        pl,
+        "_ai_feature_enabled_for_user",
+        lambda user_id, key: False if key in {"semantic_fallback", "tool_mode"} else True,
+    )
+    assert pl._select_execution_route(req, None) == "none"

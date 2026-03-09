@@ -7,6 +7,10 @@ from aiogram.types import CallbackQuery, Message
 from mono_ai_budget_bot.currency import MonobankPublicClient
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq.pipeline import handle_nlq
+from mono_ai_budget_bot.settings.ai_features import (
+    ai_feature_enabled,
+    normalize_ai_features_settings,
+)
 from mono_ai_budget_bot.settings.persona import (
     build_persona_prompt_suffix,
     normalize_persona_settings,
@@ -383,6 +387,13 @@ def build_handler_runtime(
                     return
 
         ai_block = None
+        profile = normalize_ai_features_settings(
+            normalize_persona_settings(profile_store.load(tg_id) or {})
+        )
+        if want_ai and not ai_feature_enabled(profile, "report_explanations"):
+            await message.answer(templates.ai_feature_disabled_message("AI explanations"))
+            want_ai = False
+
         if want_ai:
             if not settings.openai_api_key:
                 await message.answer(templates.ai_disabled_missing_key_message())
@@ -402,7 +413,6 @@ def build_handler_runtime(
                         api_key=settings.openai_api_key, model=settings.openai_model
                     )
                     try:
-                        profile = normalize_persona_settings(profile_store.load(tg_id) or {})
                         system = (
                             "Ти допомагаєш з персональною фінансовою аналітикою. "
                             "Працюй лише на основі переданих фактів. "

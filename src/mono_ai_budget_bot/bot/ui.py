@@ -293,6 +293,49 @@ def build_persona_preview_keyboard() -> Any:
     )
 
 
+def build_ai_features_editor_keyboard(ai_features: dict[str, bool]) -> Any:
+    return _build_rows(
+        [
+            [
+                (
+                    f"{'✅' if ai_features.get('report_explanations', True) else '❌'} AI explanations",
+                    "menu:personalization:ai:toggle:report_explanations",
+                )
+            ],
+            [
+                (
+                    f"{'✅' if ai_features.get('ai_summaries', True) else '❌'} AI summaries",
+                    "menu:personalization:ai:toggle:ai_summaries",
+                )
+            ],
+            [
+                (
+                    f"{'✅' if ai_features.get('ai_insights_wording', True) else '❌'} AI insights wording",
+                    "menu:personalization:ai:toggle:ai_insights_wording",
+                )
+            ],
+            [
+                (
+                    f"{'✅' if ai_features.get('semantic_fallback', True) else '❌'} Semantic fallback",
+                    "menu:personalization:ai:toggle:semantic_fallback",
+                )
+            ],
+            [
+                (
+                    f"{'✅' if ai_features.get('tool_mode', True) else '❌'} Planner / tool-mode",
+                    "menu:personalization:ai:toggle:tool_mode",
+                )
+            ],
+            [
+                ("💾 Save", "menu:personalization:ai:save"),
+                ("↺ Reset", "menu:personalization:ai:reset"),
+            ],
+            [(BTN_CANCEL, "menu:personalization:ai:cancel")],
+            [(BTN_BACK, "menu:personalization")],
+        ]
+    )
+
+
 def build_activity_mode_keyboard(current_mode: str) -> Any:
     rows = [
         [

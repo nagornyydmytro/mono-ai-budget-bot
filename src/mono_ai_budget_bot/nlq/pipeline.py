@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from mono_ai_budget_bot.analytics.categories import category_from_mcc
@@ -30,6 +31,11 @@ from mono_ai_budget_bot.nlq.types import (
     NLQResponse,
     NLQResult,
 )
+from mono_ai_budget_bot.settings.ai_features import (
+    ai_feature_enabled,
+    normalize_ai_features_settings,
+)
+from mono_ai_budget_bot.storage.profile_store import ProfileStore
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxRecord, TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
@@ -411,8 +417,17 @@ def _select_execution_route(
             return "deterministic"
     if _is_out_of_scope_for_llm(req.text):
         return "none"
+
+    semantic_enabled = _ai_feature_enabled_for_user(req.telegram_user_id, "semantic_fallback")
+    tool_mode_enabled = _ai_feature_enabled_for_user(req.telegram_user_id, "tool_mode")
+
     if _is_tool_mode_candidate(req.text):
-        return "tool_mode"
+        if tool_mode_enabled:
+            return "tool_mode"
+        return "planner" if semantic_enabled else "none"
+
+    if not semantic_enabled:
+        return "none"
     return "planner"
 
 
@@ -451,6 +466,8 @@ def _select_answer_policy(
         return "none"
     if _needs_open_question_clarification(req, deterministic_intent):
         return "clarification"
+    if not _ai_feature_enabled_for_user(req.telegram_user_id, "semantic_fallback"):
+        return "none"
     return "safe_llm"
 
 
@@ -461,6 +478,28 @@ def _llm_cooldown_ok(user_id: int, now_ts: int, seconds: int = 10) -> bool:
         return False
     _LLM_LAST_TS[int(user_id)] = int(now_ts)
     return True
+
+
+def _load_ai_profile(user_id: int) -> dict[str, object]:
+    store = ProfileStore(Path(".cache") / "profiles")
+    return normalize_ai_features_settings(store.load(user_id) or {})
+
+
+def _ai_feature_enabled_for_user(user_id: int, key: str) -> bool:
+    try:
+        return ai_feature_enabled(_load_ai_profile(user_id), key)
+    except Exception:
+        return True
+
+
+def _narrative_feature_key(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> str:
+    schema = _build_canonical_query_schema(req, deterministic_intent)
+    if schema.output_mode == "summary" or schema.facts_scope == "summary":
+        return "ai_summaries"
+    return "ai_insights_wording"
 
 
 def _llm_tool_mode_intent(req: NLQRequest) -> NLQIntent | None:
@@ -1062,11 +1101,25 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
             intent = _llm_tool_mode_intent(req)
             if intent is None:
                 intent = _llm_plan_intent(req)
-            if intent is None and _is_narrative_candidate(req):
+            if (
+                intent is None
+                and _is_narrative_candidate(req)
+                and _ai_feature_enabled_for_user(
+                    req.telegram_user_id,
+                    _narrative_feature_key(req, deterministic_intent),
+                )
+            ):
                 narrative_resp = _llm_narrative_response(req, deterministic_intent)
         elif strategy == "planner":
             intent = _llm_plan_intent(req)
-            if intent is None and _is_narrative_candidate(req):
+            if (
+                intent is None
+                and _is_narrative_candidate(req)
+                and _ai_feature_enabled_for_user(
+                    req.telegram_user_id,
+                    _narrative_feature_key(req, deterministic_intent),
+                )
+            ):
                 narrative_resp = _llm_narrative_response(req, deterministic_intent)
         else:
             intent = None

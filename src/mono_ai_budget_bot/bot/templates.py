@@ -762,6 +762,42 @@ def menu_personalization_item_message(*, title: str, current_value: str) -> str:
     ).strip()
 
 
+def menu_ai_features_editor_message(*, current_value: str, draft_value: str) -> str:
+    return "\n".join(
+        [
+            "🤖 *AI features editor*",
+            "",
+            "AI тут не рахує гроші, не змінює deterministic facts і не дає фінансових порад.",
+            "AI дозволено тільки там, де продуктом це явно дозволено: wording, summaries, semantic fallback, safe planner/tool-mode.",
+            "У сирі секрети, токени та зайві персональні дані AI не передаються.",
+            "",
+            "Збережено зараз:",
+            current_value,
+            "",
+            "Draft:",
+            draft_value,
+            "",
+            "Увімкни або вимкни потрібні AI-assisted шари, потім Save або Reset.",
+        ]
+    ).strip()
+
+
+def menu_ai_features_saved_message(saved_value: str) -> str:
+    return "\n".join(
+        [
+            "✅ *AI features збережені*",
+            "",
+            saved_value,
+            "",
+            "Нові прапорці вже застосовані до reports / NLQ fallback там, де це підтримується.",
+        ]
+    ).strip()
+
+
+def ai_feature_disabled_message(label: str) -> str:
+    return f"ℹ️ {label} вимкнено в AI features. Показую deterministic версію без цього AI-шару."
+
+
 def menu_persona_editor_message(*, current_value: str, draft_value: str) -> str:
     return "\n".join(
         [

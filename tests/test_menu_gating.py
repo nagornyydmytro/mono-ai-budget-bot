@@ -3243,7 +3243,13 @@ def test_menu_personalization_item_reads_from_profile_store(tmp_path: Path):
             "activity_mode": "quiet",
             "uncategorized_prompt_frequency": "before_report",
             "persona": "rational",
-            "ai_features": {"report_explanations": False},
+            "ai_features": {
+                "report_explanations": False,
+                "ai_summaries": True,
+                "ai_insights_wording": False,
+                "semantic_fallback": True,
+                "tool_mode": False,
+            },
             "reports_preset": "custom",
         },
         tx_store=tx_store,
@@ -3261,11 +3267,29 @@ def test_menu_personalization_item_reads_from_profile_store(tmp_path: Path):
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert text == templates.menu_personalization_item_message(
-        title="🤖 *AI features*",
-        current_value="AI explanations OFF",
+    assert text == templates.menu_ai_features_editor_message(
+        current_value="\n".join(
+            [
+                "AI explanations: OFF",
+                "AI summaries: ON",
+                "AI insights wording: OFF",
+                "Semantic fallback: ON",
+                "Planner / tool-mode: OFF",
+            ]
+        ),
+        draft_value="\n".join(
+            [
+                "AI explanations: OFF",
+                "AI summaries: ON",
+                "AI insights wording: OFF",
+                "Semantic fallback: ON",
+                "Planner / tool-mode: OFF",
+            ]
+        ),
     )
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:personalization")]]
+    assert _kb_dump(kb)[0] == [
+        ("❌ AI explanations", "menu:personalization:ai:toggle:report_explanations")
+    ]
     assert query.answer_calls[-1] == (None, False, None)
 
 
@@ -4219,3 +4243,281 @@ def test_menu_reports_ai_prompt_includes_persona_suffix(tmp_path: Path, monkeypa
     assert "verbosity=detailed" in str(captured["system"])
     assert "motivation=soft" in str(captured["system"])
     assert "emoji=normal" in str(captured["system"])
+
+
+def test_menu_personalization_ai_save_persists_all_flags(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 201
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "reports_preset": "min",
+        }
+    )
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_open = dp.callback_query.handlers["cb_menu_personalization_items"]
+    cb_toggle = dp.callback_query.handlers["cb_menu_personalization_ai_toggle"]
+    cb_save = dp.callback_query.handlers["cb_menu_personalization_ai_save"]
+    message = DummyMessage(user_id=user_id)
+
+    asyncio.run(
+        cb_open(
+            DummyCallbackQuery(user_id=user_id, data="menu:personalization:ai", message=message)
+        )
+    )
+    for key in [
+        "report_explanations",
+        "ai_summaries",
+        "ai_insights_wording",
+        "semantic_fallback",
+        "tool_mode",
+    ]:
+        asyncio.run(
+            cb_toggle(
+                DummyCallbackQuery(
+                    user_id=user_id,
+                    data=f"menu:personalization:ai:toggle:{key}",
+                    message=message,
+                )
+            )
+        )
+    asyncio.run(
+        cb_save(
+            DummyCallbackQuery(
+                user_id=user_id, data="menu:personalization:ai:save", message=message
+            )
+        )
+    )
+
+    saved = profile_store.load(user_id)
+    assert saved["ai_features"] == {
+        "report_explanations": False,
+        "ai_summaries": False,
+        "ai_insights_wording": False,
+        "semantic_fallback": False,
+        "tool_mode": False,
+    }
+    assert ms.load_memory(user_id).get("ai_features_draft") is None
+    assert message.answers[-1][0] == templates.menu_ai_features_saved_message(
+        "\n".join(
+            [
+                "AI explanations: OFF",
+                "AI summaries: OFF",
+                "AI insights wording: OFF",
+                "Semantic fallback: OFF",
+                "Planner / tool-mode: OFF",
+            ]
+        )
+    )
+
+
+def test_menu_personalization_ai_cancel_discards_draft(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 202
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "reports_preset": "min",
+            "ai_features": {"report_explanations": False},
+        }
+    )
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_open = dp.callback_query.handlers["cb_menu_personalization_items"]
+    cb_toggle = dp.callback_query.handlers["cb_menu_personalization_ai_toggle"]
+    cb_cancel = dp.callback_query.handlers["cb_menu_personalization_ai_cancel"]
+    message = DummyMessage(user_id=user_id)
+
+    asyncio.run(
+        cb_open(
+            DummyCallbackQuery(user_id=user_id, data="menu:personalization:ai", message=message)
+        )
+    )
+    asyncio.run(
+        cb_toggle(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:ai:toggle:semantic_fallback",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_cancel(
+            DummyCallbackQuery(
+                user_id=user_id, data="menu:personalization:ai:cancel", message=message
+            )
+        )
+    )
+
+    saved = profile_store.load(user_id)
+    assert saved["ai_features"] == {
+        "report_explanations": False,
+        "ai_summaries": True,
+        "ai_insights_wording": True,
+        "semantic_fallback": True,
+        "tool_mode": True,
+    }
+    assert ms.load_memory(user_id).get("ai_features_draft") is None
+    assert message.answers[-1][0] == templates.menu_personalization_message(
+        persona_label="Rational",
+        activity_label="Quiet",
+        reports_label="Min",
+        uncat_label="Перед звітом",
+        ai_label="AI explanations OFF",
+    )
+
+
+def test_menu_personalization_ai_reset_sets_defaults(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 203
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "reports_preset": "min",
+            "ai_features": {
+                "report_explanations": False,
+                "ai_summaries": False,
+                "ai_insights_wording": False,
+                "semantic_fallback": False,
+                "tool_mode": False,
+            },
+        },
+        tx_store=tx_store,
+    )
+
+    cb_open = dp.callback_query.handlers["cb_menu_personalization_items"]
+    cb_reset = dp.callback_query.handlers["cb_menu_personalization_ai_reset"]
+    message = DummyMessage(user_id=user_id)
+
+    asyncio.run(
+        cb_open(
+            DummyCallbackQuery(user_id=user_id, data="menu:personalization:ai", message=message)
+        )
+    )
+    asyncio.run(
+        cb_reset(
+            DummyCallbackQuery(
+                user_id=user_id, data="menu:personalization:ai:reset", message=message
+            )
+        )
+    )
+
+    assert ms.load_memory(user_id).get("ai_features_draft") == {
+        "report_explanations": True,
+        "ai_summaries": True,
+        "ai_insights_wording": True,
+        "semantic_fallback": True,
+        "tool_mode": True,
+    }
+    assert "AI explanations: ON" in message.answers[-1][0]
+    assert "Planner / tool-mode: ON" in message.answers[-1][0]
+
+
+def test_menu_reports_ai_explanations_disabled_falls_back_to_deterministic(
+    tmp_path: Path, monkeypatch
+):
+    called = {"generate": 0}
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str, model: str):
+            return None
+
+        def generate_report_v2(self, system: str, user: str, *, max_tokens: int = 700):
+            called["generate"] += 1
+            raise AssertionError("should not call OpenAI when AI explanations are disabled")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(openai_client_module, "OpenAIClient", FakeOpenAIClient)
+
+    class StoreWithFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {"real_spend_total_uah": 123.0},
+                    "coverage": {
+                        "coverage_from_ts": 1_700_000_000,
+                        "coverage_to_ts": 1_700_086_400,
+                        "requested_from_ts": 1_700_000_000,
+                        "requested_to_ts": 1_700_086_400,
+                    },
+                }
+            )
+
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 204
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+            "ai_features": {"report_explanations": False},
+        },
+        tx_store=tx_store,
+        store=StoreWithFacts(),
+        settings=SimpleNamespace(openai_api_key="key", openai_model="gpt"),
+        render_report_for_user=lambda *a, **k: "REPORT",
+    )
+
+    cb_menu_run_report_mode = dp.callback_query.handlers["cb_menu_run_report_mode"]
+    message = DummyMessage(user_id=user_id)
+    query = DummyCallbackQuery(user_id=user_id, data="menu:reports:run:today:ai", message=message)
+
+    asyncio.run(cb_menu_run_report_mode(query))
+
+    assert called["generate"] == 0
+    assert message.answers[0][0] == templates.ai_feature_disabled_message("AI explanations")
+    assert message.answers[-1][0] == "REPORT"
