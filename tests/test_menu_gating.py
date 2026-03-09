@@ -4521,3 +4521,37 @@ def test_menu_reports_ai_explanations_disabled_falls_back_to_deterministic(
     assert called["generate"] == 0
     assert message.answers[0][0] == templates.ai_feature_disabled_message("AI explanations")
     assert message.answers[-1][0] == "REPORT"
+
+
+def test_settings_handlers_registered_via_dedicated_modules(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=301,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+        },
+        tx_store=tx_store,
+    )
+
+    for name in [
+        "cb_menu_personalization_persona_update",
+        "cb_menu_personalization_persona_preview",
+        "cb_menu_personalization_persona_save",
+        "cb_menu_personalization_persona_reset",
+        "cb_menu_personalization_persona_cancel",
+        "cb_menu_personalization_ai_toggle",
+        "cb_menu_personalization_ai_save",
+        "cb_menu_personalization_ai_reset",
+        "cb_menu_personalization_ai_cancel",
+    ]:
+        assert name in dp.callback_query.handlers
