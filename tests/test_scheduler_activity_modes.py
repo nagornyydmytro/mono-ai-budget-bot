@@ -2,11 +2,17 @@ import asyncio
 import logging
 from types import SimpleNamespace
 
+import pytest
+
+import mono_ai_budget_bot.bot.scheduler as sched
 from mono_ai_budget_bot.bot.scheduler import (
     build_activity_proactive_messages,
     build_scheduled_auto_report_text,
+    mark_proactive_output_sent,
     maybe_send_activity_proactive_messages,
+    maybe_send_guarded_proactive_output,
     maybe_send_scheduled_auto_report,
+    should_send_proactive_output,
 )
 
 
@@ -34,6 +40,12 @@ class DummyReportStore:
         if self.facts is None:
             return None
         return SimpleNamespace(facts=self.facts)
+
+
+@pytest.fixture(autouse=True)
+def reset_proactive_state():
+    sched._PROACTIVE_COOLDOWN_STATE.clear()
+    sched._PROACTIVE_DEDUPE_STATE.clear()
 
 
 def _facts() -> dict:
@@ -403,3 +415,191 @@ def test_maybe_send_scheduled_auto_report_skips_when_autojobs_disabled():
 
     assert sent is False
     assert bot.sent == []
+
+
+def test_should_send_proactive_output_rejects_empty_text():
+    assert (
+        should_send_proactive_output(
+            user_id=1,
+            kind="activity",
+            text="   ",
+            now_ts=1000,
+        )
+        is False
+    )
+
+
+def test_mark_proactive_output_sent_enforces_dedupe_for_same_trigger():
+    assert (
+        should_send_proactive_output(
+            user_id=1,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            now_ts=1000,
+        )
+        is True
+    )
+
+    mark_proactive_output_sent(
+        user_id=1,
+        kind="activity",
+        text="🚨 Anomaly nudge\nWOLT spike",
+        now_ts=1000,
+    )
+
+    assert (
+        should_send_proactive_output(
+            user_id=1,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            now_ts=1001,
+        )
+        is False
+    )
+
+
+def test_mark_proactive_output_sent_does_not_block_different_activity_output_in_same_window():
+    mark_proactive_output_sent(
+        user_id=1,
+        kind="activity",
+        text="📈 Trends nudge\nКафе росте",
+        now_ts=1000,
+    )
+
+    assert (
+        should_send_proactive_output(
+            user_id=1,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            now_ts=1001,
+        )
+        is True
+    )
+
+
+def test_mark_proactive_output_sent_enforces_cooldown_for_same_output():
+    mark_proactive_output_sent(
+        user_id=1,
+        kind="activity",
+        text="🚨 Anomaly nudge\nWOLT spike",
+        now_ts=1000,
+    )
+
+    assert (
+        should_send_proactive_output(
+            user_id=1,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            now_ts=1001,
+        )
+        is False
+    )
+
+    assert (
+        should_send_proactive_output(
+            user_id=1,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            now_ts=1000 + 6 * 60 * 60 + 1,
+        )
+        is True
+    )
+
+
+def test_maybe_send_guarded_proactive_output_dedupes_repeated_alert():
+    bot = DummyBot()
+
+    first = asyncio.run(
+        maybe_send_guarded_proactive_output(
+            user_id=1,
+            chat_id=777,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            bot=bot,
+            logger=logging.getLogger("test"),
+            now_ts=1000,
+        )
+    )
+    second = asyncio.run(
+        maybe_send_guarded_proactive_output(
+            user_id=1,
+            chat_id=777,
+            kind="activity",
+            text="🚨 Anomaly nudge\nWOLT spike",
+            bot=bot,
+            logger=logging.getLogger("test"),
+            now_ts=1001,
+        )
+    )
+
+    assert first is True
+    assert second is False
+    assert bot.sent == [(777, "🚨 Anomaly nudge\nWOLT spike", None)]
+
+
+def test_maybe_send_activity_proactive_messages_applies_cooldown_and_suppresses_repeat(monkeypatch):
+    bot = DummyBot()
+    profile_store = DummyProfileStore({"activity_mode": "loud"})
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=True, chat_id=777)
+
+    monkeypatch.setattr(sched.time, "time", lambda: 1000)
+    asyncio.run(
+        maybe_send_activity_proactive_messages(
+            user,
+            bot=bot,
+            profile_store=profile_store,
+            report_store=report_store,
+            logger=logging.getLogger("test"),
+        )
+    )
+
+    monkeypatch.setattr(sched.time, "time", lambda: 1001)
+    asyncio.run(
+        maybe_send_activity_proactive_messages(
+            user,
+            bot=bot,
+            profile_store=profile_store,
+            report_store=report_store,
+            logger=logging.getLogger("test"),
+        )
+    )
+
+    assert len(bot.sent) == 4
+
+
+def test_maybe_send_scheduled_auto_report_dedupes_same_period_report(monkeypatch):
+    bot = DummyBot()
+    profile_store = DummyProfileStore({"activity_mode": "loud"})
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=True, chat_id=777)
+
+    monkeypatch.setattr(sched.time, "time", lambda: 2000)
+    first = asyncio.run(
+        maybe_send_scheduled_auto_report(
+            user,
+            period="week",
+            bot=bot,
+            profile_store=profile_store,
+            report_store=report_store,
+            render_report_text=lambda user_id, period, facts: "WEEK REPORT",
+            logger=logging.getLogger("test"),
+        )
+    )
+
+    monkeypatch.setattr(sched.time, "time", lambda: 2001)
+    second = asyncio.run(
+        maybe_send_scheduled_auto_report(
+            user,
+            period="week",
+            bot=bot,
+            profile_store=profile_store,
+            report_store=report_store,
+            render_report_text=lambda user_id, period, facts: "WEEK REPORT",
+            logger=logging.getLogger("test"),
+        )
+    )
+
+    assert first is True
+    assert second is False
+    assert bot.sent == [(777, "WEEK REPORT", None)]

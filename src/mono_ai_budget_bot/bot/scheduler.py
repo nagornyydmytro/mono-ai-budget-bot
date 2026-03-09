@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -113,6 +114,101 @@ async def safe_send(bot, chat_id: int, text: str, logger: logging.Logger) -> Non
         logger.warning("Failed to send message to chat_id=%s: %s", chat_id, e)
 
 
+_PROACTIVE_COOLDOWN_STATE: dict[tuple[int, str], int] = {}
+_PROACTIVE_DEDUPE_STATE: dict[tuple[int, str], int] = {}
+
+_PROACTIVE_COOLDOWN_SECONDS = {
+    "activity": 6 * 60 * 60,
+    "report:week": 18 * 60 * 60,
+    "report:month": 36 * 60 * 60,
+}
+
+_PROACTIVE_DEDUPE_SECONDS = {
+    "activity": 6 * 60 * 60,
+    "report:week": 7 * 24 * 60 * 60,
+    "report:month": 31 * 24 * 60 * 60,
+}
+
+
+def _proactive_signature(text: str) -> str:
+    normalized = " ".join((text or "").split()).strip()
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+def should_send_proactive_output(
+    *,
+    user_id: int,
+    kind: str,
+    text: str,
+    now_ts: int,
+) -> bool:
+    normalized = " ".join((text or "").split()).strip()
+    if not normalized:
+        return False
+
+    signature = _proactive_signature(normalized)
+
+    cooldown_key = (user_id, f"{kind}:{signature}")
+    cooldown_until = int(_PROACTIVE_COOLDOWN_STATE.get(cooldown_key, 0) or 0)
+    if cooldown_until > now_ts:
+        return False
+
+    dedupe_key = (user_id, f"{kind}:{signature}")
+    dedupe_until = int(_PROACTIVE_DEDUPE_STATE.get(dedupe_key, 0) or 0)
+    if dedupe_until > now_ts:
+        return False
+
+    return True
+
+
+def mark_proactive_output_sent(
+    *,
+    user_id: int,
+    kind: str,
+    text: str,
+    now_ts: int,
+) -> None:
+    normalized = " ".join((text or "").split()).strip()
+    if not normalized:
+        return
+
+    cooldown_ttl = int(_PROACTIVE_COOLDOWN_SECONDS.get(kind, 6 * 60 * 60))
+    dedupe_ttl = int(_PROACTIVE_DEDUPE_SECONDS.get(kind, 24 * 60 * 60))
+
+    signature = _proactive_signature(normalized)
+    _PROACTIVE_COOLDOWN_STATE[(user_id, f"{kind}:{signature}")] = now_ts + cooldown_ttl
+    _PROACTIVE_DEDUPE_STATE[(user_id, f"{kind}:{signature}")] = now_ts + dedupe_ttl
+
+
+async def maybe_send_guarded_proactive_output(
+    *,
+    user_id: int,
+    chat_id: int,
+    kind: str,
+    text: str,
+    bot,
+    logger: logging.Logger,
+    now_ts: int | None = None,
+) -> bool:
+    ts = int(now_ts if now_ts is not None else time.time())
+    if not should_send_proactive_output(
+        user_id=user_id,
+        kind=kind,
+        text=text,
+        now_ts=ts,
+    ):
+        return False
+
+    await safe_send(bot, chat_id, text, logger)
+    mark_proactive_output_sent(
+        user_id=user_id,
+        kind=kind,
+        text=text,
+        now_ts=ts,
+    )
+    return True
+
+
 def build_activity_proactive_messages(profile: dict, facts: dict | None) -> list[str]:
     if not isinstance(profile, dict) or not isinstance(facts, dict) or not facts:
         return []
@@ -215,8 +311,17 @@ async def maybe_send_activity_proactive_messages(
         else None
     )
 
+    now_ts = int(time.time())
     for text in build_activity_proactive_messages(prof, facts):
-        await safe_send(bot, u.chat_id, text, logger)
+        await maybe_send_guarded_proactive_output(
+            user_id=u.telegram_user_id,
+            chat_id=u.chat_id,
+            kind="activity",
+            text=text,
+            bot=bot,
+            logger=logger,
+            now_ts=now_ts,
+        )
 
 
 def build_scheduled_auto_report_text(
@@ -263,8 +368,14 @@ async def maybe_send_scheduled_auto_report(
     if text is None:
         return False
 
-    await safe_send(bot, u.chat_id, text, logger)
-    return True
+    return await maybe_send_guarded_proactive_output(
+        user_id=u.telegram_user_id,
+        chat_id=u.chat_id,
+        kind=f"report:{period}",
+        text=text,
+        bot=bot,
+        logger=logger,
+    )
 
 
 def start_jobs(
