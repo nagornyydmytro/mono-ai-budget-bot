@@ -128,6 +128,15 @@ _NARRATIVE_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_FINANCE_SUBJECT_RE = re.compile(
+    r"\b("
+    r"витрат\w*|доход\w*|переказ\w*|"
+    r"категор\w*|мерчант\w*|магазин\w*|покупк\w*|"
+    r"бюджет\w*|фінанс\w*|грош\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _TOOL_MODE_HINT_RE = re.compile(
     r"\b("
     r"топ|top|"
@@ -405,6 +414,44 @@ def _select_execution_route(
     if _is_tool_mode_candidate(req.text):
         return "tool_mode"
     return "planner"
+
+
+def _needs_open_question_clarification(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> bool:
+    if deterministic_intent is not None:
+        return False
+    if not _is_narrative_candidate(req):
+        return False
+    return _FINANCE_SUBJECT_RE.search(req.text or "") is None
+
+
+def _open_question_clarification_text(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> str | None:
+    if not _needs_open_question_clarification(req, deterministic_intent):
+        return None
+    return (
+        "Уточни, будь ласка, що саме проаналізувати: витрати, доходи чи перекази. "
+        "Можеш також додати період, наприклад за місяць або за 7 днів."
+    )
+
+
+def _select_answer_policy(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> Literal["deterministic", "safe_llm", "clarification", "none"]:
+    if deterministic_intent is not None:
+        schema = _build_canonical_query_schema(req, deterministic_intent)
+        if not _should_handoff_deterministic_intent(req, deterministic_intent, schema):
+            return "deterministic"
+    if _is_out_of_scope_for_llm(req.text):
+        return "none"
+    if _needs_open_question_clarification(req, deterministic_intent):
+        return "clarification"
+    return "safe_llm"
 
 
 def _llm_cooldown_ok(user_id: int, now_ts: int, seconds: int = 10) -> bool:
@@ -996,23 +1043,33 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
             )
 
     deterministic_intent = route(req)
+    policy = _select_answer_policy(req, deterministic_intent)
     strategy = _select_execution_route(req, deterministic_intent)
 
     intent: NLQIntent | None
     narrative_resp: NLQResponse | None = None
 
-    if strategy == "deterministic":
+    if policy == "deterministic":
         intent = deterministic_intent
-    elif strategy == "tool_mode":
-        intent = _llm_tool_mode_intent(req)
-        if intent is None:
+    elif policy == "clarification":
+        text = _open_question_clarification_text(req, deterministic_intent)
+        return NLQResponse(
+            result=NLQResult(text=(text or "Уточни, будь ласка, свій запит.")),
+            clarification=None,
+        )
+    elif policy == "safe_llm":
+        if strategy == "tool_mode":
+            intent = _llm_tool_mode_intent(req)
+            if intent is None:
+                intent = _llm_plan_intent(req)
+            if intent is None and _is_narrative_candidate(req):
+                narrative_resp = _llm_narrative_response(req, deterministic_intent)
+        elif strategy == "planner":
             intent = _llm_plan_intent(req)
-        if intent is None and _is_narrative_candidate(req):
-            narrative_resp = _llm_narrative_response(req, deterministic_intent)
-    elif strategy == "planner":
-        intent = _llm_plan_intent(req)
-        if intent is None and _is_narrative_candidate(req):
-            narrative_resp = _llm_narrative_response(req, deterministic_intent)
+            if intent is None and _is_narrative_candidate(req):
+                narrative_resp = _llm_narrative_response(req, deterministic_intent)
+        else:
+            intent = None
     else:
         intent = None
 

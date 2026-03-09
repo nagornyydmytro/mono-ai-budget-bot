@@ -67,6 +67,34 @@ def test_select_execution_route_uses_tool_mode_for_decomposable_query():
     assert pl._select_execution_route(req, None) == "tool_mode"
 
 
+def test_select_answer_policy_prefers_deterministic_before_safe_llm():
+    req = NLQRequest(telegram_user_id=1, text="скільки я витратив на мак за 7 днів?", now_ts=1000)
+    deterministic = NLQIntent(name="spend_sum", slots={"intent": "spend_sum", "days": 7})
+    assert pl._select_answer_policy(req, deterministic) == "deterministic"
+
+
+def test_select_answer_policy_prefers_safe_llm_over_wrong_deterministic_match():
+    req = NLQRequest(
+        telegram_user_id=1,
+        text="скільки я витратив на мак за 7 днів і що це говорить про мої звички?",
+        now_ts=1000,
+    )
+    deterministic = NLQIntent(
+        name="spend_sum",
+        slots={"intent": "spend_sum", "days": 7, "merchant_contains": "мак"},
+    )
+    assert pl._select_answer_policy(req, deterministic) == "safe_llm"
+
+
+def test_select_answer_policy_returns_clarification_for_too_ambiguous_open_question():
+    req = NLQRequest(
+        telegram_user_id=1,
+        text="поясни як коуч",
+        now_ts=1000,
+    )
+    assert pl._select_answer_policy(req, None) == "clarification"
+
+
 def test_handle_nlq_does_not_call_llm_when_deterministic_route_exists(monkeypatch):
     monkeypatch.setattr(
         pl,

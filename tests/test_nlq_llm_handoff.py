@@ -146,3 +146,30 @@ def test_ambiguous_deterministic_match_falls_through_to_safe_narrative(monkeypat
 
     assert resp.result is not None
     assert resp.result.text == "За місяць у тебе помітна концентрація витрат на fast food."
+
+
+def test_handle_nlq_returns_clarification_for_too_ambiguous_open_question(monkeypatch):
+    monkeypatch.setattr(pl, "route", lambda req: None)
+    monkeypatch.setattr(pl, "load_memory", lambda telegram_user_id: {})
+    monkeypatch.setattr(pl, "get_pending_manual_mode", lambda telegram_user_id, now_ts: None)
+
+    class DummyClient:
+        def plan_nlq(self, *, user_text: str, now_ts: int):
+            raise AssertionError("plan_nlq must not be called for clarification-first policy")
+
+        def interpret_nlq(self, *, user_text: str, schema: dict, facts_payload: dict):
+            raise AssertionError("interpret_nlq must not be called for clarification-first policy")
+
+    monkeypatch.setattr(pl, "_get_llm_client", lambda: DummyClient())
+
+    resp = pl.handle_nlq(
+        NLQRequest(
+            telegram_user_id=1,
+            text="поясни як коуч",
+            now_ts=40_000,
+        )
+    )
+
+    assert resp.result is not None
+    assert "Уточни, будь ласка" in resp.result.text
+    assert "витрати, доходи чи перекази" in resp.result.text
