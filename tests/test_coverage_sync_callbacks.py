@@ -194,33 +194,18 @@ def test_missing_coverage_sync_reruns_with_separate_success_and_answer_messages(
     assert query.answer_calls[-1] == ("Ок", False)
 
 
-def test_partial_coverage_sync_reruns_with_separate_success_and_answer_messages(
-    monkeypatch, tmp_path
-):
+def test_partial_coverage_nlq_does_not_offer_sync_cta(monkeypatch, tmp_path):
     harness = _build_harness(monkeypatch, tmp_path, coverage_status="partial")
 
     message = DummyMessage(user_id=1, text="Скільки я витратив?")
     asyncio.run(harness.handle_plain_text(message))
 
     pending_id = ms.get_pending_id(1)
-    assert isinstance(pending_id, str) and pending_id
+    assert pending_id is None
     assert message.answers[0][0] == "Coverage partial"
-
-    query = DummyCallbackQuery(user_id=1, data=f"cov_sync:{pending_id}", message=message)
-    asyncio.run(harness.cb_cov_sync(query))
-
-    assert harness.sync_calls == [30]
-    assert harness.nlq_calls == ["Скільки я витратив?", "Скільки я витратив?"]
-    assert [text for text, _ in message.answers] == [
-        "Coverage partial",
-        templates.ledger_refresh_progress_message(),
-        templates.coverage_sync_done_message(),
-        "Final answer",
-    ]
-    mem = ms.load_memory(1)
-    assert mem.get("pending_intent") is None
-    assert mem.get("pending_id") is None
-    assert query.answer_calls[-1] == ("Ок", False)
+    assert message.answers[0][1] is None
+    assert harness.sync_calls == []
+    assert harness.nlq_calls == ["Скільки я витратив?"]
 
 
 def test_coverage_cancel_clears_pending_without_sync_or_rerun(monkeypatch, tmp_path):

@@ -82,3 +82,117 @@ def test_nlq_compare_to_baseline_merchant_mac_yesterday():
     assert intent["intent"] == "compare_to_baseline"
     assert intent["days"] == 1
     assert intent["merchant_contains"] == "мак"
+
+
+def test_router_category_sum_cafe_restaurants():
+    p = parse_nlq_intent("Скільки я витратив на кафе та ресторани за місяць?")
+    assert p["intent"] == "spend_sum"
+    assert p["category"] == "Кафе/Ресторани"
+    assert p["merchant_contains"] is None
+
+
+def test_router_category_sum_transport():
+    p = parse_nlq_intent("Скільки я витратив на транспорт за місяць?")
+    assert p["intent"] == "spend_sum"
+    assert p["category"] == "Транспорт"
+    assert p["merchant_contains"] is None
+
+
+def test_router_top_categories():
+    p = parse_nlq_intent("Які топ-3 категорії витрат за 30 днів?")
+    assert p["intent"] == "top_categories"
+    assert p["top_n"] == 3
+
+
+def test_router_biggest_category():
+    p = parse_nlq_intent("Яка категорія найбільша цього місяця?", now_ts=1773057600)
+    assert p["intent"] == "top_categories"
+    assert p["top_n"] == 1
+    assert p["period_label"] == "цей місяць"
+    assert p["start_ts"] == 1772323200
+    assert p["end_ts"] == 1773057600
+
+
+def test_router_category_share():
+    p = parse_nlq_intent("Яка частка витрат пішла на маркет/побут?")
+    assert p["intent"] == "category_share"
+    assert p["category"] == "Маркет/Побут"
+
+
+def test_router_merchant_query_with_u_preposition():
+    p = parse_nlq_intent("Скільки я витратив у NOVUS за місяць?")
+    assert p["intent"] == "spend_sum"
+    assert p["merchant_contains"] == "novus"
+    assert p["category"] is None
+
+
+def test_router_merchant_query_bolt_not_transport_category():
+    p = parse_nlq_intent("Скільки я витратив на Bolt за місяць?")
+    assert p["intent"] == "spend_sum"
+    assert p["merchant_contains"] == "bolt"
+    assert p["category"] is None
+
+
+def test_router_top_merchants():
+    p = parse_nlq_intent("Які в мене топ-5 мерчантів за місяць?")
+    assert p["intent"] == "top_merchants"
+    assert p["top_n"] == 5
+
+
+def test_router_compare_to_previous_period():
+    p = parse_nlq_intent("Порівняй витрати за останні 30 днів із попередніми 30 днями")
+    assert p["intent"] == "compare_to_previous_period"
+
+
+def test_router_top_growth_categories():
+    p = parse_nlq_intent("Що найбільше виросло за останній місяць?")
+    assert p["intent"] == "top_growth_categories"
+
+
+def test_router_top_decline_categories():
+    p = parse_nlq_intent("Що найбільше просіло?")
+    assert p["intent"] == "top_decline_categories"
+
+
+def test_router_explain_growth():
+    p = parse_nlq_intent("Чому цього місяця витрати зросли?")
+    assert p["intent"] == "explain_growth"
+
+
+def test_router_compare_question_does_not_capture_previous_as_merchant():
+    p = parse_nlq_intent("У мене цього місяця витрати більші чи менші, ніж у попередньому?")
+    assert p["intent"] == "compare_to_previous_period"
+    assert p["merchant_contains"] is None
+
+
+def test_router_explicit_merchant_sets_exact_flag():
+    p = parse_nlq_intent("Скільки я витратив у NOVUS за місяць?")
+    assert p["merchant_contains"] == "novus"
+    assert p["merchant_exact"] is True
+
+
+def test_router_income_query_does_not_capture_v_mene_as_merchant():
+    p = parse_nlq_intent("Скільки в мене було доходів за останні 30 днів?")
+    assert p["intent"] == "income_sum"
+    assert p["merchant_contains"] is None
+    assert p["merchant_exact"] is False
+
+
+def test_router_spend_summary_short():
+    p = parse_nlq_intent("Поясни мої витрати за останній місяць коротко")
+    assert p["intent"] == "spend_summary_short"
+
+
+def test_router_spend_insights_three():
+    p = parse_nlq_intent("Дай 3 головні інсайти по моїх витратах за 30 днів")
+    assert p["intent"] == "spend_insights_three"
+
+
+def test_router_spend_unusual_summary():
+    p = parse_nlq_intent("Що в мене виглядає незвично за місяць?")
+    assert p["intent"] == "spend_unusual_summary"
+
+
+def test_router_explain_growth_alt_phrase():
+    p = parse_nlq_intent("Чим пояснюється ріст витрат цього місяця?")
+    assert p["intent"] == "explain_growth"

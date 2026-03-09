@@ -173,3 +173,37 @@ def test_executor_extended_intents(monkeypatch):
     )
     assert "Зазвичай" in msg
     assert "Різниця:" in msg
+
+
+def test_executor_top_categories_biggest_category_format(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: NOW_TS)
+    monkeypatch.setattr(
+        ex,
+        "load_memory",
+        lambda telegram_user_id: {
+            "recipient_aliases": {},
+            "merchant_aliases": {},
+            "category_aliases": {},
+            "pending_intent": None,
+            "pending_kind": None,
+            "pending_options": None,
+        },
+    )
+    monkeypatch.setattr(ex, "save_memory", lambda telegram_user_id, data: None)
+
+    msg = execute_intent(
+        1,
+        {
+            "intent": "top_categories",
+            "top_n": 1,
+            "period_label": "цей місяць",
+            "start_ts": NOW_TS - 7 * 86400,
+            "end_ts": NOW_TS,
+        },
+    )
+    assert "Цього місяця: найбільша категорія —" in msg
+    assert "\n1. " not in msg

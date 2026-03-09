@@ -11,13 +11,15 @@ from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
 
 _DAYS_RE = re.compile(r"(\d{1,3})\s*(?:дн|днів|дня|days)\b", re.IGNORECASE)
 _INCOME_RE = re.compile(
-    r"\b(поповнен\w*|зачислен\w*|пополнен\w*|top\s*up|income|депозит)\b",
+    r"\b(дох(ід|оди|одів)|поповнен\w*|зачислен\w*|пополнен\w*|top\s*up|income|депозит)\b",
     re.IGNORECASE,
 )
+
 _TRANSFER_OUT_RE = re.compile(
     r"\b(скинув|скинула|скинути|переказ(ав|ала|ати)?|перев(ів|ела)|відправ(ив|ила|ити)?|send|sent)\b",
     re.IGNORECASE,
 )
+
 _TRANSFER_IN_RE = re.compile(
     (
         r"\b("
@@ -25,6 +27,8 @@ _TRANSFER_IN_RE = re.compile(
         r"входящ\w*\s+перевод\w*|"
         r"incoming\s+transfer(s)?|"
         r"inbound\s+transfer(s)?|"
+        r"переказ\w*\s+на\s+карт\w*|"
+        r"перевод\w*\s+на\s+карт\w*|"
         r"отрим(ав|ала|ати)?|"
         r"прийшл(и|о)|"
         r"надійшл(и|о)|"
@@ -33,34 +37,48 @@ _TRANSFER_IN_RE = re.compile(
     ),
     re.IGNORECASE,
 )
+
 _COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
 _RECIPIENT_ALIAS_RE = re.compile(
     r"\b(дівчин(і|е|у|а)|мам(і|е|у|а)|тат(ові|у|а)|оренд(а|і|у)|квартир(а|і|у))\b", re.IGNORECASE
 )
+
 _COMPARE_RE = re.compile(
-    r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян|compare)\b", re.IGNORECASE
-)
-_BASELINE_RE = re.compile(r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline)\b", re.IGNORECASE)
-_COUNT_PHRASING_RE = re.compile(
-    r"\b(скільки\s+було|сколько\s+было|how\s+many)\b",
+    r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян\w*|порівняй|порівняти|compare)\b",
     re.IGNORECASE,
 )
+
+_BASELINE_RE = re.compile(r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline)\b", re.IGNORECASE)
+_COUNT_PHRASING_RE = re.compile(
+    r"\b(скільки\s+разів|кількість|count|how\s+many)\b",
+    re.IGNORECASE,
+)
+
 _INCOME_COUNT_PHRASING_RE = re.compile(
     r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\bпоповнен",
     re.IGNORECASE,
 )
+
 _INCOME_COUNT_OVERRIDE_RE = re.compile(
     r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\bпоповнен",
     re.IGNORECASE,
 )
+
 _TRANSFER_COUNT_OVERRIDE_RE = re.compile(
-    r"\b(скільки|сколько|how\s+many)\b.*\bбуло\b.*\b(переказ|транзакц)",
+    (
+        r"("
+        r"\b(скільки\s+разів|кількість|count|how\s+many)\b.*\b(переказ|транзакц)|"
+        r"\bскільки\b.*\bбуло\b.*\b(вхідн\w*\s+)?переказ(ів)?\b(?!\s+на\s+карт\w*)"
+        r")"
+    ),
     re.IGNORECASE,
 )
+
 _MERCHANT_AFTER_NA_RE = re.compile(
     r"\bна\s+([^\?\.,!]+?)(?:\s+(ніж|чем)\s+зазвичай|\s+than\s+usual|\s+usual|\s+звичайно|$)",
     re.IGNORECASE,
 )
+
 _MERCHANT_TAIL_RE = re.compile(
     r"\b(?:на|в|у)\s+([^\?\.,!]+)$",
     re.IGNORECASE,
@@ -75,12 +93,69 @@ _LAST_TIME_RE = re.compile(
     r"\b(коли\s+останн(ій|є)|коли\s+востаннє|last\s+time|when\s+was\s+the\s+last)\b",
     re.IGNORECASE,
 )
+
 _RECURRENCE_RE = re.compile(
     r"\b(як\s+часто|наскільки\s+регулярно|regularly|recurr|регулярно)\b",
     re.IGNORECASE,
 )
+
 _THRESHOLD_RE = re.compile(
     r"\b(більше|более|more\s+than|over|понад|вище|дорожче|менше|меньше|less\s+than|under|дешевше|до)\s*(\d+(?:[.,]\d+)?)\s*(?:грн|uah|₴)?\b",
+    re.IGNORECASE,
+)
+
+_PREVIOUS_PERIOD_RE = re.compile(
+    r"\b(поперед\w*|прошл\w*|previous|prior)\b",
+    re.IGNORECASE,
+)
+
+_TOP_MERCHANTS_RE = re.compile(
+    r"\b(топ-?\s*\d*\s*мерчант\w*|топ-?\s*\d*\s*merchant\w*|де\s+я\s+витратив\s+найбільше)\b",
+    re.IGNORECASE,
+)
+
+_TOP_GROWTH_RE = re.compile(
+    r"\b(що\s+найбільше\s+виросло|що\s+зараз\s+росте|що\s+росте)\b",
+    re.IGNORECASE,
+)
+
+_TOP_DECLINE_RE = re.compile(
+    r"\b(що\s+найбільше\s+просіло|що\s+впало|що\s+зменшилось)\b",
+    re.IGNORECASE,
+)
+
+_SUMMARY_SHORT_RE = re.compile(
+    r"\b(поясни.*витрат\w*.*коротко|коротко.*поясни.*витрат\w*|short\s+summary)\b",
+    re.IGNORECASE,
+)
+
+_INSIGHTS_THREE_RE = re.compile(
+    r"\b(дай\s+\d+\s+головн\w+\s+інсайт\w*|головн\w+\s+інсайт\w*|main\s+insights)\b",
+    re.IGNORECASE,
+)
+
+_UNUSUAL_RE = re.compile(
+    r"\b(що.*виглядає\s+незвичн\w*|що.*незвичн\w*|що.*аномальн\w*|unusual|anomal)\b",
+    re.IGNORECASE,
+)
+
+_EXPLAIN_GROWTH_RE = re.compile(
+    r"\b(чому.*витрат\w*.*зросл\w*|чому.*витрат\w*.*виросл\w*|чим.*пояснюєт\w*.*ріст.*витрат\w*|чим.*пояснюєт\w*.*зростан\w*.*витрат\w*|why.*spend.*up)\b",
+    re.IGNORECASE,
+)
+
+_MERCHANT_AFTER_PLACE_RE = re.compile(
+    r"\b(?:у|в|на)\s+([^\?\.,!]+?)(?:\s+(?:ніж|чем)\s+зазвичай|\s+than\s+usual|$)",
+    re.IGNORECASE,
+)
+
+_TOP_CATEGORIES_RE = re.compile(
+    r"\b(на\s+що\s+я\s+найбільше|яка\s+категорія\s+найбільш\w*|топ-?\s*\d*\s*категор)",
+    re.IGNORECASE,
+)
+
+_SHARE_RE = re.compile(
+    r"\b(частка|доля|share|відсот(ок|ка|ки))\b",
     re.IGNORECASE,
 )
 
@@ -103,6 +178,73 @@ def _parse_threshold_uah(text: str) -> tuple[str | None, float | None]:
     under_markers = {"менше", "меньше", "less than", "under", "дешевше", "до"}
     mode = "under" if raw_mode in under_markers else "over"
     return mode, value
+
+
+def _strip_period_tail(value: str) -> str:
+    s = (value or "").strip()
+    if not s:
+        return ""
+
+    s = re.sub(
+        (
+            r"\s+(?:"
+            r"за\s+останні\s+\d{1,3}\s*(?:дн|днів|дня|days)|"
+            r"за\s+\d{1,3}\s*(?:дн|днів|дня|days)|"
+            r"за\s+тиждень|за\s+неделю|за\s+місяць|"
+            r"за\s+минулий\s+місяць|за\s+прошлый\s+месяц|"
+            r"цього\s+місяця|этого\s+месяца|this\s+month|"
+            r"місяць|тиждень|30\s+днів|7\s+днів|сьогодні|today"
+            r")\s*$"
+        ),
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s.strip(" .,!?:;\"'()[]{}").strip()
+
+
+def _extract_top_n(text: str) -> int:
+    m = re.search(r"\bтоп-?\s*(\d{1,2})\b", text or "", flags=re.IGNORECASE)
+    if m:
+        try:
+            return max(1, min(int(m.group(1)), 10))
+        except Exception:
+            return 5
+    if re.search(r"\bяка\s+категорія\s+найбільш\w*\b", text or "", flags=re.IGNORECASE):
+        return 1
+    if re.search(r"\bде\s+я\s+витратив\s+найбільше\b", text or "", flags=re.IGNORECASE):
+        return 1
+    return 5
+
+
+def _is_non_merchant_prepositional_phrase(prep: str, cand: str) -> bool:
+    p = (prep or "").strip().lower()
+    s = (cand or "").strip().lower()
+    if not s:
+        return False
+
+    if p in {"у", "в"} and re.match(r"^(мене|меня|me)\b", s, flags=re.IGNORECASE):
+        return True
+
+    if re.fullmatch(r"(поперед\w*|прошл\w*|previous|prior)", s, flags=re.IGNORECASE):
+        return True
+
+    return False
+
+
+def _looks_like_explicit_merchant(prep: str, cand: str) -> bool:
+    p = (prep or "").strip().lower()
+    s = (cand or "").strip()
+    if not s:
+        return False
+
+    if p in {"у", "в"}:
+        return True
+
+    latin = re.search(r"[a-z]", s, flags=re.IGNORECASE) is not None
+    has_quote = any(ch in s for ch in ("'", "’", "`"))
+
+    return p == "на" and (latin or has_quote)
 
 
 def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any]:
@@ -154,6 +296,8 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             period_label = f"останні {int(m_lbl.group(2))} днів"
         elif re.search(r"\b(за\s+тиждень|за\s+неделю|last\s+week)\b", t):
             period_label = "останній тиждень"
+        elif re.search(r"\b(цього\s+місяця|этого\s+месяца|this\s+month)\b", t):
+            period_label = "цей місяць"
         elif re.search(r"\b(за\s+минулий\s+місяць|за\s+прошлый\s+месяц|last\s+month)\b", t):
             period_label = "минулий місяць"
         else:
@@ -225,9 +369,22 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         days = max(1, min(days, 31))
 
     is_count = _COUNT_RE.search(t) is not None
-    want_compare = _COMPARE_RE.search(t) is not None and _BASELINE_RE.search(t) is not None
+    want_compare_baseline = _COMPARE_RE.search(t) is not None and _BASELINE_RE.search(t) is not None
+    want_compare_previous = _PREVIOUS_PERIOD_RE.search(t) is not None and (
+        _COMPARE_RE.search(t) is not None
+        or re.search(r"\b(більш\w*|менш\w*|больше|меньше|higher|lower)\b", t) is not None
+    )
     want_last_time = _LAST_TIME_RE.search(t) is not None
     want_recurrence = _RECURRENCE_RE.search(t) is not None
+    want_top_categories = _TOP_CATEGORIES_RE.search(t) is not None
+    want_top_merchants = _TOP_MERCHANTS_RE.search(t) is not None
+    want_share = _SHARE_RE.search(t) is not None
+    want_top_growth = _TOP_GROWTH_RE.search(t) is not None and _PREVIOUS_PERIOD_RE.search(t) is None
+    want_top_decline = _TOP_DECLINE_RE.search(t) is not None
+    want_summary_short = _SUMMARY_SHORT_RE.search(t) is not None
+    want_insights_three = _INSIGHTS_THREE_RE.search(t) is not None
+    want_unusual = _UNUSUAL_RE.search(t) is not None
+    want_explain_growth = _EXPLAIN_GROWTH_RE.search(t) is not None
     threshold_mode, threshold_uah = _parse_threshold_uah(t)
 
     intent: str | None = None
@@ -282,24 +439,43 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             intent = "unsupported"
 
     merchant: str | None = None
+    merchant_prep: str | None = None
+    merchant_exact = False
 
-    parts: list[str] = []
-    for m in re.finditer(r"\bна\s+([^\?\.,!]+)", t, flags=re.IGNORECASE):
-        cand = m.group(1).strip()
+    parts: list[tuple[str, str]] = []
+    for m in re.finditer(r"\b(на|у|в)\s+([^\?\.,!]+)", t, flags=re.IGNORECASE):
+        prep = str(m.group(1) or "").strip().lower()
+        cand = str(m.group(2) or "").strip()
         if cand:
-            parts.append(cand)
+            parts.append((prep, cand))
 
     if parts:
-        cand = parts[-1]
+        merchant_prep, cand = parts[-1]
         cand = re.split(r"\b(ніж|чем|than)\b", cand, maxsplit=1, flags=re.IGNORECASE)[0].strip()
 
         if re.match(r"^(скільки|сколько|how\s+much|how\s+many)\b", cand, flags=re.IGNORECASE):
             if " на " in cand:
                 cand = cand.split(" на ")[-1].strip()
 
-        cand = cand.strip(" .,!?:;\"'()[]{}").strip()
+        cand = _strip_period_tail(cand)
+        cand_category = detect_category(cand)
+
+        cand = _strip_period_tail(cand)
+        cand_category = detect_category(cand)
+
         if cand and not re.search(r"\b(\d+%|\d+)\b", cand):
-            merchant = cand
+            if _is_non_merchant_prepositional_phrase(merchant_prep or "", cand):
+                pass
+            else:
+                explicit_merchant = _looks_like_explicit_merchant(merchant_prep or "", cand)
+
+                if explicit_merchant:
+                    merchant = cand
+                    merchant_exact = True
+                    if category is not None and cand_category == category:
+                        category = None
+                elif not (category is not None and cand_category == category):
+                    merchant = cand
 
     recipient_alias = None
     m3 = _RECIPIENT_ALIAS_RE.search(t)
@@ -316,12 +492,32 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         elif intent in ("transfer_out_sum", "transfer_out_count"):
             intent = "transfer_out_count"
 
-    if want_compare:
+    if want_compare_baseline:
         intent = "compare_to_baseline"
+    elif want_compare_previous:
+        intent = "compare_to_previous_period"
+    elif want_summary_short:
+        intent = "spend_summary_short"
+    elif want_insights_three:
+        intent = "spend_insights_three"
+    elif want_unusual:
+        intent = "spend_unusual_summary"
     elif want_last_time:
         intent = "last_time"
     elif want_recurrence:
         intent = "recurrence_summary"
+    elif want_top_merchants:
+        intent = "top_merchants"
+    elif want_top_categories:
+        intent = "top_categories"
+    elif want_share and category is not None:
+        intent = "category_share"
+    elif want_top_growth:
+        intent = "top_growth_categories"
+    elif want_top_decline:
+        intent = "top_decline_categories"
+    elif want_explain_growth:
+        intent = "explain_growth"
     elif (
         threshold_mode == "over"
         and threshold_uah is not None
@@ -343,11 +539,13 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "start_ts": start_ts,
         "end_ts": end_ts,
         "merchant_contains": merchant,
+        "merchant_exact": merchant_exact,
         "recipient_alias": recipient_alias,
         "period_label": period_label,
         "category": category,
         "entity_kind": entity_kind,
         "threshold_uah": threshold_uah,
+        "top_n": _extract_top_n(t) if intent in {"top_categories", "top_merchants"} else None,
     }
 
 

@@ -11,6 +11,7 @@ from mono_ai_budget_bot.analytics.compare import (
     compare_window_to_baseline,
 )
 from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
+from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
 from mono_ai_budget_bot.analytics.refunds import detect_refund_pairs, refund_ignore_ids
 from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.bot.formatting import (
@@ -40,6 +41,55 @@ from mono_ai_budget_bot.nlq.tabular import (
 from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
+
+
+def _build_current_period_report(rows, ts_from: int, ts_to: int) -> dict[str, Any]:
+    window_days = max(1, int(math.ceil((int(ts_to) - int(ts_from)) / 86400.0)))
+    return build_period_report_from_ledger(rows, days_back=window_days, now_ts=ts_to)
+
+
+def _apply_exact_merchant_filter(rows, merchant_filter: list[str] | None):
+    terms = {
+        norm(x).replace(" ", "")
+        for x in (merchant_filter or [])
+        if isinstance(x, str) and norm(x).replace(" ", "")
+    }
+    if not terms:
+        return rows
+
+    out = []
+    for r in rows:
+        key = norm(str(getattr(r, "description", "") or "")).replace(" ", "")
+        if key in terms:
+            out.append(r)
+    return out
+
+
+def _normalize_coverage_status_for_nlq(
+    status: CoverageStatus,
+    coverage_window: tuple[int, int] | None,
+    requested_to_ts: int,
+    has_rows_in_window: bool,
+) -> CoverageStatus:
+    if status != CoverageStatus.partial or coverage_window is None:
+        return status
+
+    if not has_rows_in_window:
+        return status
+
+    cov_to = int(coverage_window[1])
+    requested_to_ts = int(requested_to_ts)
+
+    if cov_to >= requested_to_ts:
+        return CoverageStatus.ok
+
+    if requested_to_ts - cov_to <= 3600:
+        return CoverageStatus.ok
+
+    if format_ts_local(cov_to)[:10] == format_ts_local(requested_to_ts)[:10]:
+        return CoverageStatus.ok
+
+    return status
 
 
 def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str:
@@ -128,10 +178,23 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     cov = tx_store.aggregated_coverage_window(telegram_user_id, account_ids)
     coverage_warning: str | None = None
 
+    rows = tx_store.load_range(
+        telegram_user_id=telegram_user_id,
+        account_ids=account_ids,
+        ts_from=ts_from,
+        ts_to=ts_to,
+    )
+
     status = classify_coverage(
         requested_from_ts=int(ts_from),
         requested_to_ts=int(ts_to),
         coverage_window=cov,
+    )
+    status = _normalize_coverage_status_for_nlq(
+        status,
+        cov,
+        ts_to,
+        has_rows_in_window=bool(rows),
     )
 
     if status != CoverageStatus.ok:
@@ -167,13 +230,6 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             coverage_warning = templates.warning(
                 f"Немає даних для запитаного періоду. Coverage: {d1} — {d2}."
             )
-
-    rows = tx_store.load_range(
-        telegram_user_id=telegram_user_id,
-        account_ids=account_ids,
-        ts_from=ts_from,
-        ts_to=ts_to,
-    )
     ignore_ids: set[str] = set()
     try:
         can_run = all(
@@ -341,6 +397,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             recipient_contains=recipient_match,
         ),
     )
+    if bool(intent_payload.get("merchant_exact")) and merchant_filter:
+        filtered = _apply_exact_merchant_filter(filtered, merchant_filter)
+
     alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
     if (
         filter_intent.startswith("spend_")
@@ -368,6 +427,8 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             prefix = "Сьогодні"
         elif label == "вчора":
             prefix = "Вчора"
+        elif label == "цей місяць":
+            prefix = "Цього місяця"
         elif label:
             prefix = f"За {label}"
         else:
@@ -427,6 +488,343 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             f"{prefix}: {len(rows_for_summary)} операцій у {len(day_keys)} активних днях. Медіанний інтервал — {median_gap} дн."
         )
 
+    if intent in {"spend_summary_short", "spend_insights_three", "spend_unusual_summary"}:
+        report = _build_current_period_report(rows, ts_from, ts_to)
+        current = report.get("current", {}) if isinstance(report, dict) else {}
+        compare = report.get("compare", {}) if isinstance(report, dict) else {}
+
+        totals = current.get("totals", {}) if isinstance(current, dict) else {}
+        total_uah = float(totals.get("real_spend_total_uah") or 0.0)
+
+        top_categories_raw = (
+            current.get("category_shares_real_spend", {}) if isinstance(current, dict) else {}
+        )
+        if not isinstance(top_categories_raw, dict):
+            top_categories_raw = {}
+
+        top_categories = sorted(
+            [(str(k), float(v)) for k, v in top_categories_raw.items()],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+
+        top_merchants_raw = (
+            current.get("top_merchants_real_spend", []) if isinstance(current, dict) else []
+        )
+        top_merchants: list[tuple[str, float]] = []
+        if isinstance(top_merchants_raw, list):
+            for item in top_merchants_raw:
+                if isinstance(item, dict):
+                    top_merchants.append(
+                        (
+                            str(item.get("merchant") or "").strip(),
+                            float(item.get("amount_uah") or 0.0),
+                        )
+                    )
+
+        categories_cmp_raw = (
+            compare.get("categories_real_spend", {}) if isinstance(compare, dict) else {}
+        )
+        categories_cmp: list[tuple[str, float, float, float]] = []
+        if isinstance(categories_cmp_raw, dict):
+            for name, payload in categories_cmp_raw.items():
+                if isinstance(payload, dict):
+                    categories_cmp.append(
+                        (
+                            str(name),
+                            float(payload.get("delta_uah") or 0.0),
+                            float(payload.get("current_uah") or 0.0),
+                            float(payload.get("prev_uah") or 0.0),
+                        )
+                    )
+
+        growing = sorted([x for x in categories_cmp if x[1] > 0], key=lambda x: x[1], reverse=True)
+        declining = sorted([x for x in categories_cmp if x[1] < 0], key=lambda x: x[1])
+
+        anomalies_raw = current.get("anomalies", []) if isinstance(current, dict) else []
+        anomalies: list[dict[str, Any]] = []
+        if isinstance(anomalies_raw, list):
+            anomalies = [x for x in anomalies_raw if isinstance(x, dict)]
+
+        if intent == "spend_summary_short":
+            parts: list[str] = [f"{prefix}: ти витратив {format_money_grn(total_uah)}."]
+            if top_categories:
+                cat1, share1 = top_categories[0]
+                parts.append(f"Найбільша категорія — {cat1} ({format_decimal_2(share1)}%).")
+            if len(top_categories) >= 2:
+                cat2, share2 = top_categories[1]
+                parts.append(f"Далі — {cat2} ({format_decimal_2(share2)}%).")
+            if top_merchants:
+                merch1, amt1 = top_merchants[0]
+                parts.append(f"Найбільший мерчант — {merch1} ({format_money_grn(amt1)}).")
+            return _with_cov(" ".join(parts))
+
+        if intent == "spend_insights_three":
+            lines: list[str] = []
+            if top_categories:
+                cat1, share1 = top_categories[0]
+                lines.append(
+                    f"1. Найбільша категорія — {cat1}: {format_decimal_2(share1)}% усіх витрат."
+                )
+            if growing:
+                name, delta, _, _ = growing[0]
+                lines.append(
+                    f"2. Найбільше зростання — {name}: +{format_decimal_2(delta)} грн до попереднього такого самого періоду."
+                )
+            elif declining:
+                name, delta, _, _ = declining[0]
+                lines.append(f"2. Найбільша зміна — {name}: {format_decimal_2(delta)} грн.")
+            if top_merchants:
+                merch1, amt1 = top_merchants[0]
+                lines.append(f"3. Найбільший мерчант — {merch1}: {format_money_grn(amt1)}.")
+            if not lines:
+                return _with_cov(f"{prefix}: поки що не бачу достатньо фактів для інсайтів.")
+            return _with_cov(f"{prefix}:\n" + "\n".join(lines[:3]))
+
+        if anomalies:
+            first = anomalies[0]
+            label = str(first.get("merchant") or first.get("label") or "операція").strip()
+            amount = float(first.get("amount_uah") or 0.0)
+            category_name = str(first.get("category") or "").strip()
+            suffix = f", категорія {category_name}" if category_name else ""
+            return _with_cov(
+                f"{prefix}: незвично виглядає {label} — {format_money_grn(amount)}{suffix}."
+            )
+
+        if growing:
+            name, delta, cur, prev = growing[0]
+            return _with_cov(
+                f"{prefix}: найбільш незвично виглядає ріст у категорії {name} — +{format_decimal_2(delta)} грн (було {format_decimal_2(prev)} → стало {format_decimal_2(cur)})."
+            )
+
+        if top_merchants:
+            merch1, amt1 = top_merchants[0]
+            return _with_cov(
+                f"{prefix}: найбільш помітний мерчант — {merch1} ({format_money_grn(amt1)})."
+            )
+
+        return _with_cov(f"{prefix}: явних незвичних патернів не бачу.")
+
+    if intent == "compare_to_previous_period":
+        category_name = (
+            spec.category
+            if spec is not None
+            else str(intent_payload.get("category") or "").strip() or None
+        )
+
+        current_total_cents = engine.sum_cents(filtered, filter_intent)
+        prev_from_ts, prev_total_cents = _sum_previous_period_filtered(
+            tx_store,
+            telegram_user_id,
+            account_ids,
+            current_from_ts=ts_from,
+            current_to_ts=ts_to,
+            filter_intent=filter_intent,
+            category=category_name,
+            merchant_filter=merchant_filter,
+            recipient_match=recipient_match,
+            merchant_exact=bool(intent_payload.get("merchant_exact")),
+        )
+
+        delta_cents = int(current_total_cents - prev_total_cents)
+        sign = "+" if delta_cents >= 0 else ""
+
+        if current_total_cents > prev_total_cents:
+            verdict = "більші"
+        elif current_total_cents < prev_total_cents:
+            verdict = "менші"
+        else:
+            verdict = "такі самі"
+
+        return _with_cov(
+            f"{prefix}: {format_money_grn(current_total_cents / 100)}. "
+            f"За попередній такий самий період: {format_money_grn(prev_total_cents / 100)}. "
+            f"Різниця: {sign}{format_decimal_2(delta_cents / 100)} грн. "
+            f"Висновок: витрати {verdict}."
+        )
+
+    if intent == "top_merchants":
+        top_n_raw = intent_payload.get("top_n")
+        try:
+            top_n = int(top_n_raw) if top_n_raw is not None else 5
+        except Exception:
+            top_n = 5
+        top_n = max(1, min(top_n, 10))
+
+        spend_rows = engine.filter_rows(
+            rows,
+            QueryFilter(
+                intent="spend_sum",
+                category=(
+                    spec.category
+                    if spec is not None
+                    else str(intent_payload.get("category") or "").strip() or None
+                ),
+                merchant_contains=[],
+                recipient_contains=None,
+            ),
+        )
+        table = render_top_merchants(
+            spend_rows,
+            page=1,
+            page_size=top_n,
+            title=templates.nlq_top_merchants_title(),
+        )
+
+        if not table.lines:
+            return _with_cov(f"{prefix}: витрат не знайшов.")
+
+        if top_n == 1:
+            first = table.lines[0]
+            if ". " in first:
+                first = first.split(". ", 1)[1]
+            return _with_cov(f"{prefix}: найбільший мерчант — {first}")
+
+        return _with_cov(f"{prefix}:\n{table.title}:\n" + "\n".join(table.lines))
+
+    if intent in {"top_growth_categories", "top_decline_categories", "explain_growth"}:
+        window_days = max(1, int(math.ceil((int(ts_to) - int(ts_from)) / 86400.0)))
+        prev_from = max(0, int(ts_from) - window_days * 86400)
+        compare_rows = tx_store.load_range(
+            telegram_user_id=telegram_user_id,
+            account_ids=account_ids,
+            ts_from=prev_from,
+            ts_to=ts_to,
+        )
+
+        try:
+            can_run = all(
+                hasattr(r, "id")
+                and hasattr(r, "time")
+                and hasattr(r, "account_id")
+                and hasattr(r, "amount")
+                and hasattr(r, "description")
+                for r in compare_rows
+            )
+            if can_run:
+                ignore_ids = refund_ignore_ids(detect_refund_pairs(compare_rows))
+                if ignore_ids:
+                    compare_rows = [
+                        r for r in compare_rows if str(getattr(r, "id", "")) not in ignore_ids
+                    ]
+        except Exception:
+            pass
+
+        report = build_period_report_from_ledger(compare_rows, days_back=window_days, now_ts=ts_to)
+        cat_cmp = report.get("compare", {}).get("categories_real_spend", {}) or {}
+
+        items = []
+        for name, payload in cat_cmp.items():
+            if not isinstance(payload, dict):
+                continue
+            delta = float(payload.get("delta_uah") or 0.0)
+            current_uah = float(payload.get("current_uah") or 0.0)
+            prev_uah = float(payload.get("prev_uah") or 0.0)
+            items.append((str(name), round(delta, 2), round(current_uah, 2), round(prev_uah, 2)))
+
+        if intent == "top_growth_categories":
+            pos = [x for x in items if x[1] > 0]
+            pos.sort(key=lambda x: x[1], reverse=True)
+            if not pos:
+                return _with_cov(f"{prefix}: зростання не знайшов.")
+            lines = [
+                f"{i}. {name}: +{format_decimal_2(delta)} грн (було {format_decimal_2(prev)} → стало {format_decimal_2(cur)})"
+                for i, (name, delta, cur, prev) in enumerate(pos[:5], start=1)
+            ]
+            return _with_cov(f"{prefix}:\nНайбільше зросли категорії:\n" + "\n".join(lines))
+
+        if intent == "top_decline_categories":
+            neg = [x for x in items if x[1] < 0]
+            neg.sort(key=lambda x: x[1])
+            if not neg:
+                return _with_cov(f"{prefix}: просідань не знайшов.")
+            lines = [
+                f"{i}. {name}: {format_decimal_2(delta)} грн (було {format_decimal_2(prev)} → стало {format_decimal_2(cur)})"
+                for i, (name, delta, cur, prev) in enumerate(neg[:5], start=1)
+            ]
+            return _with_cov(f"{prefix}:\nНайбільше просіли категорії:\n" + "\n".join(lines))
+
+        pos = [x for x in items if x[1] > 0]
+        pos.sort(key=lambda x: x[1], reverse=True)
+        if not pos:
+            return _with_cov(f"{prefix}: явного зростання не бачу.")
+        lines = [f"{name}: +{format_decimal_2(delta)} грн" for name, delta, _, _ in pos[:3]]
+        return _with_cov(f"{prefix}: витрати зросли насамперед через:\n" + "\n".join(lines))
+
+    if intent == "top_categories":
+        top_n_raw = intent_payload.get("top_n")
+        try:
+            top_n = int(top_n_raw) if top_n_raw is not None else 5
+        except Exception:
+            top_n = 5
+        top_n = max(1, min(top_n, 10))
+
+        spend_rows = engine.filter_rows(
+            rows,
+            QueryFilter(
+                intent="spend_sum",
+                category=None,
+                merchant_contains=[],
+                recipient_contains=None,
+            ),
+        )
+        table = render_top_categories(
+            spend_rows,
+            page=1,
+            page_size=top_n,
+            title=templates.nlq_top_categories_title(),
+        )
+
+        if not table.lines:
+            return _with_cov(f"{prefix}: витрат не знайшов.")
+
+        if top_n == 1:
+            first = table.lines[0]
+            if ". " in first:
+                first = first.split(". ", 1)[1]
+            return _with_cov(f"{prefix}: найбільша категорія — {first}")
+
+        return _with_cov(f"{prefix}:\n{table.title}:\n" + "\n".join(table.lines))
+
+    if intent == "category_share":
+        category_name = (
+            spec.category
+            if spec is not None
+            else str(intent_payload.get("category") or "").strip() or None
+        )
+        if not category_name:
+            return templates.nlq_unsupported_message()
+
+        spend_rows = engine.filter_rows(
+            rows,
+            QueryFilter(
+                intent="spend_sum",
+                category=None,
+                merchant_contains=[],
+                recipient_contains=None,
+            ),
+        )
+        category_rows = engine.filter_rows(
+            rows,
+            QueryFilter(
+                intent="spend_sum",
+                category=category_name,
+                merchant_contains=[],
+                recipient_contains=None,
+            ),
+        )
+
+        total_cents = engine.sum_cents(spend_rows, "spend_sum") if spend_rows else 0
+        category_cents = engine.sum_cents(category_rows, "spend_sum") if category_rows else 0
+
+        if total_cents <= 0:
+            return _with_cov(f"{prefix}: витрат не знайшов.")
+
+        share = (category_cents / total_cents) * 100.0
+        return _with_cov(
+            f"{prefix}: {category_name} — {format_money_grn(category_cents / 100)}, це {format_decimal_2(share)}% від усіх витрат."
+        )
+
     if intent == "spend_sum":
         total_cents = engine.sum_cents(filtered, intent)
         parts: list[str] = [
@@ -451,15 +849,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 parts.append(f"\n{t.title} (стор. {page}):\n" + "\n".join(t.lines))
 
             if t.has_more:
-                next_payload = dict(intent_payload)
-                next_payload["page"] = page + 1
-                set_pending_intent(
-                    telegram_user_id,
-                    next_payload,
-                    kind="paging",
-                    options=[templates.nlq_paging_option_show_more()],
-                )
-                parts.append("\n" + templates.nlq_paging_hint())
+                pass
 
             if spec is None or spec.category is None:
                 c = render_top_categories(
@@ -504,6 +894,62 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     return templates.nlq_not_implemented_yet()
 
 
+def _sum_previous_period_filtered(
+    tx_store: TxStore,
+    telegram_user_id: int,
+    account_ids: list[str],
+    *,
+    current_from_ts: int,
+    current_to_ts: int,
+    filter_intent: str,
+    category: str | None,
+    merchant_filter: list[str] | None,
+    recipient_match: str | None,
+    merchant_exact: bool,
+) -> tuple[int, int]:
+    window_sec = max(86400, int(current_to_ts) - int(current_from_ts))
+    prev_from = int(current_from_ts) - window_sec
+    prev_to = int(current_from_ts)
+
+    prev_rows = tx_store.load_range(
+        telegram_user_id=telegram_user_id,
+        account_ids=account_ids,
+        ts_from=prev_from,
+        ts_to=prev_to,
+    )
+
+    try:
+        can_run = all(
+            hasattr(r, "id")
+            and hasattr(r, "time")
+            and hasattr(r, "account_id")
+            and hasattr(r, "amount")
+            and hasattr(r, "description")
+            for r in prev_rows
+        )
+        if can_run:
+            ignore_ids = refund_ignore_ids(detect_refund_pairs(prev_rows))
+            if ignore_ids:
+                prev_rows = [r for r in prev_rows if str(getattr(r, "id", "")) not in ignore_ids]
+    except Exception:
+        pass
+
+    engine = QueryEngine()
+    prev_filtered = engine.filter_rows(
+        prev_rows,
+        QueryFilter(
+            intent=filter_intent,
+            category=category,
+            merchant_contains=merchant_filter,
+            recipient_contains=recipient_match,
+        ),
+    )
+    if merchant_exact and merchant_filter:
+        prev_filtered = _apply_exact_merchant_filter(prev_filtered, merchant_filter)
+
+    return prev_from, engine.sum_cents(prev_filtered, filter_intent)
+
+
 def _filter_intent_for_payload(intent: str, intent_payload: dict[str, Any]) -> str:
     if intent in {
         "threshold_query",
@@ -511,6 +957,7 @@ def _filter_intent_for_payload(intent: str, intent_payload: dict[str, Any]) -> s
         "count_under",
         "last_time",
         "recurrence_summary",
+        "compare_to_previous_period",
     }:
         entity_kind = str(intent_payload.get("entity_kind") or "spend").strip()
         mapping = {

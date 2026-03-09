@@ -61,6 +61,10 @@ def spec_from_intent_payload(intent_payload: dict[str, Any], *, now_ts: int) -> 
         kind, metric = "transfer_in", "count"
     elif intent == "compare_to_baseline":
         kind, metric = "spend", "sum"
+    elif intent == "compare_to_previous_period":
+        kind, metric = "spend", "sum"
+    elif intent in {"spend_summary_short", "spend_insights_three", "spend_unusual_summary"}:
+        kind, metric = "spend", "sum"
     else:
         return None
 
@@ -81,6 +85,8 @@ def spec_from_intent_payload(intent_payload: dict[str, Any], *, now_ts: int) -> 
         prefix = "Сьогодні"
     elif label == "вчора":
         prefix = "Вчора"
+    elif label == "цей місяць":
+        prefix = "Цього місяця"
     elif label:
         prefix = f"За {label}"
     else:

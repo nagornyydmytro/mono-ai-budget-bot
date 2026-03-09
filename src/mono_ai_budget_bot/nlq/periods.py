@@ -115,6 +115,11 @@ def parse_period_range(text: str, now_ts: int) -> PeriodRange | None:
             mth -= 1
         return _month_range_utc(y, mth)
 
+    if re.search(r"\b(цього\s+місяця|этого\s+месяца|this\s+month)\b", s):
+        dt = datetime.fromtimestamp(now_ts, tz=timezone.utc)
+        start = datetime(dt.year, dt.month, 1, tzinfo=timezone.utc)
+        return PeriodRange(int(start.timestamp()), now_ts)
+
     for name, month in _MONTHS.items():
         m_name_year = re.search(rf"\bза\s+{re.escape(name)}\s+(\d{{4}})\b", s)
         if m_name_year:

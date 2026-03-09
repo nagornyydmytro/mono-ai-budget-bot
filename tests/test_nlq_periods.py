@@ -61,3 +61,11 @@ def test_month_name_with_explicit_year():
     assert pr is not None
     assert pr.start_ts == _ts(2024, 12, 1, 0, 0, 0)
     assert pr.end_ts == _ts(2025, 1, 1, 0, 0, 0)
+
+
+def test_this_month_range():
+    now = _ts(2026, 3, 9, 12, 0, 0)
+    pr = parse_period_range("цього місяця", now)
+    assert pr is not None
+    assert pr.start_ts == _ts(2026, 3, 1, 0, 0, 0)
+    assert pr.end_ts == now

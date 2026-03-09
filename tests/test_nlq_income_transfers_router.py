@@ -14,3 +14,19 @@ def test_router_transfer_out_sum():
 def test_router_transfer_in_sum():
     p = parse_nlq_intent("Скільки я отримав за минулий місяць?")
     assert p["intent"] in ("transfer_in_sum", "transfer_in_count")
+
+
+def test_router_income_sum_for_dohody():
+    p = parse_nlq_intent("Скільки в мене було доходів за останні 30 днів?")
+    assert p["intent"] == "income_sum"
+
+
+def test_router_transfer_in_sum_for_na_kartku():
+    p = parse_nlq_intent("Скільки було переказів на картку за останній місяць?")
+    assert p["intent"] == "transfer_in_sum"
+
+
+def test_router_income_sum_with_v_mene_phrase():
+    p = parse_nlq_intent("Скільки в мене було доходів за останні 30 днів?")
+    assert p["intent"] == "income_sum"
+    assert p["merchant_contains"] is None

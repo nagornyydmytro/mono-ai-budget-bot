@@ -454,7 +454,7 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                 mem = memory_store.load_memory(user_id)
                 cov_status = mem.get("last_coverage_status")
                 cov_days = mem.get("last_coverage_days_back")
-                if cov_status in {"missing", "partial"} and isinstance(cov_days, int):
+                if cov_status == "missing" and isinstance(cov_days, int):
                     memory_store.set_pending_intent(
                         user_id,
                         payload={
