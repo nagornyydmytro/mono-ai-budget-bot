@@ -4555,3 +4555,36 @@ def test_settings_handlers_registered_via_dedicated_modules(tmp_path: Path):
         "cb_menu_personalization_ai_cancel",
     ]:
         assert name in dp.callback_query.handlers
+
+
+def test_menu_domain_handlers_registered_after_split(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=401,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "rational",
+        },
+        tx_store=tx_store,
+    )
+
+    for name in [
+        "cb_menu_insights",
+        "cb_menu_insight_sections",
+        "cb_menu_data",
+        "cb_data_refresh",
+        "cb_menu_personalization",
+        "cb_menu_personalization_items",
+        "cb_menu_categories",
+        "cb_menu_categories_rules",
+    ]:
+        assert name in dp.callback_query.handlers
