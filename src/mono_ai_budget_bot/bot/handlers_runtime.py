@@ -260,8 +260,12 @@ def build_handler_runtime(
         pub = None
         try:
             pub = monobank_public_client_cls()
-            rates = pub.currency(force_refresh=force_refresh)
-            text = render_currency_screen_text(rates)
+            if hasattr(pub, "currency_snapshot"):
+                snapshot = pub.currency_snapshot(force_refresh=force_refresh)
+                text = render_currency_screen_text(snapshot)
+            else:
+                rates = pub.currency(force_refresh=force_refresh)
+                text = render_currency_screen_text(rates)
         except Exception as e:
             text = templates.error(f"Не вдалося отримати курси валют: {e}")
         finally:

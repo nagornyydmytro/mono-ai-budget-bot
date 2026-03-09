@@ -20,7 +20,7 @@ class JsonDiskCache:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.root_dir / f"{digest}.json"
 
-    def get(self, key: str) -> Any | None:
+    def get_entry(self, key: str, *, allow_expired: bool = False) -> dict[str, Any] | None:
         path = self._key_to_path(key)
         if not path.exists():
             return None
@@ -28,19 +28,32 @@ class JsonDiskCache:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             expires_at = data.get("expires_at", None)
-            if expires_at is not None and time.time() >= float(expires_at):
+            is_expired = expires_at is not None and time.time() >= float(expires_at)
+
+            if is_expired and not allow_expired:
                 try:
                     path.unlink(missing_ok=True)
                 except Exception:
                     pass
                 return None
-            return data.get("value", None)
+
+            return {
+                "value": data.get("value", None),
+                "expires_at": expires_at,
+                "is_expired": bool(is_expired),
+            }
         except Exception:
             try:
                 path.unlink(missing_ok=True)
             except Exception:
                 pass
             return None
+
+    def get(self, key: str) -> Any | None:
+        entry = self.get_entry(key, allow_expired=False)
+        if entry is None:
+            return None
+        return entry.get("value", None)
 
     def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
         path = self._key_to_path(key)

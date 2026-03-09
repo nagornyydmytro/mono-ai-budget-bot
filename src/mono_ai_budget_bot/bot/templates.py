@@ -624,11 +624,25 @@ def refresh_done_message(accounts: int, fetched_requests: int, appended: int) ->
     ).strip()
 
 
-def currency_screen_text(updated: str, usd: str | None, eur: str | None, pln: str | None) -> str:
+def currency_screen_text(
+    updated: str,
+    usd: str | None,
+    eur: str | None,
+    pln: str | None,
+    *,
+    freshness: str | None = None,
+    fetch_status: str | None = None,
+) -> str:
     def line(label: str, value: str | None) -> list[str]:
         return [f"*{label}*", f"• {value if value else 'немає даних'}"]
 
-    parts: list[str] = ["*💱 Курси валют (Monobank)*", f"Оновлено: {updated}", ""]
+    parts: list[str] = ["*💱 Курси валют (Monobank)*", f"Оновлено: {updated}"]
+    if freshness:
+        parts.append(freshness)
+    if fetch_status:
+        parts.append(fetch_status)
+    parts.append("")
+
     for block in (line("USD/UAH", usd), [""], line("EUR/UAH", eur), [""], line("PLN/UAH", pln)):
         parts.extend(block)
     return "\n".join(parts).strip()
