@@ -89,7 +89,7 @@ _OPEN_ENDED_FINANCE_RE = re.compile(
     r"людськ\w*\s+мов|human\s+language|"
     r"м'?які\s+висновк|soft\s+conclusion|"
     r"як\s+коуч|as\s+coach|coach|"
-    r"підсумуй|опиши|describe|summari[sz]e|"
+    r"підсумуй|сформулюй|опиши|describe|formulate|summari[sz]e|"
     r"аналіз|analysis"
     r")\b",
     re.IGNORECASE,
@@ -107,7 +107,7 @@ _HUMAN_TONE_RE = re.compile(
 _BRIEF_TONE_RE = re.compile(r"\b(коротко|brief|short)\b", re.IGNORECASE)
 
 _MULTI_CLAUSE_RE = re.compile(
-    r"\b(і|та|and)\b.*\b(що\s+це\s+говорить|поясни|опиши|підсумуй|summari[sz]e|describe)\b",
+    r"\b(і|та|and)\b.*\b(що\s+це\s+говорить|поясни|опиши|підсумуй|сформулюй|formulate|summari[sz]e|describe)\b",
     re.IGNORECASE,
 )
 
@@ -119,7 +119,7 @@ _ABSTRACT_FINANCE_RE = re.compile(
 _NARRATIVE_ONLY_RE = re.compile(
     r"\b("
     r"опиши|describe|"
-    r"підсумуй|summari[sz]e|"
+    r"підсумуй|сформулюй|formulate|summari[sz]e|"
     r"що\s+це\s+говорить|what\s+does\s+this\s+say|"
     r"людськ\w*\s+мов|human\s+language|"
     r"м'?які\s+висновк|soft\s+conclusion|"
