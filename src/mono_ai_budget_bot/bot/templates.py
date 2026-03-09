@@ -1220,7 +1220,7 @@ def nlq_unsupported_message() -> str:
 
 
 def nlq_currency_missing_amount() -> str:
-    return "Не бачу суму для конвертації. Наприклад: 1500 грн в USD."
+    return "Не бачу суму для конвертації. Спробуй, наприклад: 1500 грн в USD, $100 в грн або 50 EUR у PLN."
 
 
 def nlq_currency_amount_nonpositive() -> str:
@@ -1228,11 +1228,14 @@ def nlq_currency_amount_nonpositive() -> str:
 
 
 def nlq_currency_missing_currency() -> str:
-    return "Не бачу валюту. Наприклад: 1500 грн в USD."
+    return "Не бачу валюту. Спробуй формат на кшталт: 1500 грн в USD, $100 в грн або 50 EUR у PLN."
 
 
 def nlq_currency_unknown_currency(code: str) -> str:
-    return f"Не знаю таку валюту: {code}. Спробуй ISO-код (наприклад USD, EUR, UAH)."
+    return (
+        f"Не знаю таку валюту: {code}. "
+        "Підтримую, наприклад: грн / UAH / hryvnia, $ / USD, € / EUR, PLN."
+    )
 
 
 def nlq_currency_rates_fetch_failed(err: str) -> str:

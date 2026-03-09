@@ -55,6 +55,24 @@ def test_parse_currency_conversion_query_variants():
     assert c3.from_alpha == "EUR"
     assert c3.to_alpha == "PLN"
 
+    c4 = parse_currency_conversion_query("$100 в грн")
+    assert c4 is not None
+    assert c4.amount == 100.0
+    assert c4.from_alpha == "USD"
+    assert c4.to_alpha == "UAH"
+
+    c5 = parse_currency_conversion_query("100 € у PLN")
+    assert c5 is not None
+    assert c5.amount == 100.0
+    assert c5.from_alpha == "EUR"
+    assert c5.to_alpha == "PLN"
+
+    c6 = parse_currency_conversion_query("1500 hryvnia to usd")
+    assert c6 is not None
+    assert c6.amount == 1500.0
+    assert c6.from_alpha == "UAH"
+    assert c6.to_alpha == "USD"
+
 
 def test_router_detects_currency_convert_intent():
     out = parse_nlq_intent("1500 грн в USD")
@@ -157,3 +175,33 @@ def test_executor_currency_convert_missing_pair(monkeypatch):
         intent_payload={"intent": "currency_convert", "amount": 10, "from": "EUR", "to": "USD"},
     )
     assert "Немає даних по парі EUR→USD" in msg
+
+
+def test_executor_currency_convert_unknown_currency_has_guided_message(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    class DummyPublicClient:
+        def currency(self, *args, **kwargs):
+            return _rates()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(ex, "MonobankPublicClient", DummyPublicClient)
+
+    msg = ex.execute_intent(
+        telegram_user_id=1,
+        intent_payload={"intent": "currency_convert", "amount": 10, "from": "UAH", "to": "ZZZ"},
+    )
+    assert "Не знаю таку валюту" in msg
+    assert "грн / UAH / hryvnia" in msg
+    assert "$ / USD" in msg
+    assert "€ / EUR" in msg
+
+
+def test_router_detects_currency_convert_intent_for_symbol_prefix():
+    out = parse_nlq_intent("$100 в грн")
+    assert out["intent"] == "currency_convert"
+    assert out["amount"] == 100.0
+    assert out["from"] == "USD"
+    assert out["to"] == "UAH"

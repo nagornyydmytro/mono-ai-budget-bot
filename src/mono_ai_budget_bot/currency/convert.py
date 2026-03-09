@@ -46,24 +46,46 @@ _SYM_TO_ALPHA: dict[str, str] = {
     "₴": "UAH",
     "$": "USD",
     "€": "EUR",
+    "zł": "PLN",
 }
 
 _NAME_TO_ALPHA: dict[str, str] = {
     "грн": "UAH",
     "гривн": "UAH",
+    "гривня": "UAH",
+    "гривні": "UAH",
+    "гривню": "UAH",
+    "гривень": "UAH",
     "hryv": "UAH",
+    "hryvnia": "UAH",
+    "hryvnias": "UAH",
     "uah": "UAH",
     "дол": "USD",
+    "долар": "USD",
+    "долари": "USD",
+    "доларів": "USD",
     "бакс": "USD",
+    "бакси": "USD",
+    "buck": "USD",
+    "bucks": "USD",
+    "dollar": "USD",
+    "dollars": "USD",
     "usd": "USD",
     "евро": "EUR",
     "євро": "EUR",
+    "euro": "EUR",
     "eur": "EUR",
     "злот": "PLN",
+    "злотий": "PLN",
+    "злотих": "PLN",
+    "zloty": "PLN",
+    "zl": "PLN",
     "pln": "PLN",
     "фунт": "GBP",
+    "pound": "GBP",
     "gbp": "GBP",
     "франк": "CHF",
+    "franc": "CHF",
     "chf": "CHF",
 }
 
@@ -84,15 +106,21 @@ def alpha_to_numeric(alpha: str) -> int | None:
 
 
 def _alpha_from_token(tok: str) -> str | None:
-    s = (tok or "").strip().lower()
+    raw = (tok or "").strip()
+    s = raw.lower().strip(" .,:;!?()[]{}\"'`")
+
     if not s:
         return None
 
     if s in _SYM_TO_ALPHA:
         return _SYM_TO_ALPHA[s]
 
+    compact = s.replace(" ", "")
+    if compact in _SYM_TO_ALPHA:
+        return _SYM_TO_ALPHA[compact]
+
     for k, v in _NAME_TO_ALPHA.items():
-        if k in s:
+        if k in s or k in compact:
             return v
 
     if len(s) == 3 and s.isalpha():
@@ -118,8 +146,9 @@ def parse_currency_conversion_query(text: str) -> ParsedConversion | None:
     if amount <= 0:
         return None
 
+    before = t[: m_amt.start()].strip()
     after = t[m_amt.end() :].strip()
-    if not after:
+    if not before and not after:
         return None
 
     after_norm = after.replace("—", " ").replace("–", " ")
@@ -130,11 +159,16 @@ def parse_currency_conversion_query(text: str) -> ParsedConversion | None:
         maxsplit=1,
         flags=re.IGNORECASE,
     )
-    if len(parts) < 2:
-        return None
 
-    left = parts[0].strip()
-    right = parts[1].strip()
+    if len(parts) >= 2:
+        left = parts[0].strip()
+        right = parts[1].strip()
+    else:
+        left = after_norm.strip()
+        right = ""
+
+    if not left and before:
+        left = before
 
     from_alpha = _alpha_from_token(left)
     to_alpha = _alpha_from_token(right)
@@ -148,6 +182,13 @@ def parse_currency_conversion_query(text: str) -> ParsedConversion | None:
         m = _CODE_RE.search(right)
         if m:
             to_alpha = m.group(1).upper()
+
+    if not from_alpha and before:
+        from_alpha = _alpha_from_token(before)
+        if from_alpha is None:
+            m = _CODE_RE.search(before)
+            if m:
+                from_alpha = m.group(1).upper()
 
     if not from_alpha or not to_alpha:
         return None
