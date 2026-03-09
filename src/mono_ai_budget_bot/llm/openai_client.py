@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -77,6 +77,21 @@ class ToolCall:
 @dataclass(frozen=True)
 class ToolModeResult:
     tool_calls: list[ToolCall]
+
+
+class NLQInterpretationV1(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    mode: Literal["narrative", "clarify", "unsupported"]
+    answer: Optional[str] = None
+    question: Optional[str] = None
+
+    def clean(self) -> "NLQInterpretationV1":
+        if self.answer is not None:
+            self.answer = self.answer.strip()
+        if self.question is not None:
+            self.question = self.question.strip()
+        return self
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -246,3 +261,41 @@ class OpenAIClient:
             raise ValidationError.from_exception_data("ToolMode", [])
 
         return ToolModeResult(tool_calls=tool_calls)
+
+    def interpret_nlq(
+        self,
+        *,
+        user_text: str,
+        schema: dict[str, Any],
+        facts_payload: dict[str, Any],
+        max_tokens: int = 500,
+    ) -> dict[str, Any]:
+        system = (
+            "Ти safe interpreter для персональної фінансової аналітики. "
+            "Ти не рахуєш гроші самостійно, не вигадуєш факти, не працюєш з raw storage, "
+            "не повертаєш tool calls, не пишеш у storage і не працюєш із секретами. "
+            "Тобі дають тільки user_text, canonical query schema і safe facts payload. "
+            "Якщо фактів достатньо для м'якого персонального пояснення — поверни mode='narrative'. "
+            "Якщо фактів не вистачає або треба уточнення — поверни mode='clarify'. "
+            "Якщо запит поза межами персональної фінансової аналітики — поверни mode='unsupported'. "
+            "Поверни тільки JSON-об'єкт строго за схемою NLQInterpretationV1 без зайвих полів."
+        )
+        user = (
+            f"user_text={user_text}\n"
+            f"schema_json={json.dumps(schema, ensure_ascii=False, sort_keys=True)}\n"
+            f"facts_json={json.dumps(facts_payload, ensure_ascii=False, sort_keys=True)}"
+        )
+        payload = {
+            "model": self.model,
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        resp = self._post(payload)
+        raw = self._extract_text(resp)
+        interpreted = _parse_llm_json_strict(raw, NLQInterpretationV1)
+        return interpreted.clean().model_dump(exclude_none=True)

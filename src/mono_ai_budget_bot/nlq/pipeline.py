@@ -8,6 +8,7 @@ from mono_ai_budget_bot.analytics.categories import category_from_mcc
 from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
+from mono_ai_budget_bot.llm.tooling import execute_tool_call
 from mono_ai_budget_bot.nlq.executor import execute_intent
 from mono_ai_budget_bot.nlq.memory_store import (
     get_pending_manual_mode,
@@ -29,6 +30,7 @@ from mono_ai_budget_bot.nlq.types import (
     NLQResponse,
     NLQResult,
 )
+from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxRecord, TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -111,6 +113,18 @@ _MULTI_CLAUSE_RE = re.compile(
 
 _ABSTRACT_FINANCE_RE = re.compile(
     r"\b(звичк|поведінк|патерн|інсайт|висновк|аналіз)\b",
+    re.IGNORECASE,
+)
+
+_NARRATIVE_ONLY_RE = re.compile(
+    r"\b("
+    r"опиши|describe|"
+    r"підсумуй|summari[sz]e|"
+    r"що\s+це\s+говорить|what\s+does\s+this\s+say|"
+    r"людськ\w*\s+мов|human\s+language|"
+    r"м'?які\s+висновк|soft\s+conclusion|"
+    r"як\s+коуч|as\s+coach|coach"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -406,6 +420,11 @@ def _llm_tool_mode_intent(req: NLQRequest) -> NLQIntent | None:
     return None
 
 
+def _is_narrative_candidate(req: NLQRequest) -> bool:
+    text = req.text or ""
+    return _NARRATIVE_ONLY_RE.search(text) is not None
+
+
 def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
     if _is_out_of_scope_for_llm(req.text):
         return None
@@ -429,6 +448,135 @@ def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
         return None
 
     return NLQIntent(name=name, slots=slots)
+
+
+def _narrative_period_from_text(text: str) -> str:
+    s = (text or "").lower()
+    if re.search(r"\b(сьогодні|сьогоднішн\w*|today)\b", s, re.IGNORECASE):
+        return "today"
+    if re.search(r"\b(тиж|week)\b", s, re.IGNORECASE):
+        return "week"
+    return "month"
+
+
+def _schema_to_payload(schema: CanonicalQuerySchema) -> dict[str, object]:
+    return {
+        "facts_scope": schema.facts_scope,
+        "entity_scope": schema.entity_scope,
+        "period": dict(schema.period),
+        "comparison_mode": schema.comparison_mode,
+        "output_mode": schema.output_mode,
+        "tone_style": schema.tone_style,
+    }
+
+
+def _load_narrative_facts(req: NLQRequest) -> dict[str, object] | None:
+    period = _narrative_period_from_text(req.text)
+    try:
+        payload = execute_tool_call(
+            req.telegram_user_id,
+            tool="query_facts",
+            args={
+                "period": period,
+                "keys": [
+                    "totals",
+                    "comparison",
+                    "top_categories_named_real_spend",
+                    "top_merchants_real_spend",
+                    "coverage",
+                    "requested_period_label",
+                    "transactions_count",
+                ],
+            },
+            report_store=ReportStore(),
+            now_ts=req.now_ts,
+        )
+    except Exception:
+        return None
+
+    facts = payload.get("facts")
+    if not isinstance(facts, dict):
+        return None
+    if not isinstance(facts.get("totals"), dict):
+        return None
+
+    return payload
+
+
+def _missing_narrative_facts_text(req: NLQRequest) -> str:
+    period = _narrative_period_from_text(req.text)
+    label = {
+        "today": "сьогодні",
+        "week": "тиждень",
+        "month": "місяць",
+    }[period]
+    return (
+        "Можу описати твої витрати людською мовою або сформулювати м'які висновки, "
+        f"але зараз у мене немає підготовлених фактів за {label}. "
+        "Спочатку онови дані або підготуй звіт за цей період, а потім повтори запит."
+    )
+
+
+def _llm_narrative_response(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> NLQResponse | None:
+    if _is_out_of_scope_for_llm(req.text):
+        return None
+
+    client = _get_llm_client()
+    if client is None:
+        return None
+
+    schema = _build_canonical_query_schema(req, deterministic_intent)
+    facts_payload = _load_narrative_facts(req)
+    if facts_payload is None:
+        return NLQResponse(
+            result=NLQResult(text=_missing_narrative_facts_text(req)),
+            clarification=None,
+        )
+
+    try:
+        raw = client.interpret_nlq(
+            user_text=req.text,
+            schema=_schema_to_payload(schema),
+            facts_payload=facts_payload,
+        )
+    except Exception:
+        return None
+
+    mode = str(raw.get("mode") or "").strip()
+    if mode == "narrative":
+        answer = str(raw.get("answer") or "").strip()
+        if not answer:
+            return None
+        return NLQResponse(
+            result=NLQResult(
+                text=answer,
+                meta={
+                    "mode": "llm_narrative",
+                    "period": _narrative_period_from_text(req.text),
+                },
+            ),
+            clarification=None,
+        )
+
+    if mode == "clarify":
+        question = str(raw.get("question") or "").strip()
+        if not question:
+            return None
+        return NLQResponse(
+            result=NLQResult(
+                text=question,
+                meta={
+                    "mode": "llm_clarify",
+                    "period": _narrative_period_from_text(req.text),
+                },
+            ),
+            clarification=None,
+        )
+
+    return None
 
 
 def _resolve_followup_value(user_text: str, options: list[str] | None) -> str:
@@ -851,18 +999,26 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
     strategy = _select_execution_route(req, deterministic_intent)
 
     intent: NLQIntent | None
+    narrative_resp: NLQResponse | None = None
+
     if strategy == "deterministic":
         intent = deterministic_intent
     elif strategy == "tool_mode":
         intent = _llm_tool_mode_intent(req)
         if intent is None:
             intent = _llm_plan_intent(req)
+        if intent is None and _is_narrative_candidate(req):
+            narrative_resp = _llm_narrative_response(req, deterministic_intent)
     elif strategy == "planner":
         intent = _llm_plan_intent(req)
+        if intent is None and _is_narrative_candidate(req):
+            narrative_resp = _llm_narrative_response(req, deterministic_intent)
     else:
         intent = None
 
     if not intent:
+        if narrative_resp is not None:
+            return narrative_resp
         return NLQResponse(result=None, clarification=None)
 
     intent = resolve(req, intent)
