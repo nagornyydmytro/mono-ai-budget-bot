@@ -294,3 +294,132 @@ def test_select_execution_route_returns_none_when_tool_mode_and_semantic_fallbac
         lambda user_id, key: False if key in {"semantic_fallback", "tool_mode"} else True,
     )
     assert pl._select_execution_route(req, None) == "none"
+
+
+def test_handle_nlq_returns_user_visible_tool_mode_result(monkeypatch):
+    monkeypatch.setattr(pl, "route", lambda req: None)
+    monkeypatch.setattr(pl, "load_memory", lambda telegram_user_id: {})
+    monkeypatch.setattr(pl, "get_pending_manual_mode", lambda telegram_user_id, now_ts: None)
+    monkeypatch.setattr(pl, "_llm_cooldown_ok", lambda *args, **kwargs: True)
+
+    class DummyClient:
+        def tool_mode(self, system: str, user: str):
+            return {
+                "tool_calls": [
+                    {
+                        "tool": "query_primitive",
+                        "args": {"primitive": "top_categories", "intent": "spend_sum", "days": 30},
+                    },
+                    {
+                        "tool": "query_safe_view",
+                        "args": {"intent": "spend_sum", "days": 30, "limit": 2},
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(pl, "_get_llm_client", lambda: DummyClient())
+    monkeypatch.setattr(
+        pl,
+        "execute_tool_call",
+        lambda telegram_user_id, **kwargs: (
+            {
+                "tool": "query_primitive",
+                "primitive": "top_categories",
+                "items": [{"category": "Food", "amount_uah": 1200.0}],
+            }
+            if kwargs["tool"] == "query_primitive"
+            else {
+                "tool": "query_safe_view",
+                "count": 2,
+                "rows": [
+                    {
+                        "date": "2025-01-01",
+                        "counterparty_hint": "mac#123abc",
+                        "category": "Food",
+                        "amount_uah": 250.0,
+                    }
+                ],
+            }
+        ),
+    )
+
+    resp = pl.handle_nlq(
+        NLQRequest(
+            telegram_user_id=1,
+            text="покажи топ категорій і мерчантів за місяць та останні 5 витрат",
+            now_ts=1000,
+        )
+    )
+
+    assert resp.result is not None
+    assert resp.result.meta == {
+        "mode": "llm_tool_mode",
+        "tools": ["query_primitive", "query_safe_view"],
+    }
+    assert "safe AI-assisted tool path" in resp.result.text
+    assert "Food" in resp.result.text
+    assert "mac#123abc" in resp.result.text
+
+
+def test_handle_nlq_tool_mode_rejects_invalid_schema_with_safe_message(monkeypatch):
+    monkeypatch.setattr(pl, "route", lambda req: None)
+    monkeypatch.setattr(pl, "load_memory", lambda telegram_user_id: {})
+    monkeypatch.setattr(pl, "get_pending_manual_mode", lambda telegram_user_id, now_ts: None)
+    monkeypatch.setattr(pl, "_llm_cooldown_ok", lambda *args, **kwargs: True)
+
+    class DummyClient:
+        def tool_mode(self, system: str, user: str):
+            return {
+                "tool_calls": [
+                    {"tool": "query_safe_view", "args": {"intent": "spend_sum", "bucket": "users"}}
+                ]
+            }
+
+    monkeypatch.setattr(pl, "_get_llm_client", lambda: DummyClient())
+
+    resp = pl.handle_nlq(
+        NLQRequest(
+            telegram_user_id=1,
+            text="покажи топ категорій і мерчантів за місяць та останні 5 витрат",
+            now_ts=1000,
+        )
+    )
+
+    assert resp.result is not None
+    assert "Не зміг безпечно виконати AI-assisted tool path" in resp.result.text
+
+
+def test_handle_nlq_tool_mode_returns_safe_message_for_empty_results(monkeypatch):
+    monkeypatch.setattr(pl, "route", lambda req: None)
+    monkeypatch.setattr(pl, "load_memory", lambda telegram_user_id: {})
+    monkeypatch.setattr(pl, "get_pending_manual_mode", lambda telegram_user_id, now_ts: None)
+    monkeypatch.setattr(pl, "_llm_cooldown_ok", lambda *args, **kwargs: True)
+
+    class DummyClient:
+        def tool_mode(self, system: str, user: str):
+            return {
+                "tool_calls": [
+                    {
+                        "tool": "query_safe_view",
+                        "args": {"intent": "spend_sum", "days": 30, "limit": 5},
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(pl, "_get_llm_client", lambda: DummyClient())
+    monkeypatch.setattr(
+        pl,
+        "execute_tool_call",
+        lambda telegram_user_id, **kwargs: {"tool": "query_safe_view", "count": 0, "rows": []},
+    )
+
+    resp = pl.handle_nlq(
+        NLQRequest(
+            telegram_user_id=1,
+            text="покажи останні 5 витрат за місяць",
+            now_ts=1000,
+        )
+    )
+
+    assert resp.result is not None
+    assert "не знайшли достатньо даних" in resp.result.text.lower()
