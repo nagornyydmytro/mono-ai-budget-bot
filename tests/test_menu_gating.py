@@ -3302,11 +3302,25 @@ def test_menu_personalization_persona_reads_from_profile_store(tmp_path: Path):
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert text == templates.menu_personalization_item_message(
-        title="🧑 *Persona*",
-        current_value="Supportive",
+    assert text == templates.menu_persona_editor_message(
+        current_value="\n".join(
+            [
+                "Style: Supportive",
+                "Verbosity: Balanced",
+                "Motivation: Soft",
+                "Emoji: Normal",
+            ]
+        ),
+        draft_value="\n".join(
+            [
+                "Style: Supportive",
+                "Verbosity: Balanced",
+                "Motivation: Soft",
+                "Emoji: Normal",
+            ]
+        ),
     )
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:personalization")]]
+    assert _kb_dump(kb)[0] == [("🤝 Supportive", "menu:personalization:persona:style:supportive")]
     assert query.answer_calls[-1] == (None, False, None)
 
 
@@ -3811,3 +3825,397 @@ def test_menu_personalization_reports_custom_opens_block_toggles(tmp_path: Path)
         [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:reports:custom")],
     ]
+
+
+def test_menu_personalization_persona_opens_editor_screen(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 101
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "supportive",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_menu_personalization_items = dp.callback_query.handlers["cb_menu_personalization_items"]
+    message = DummyMessage(user_id=user_id)
+    query = DummyCallbackQuery(
+        user_id=user_id,
+        data="menu:personalization:persona",
+        message=message,
+    )
+
+    asyncio.run(cb_menu_personalization_items(query))
+
+    assert len(message.answers) == 1
+    text, kb = message.answers[0]
+    assert text == templates.menu_persona_editor_message(
+        current_value="\n".join(
+            [
+                "Style: Supportive",
+                "Verbosity: Balanced",
+                "Motivation: Soft",
+                "Emoji: Normal",
+            ]
+        ),
+        draft_value="\n".join(
+            [
+                "Style: Supportive",
+                "Verbosity: Balanced",
+                "Motivation: Soft",
+                "Emoji: Normal",
+            ]
+        ),
+    )
+    assert _kb_dump(kb)[0] == [("🤝 Supportive", "menu:personalization:persona:style:supportive")]
+    mem = ms.load_memory(user_id)
+    assert mem.get("persona_draft") == {
+        "style": "supportive",
+        "verbosity": "balanced",
+        "motivation": "soft",
+        "emoji": "normal",
+    }
+
+
+def test_menu_personalization_persona_save_persists_profile_and_clears_draft(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 102
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "supportive",
+        }
+    )
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_open = dp.callback_query.handlers["cb_menu_personalization_items"]
+    cb_update = dp.callback_query.handlers["cb_menu_personalization_persona_update"]
+    cb_save = dp.callback_query.handlers["cb_menu_personalization_persona_save"]
+    message = DummyMessage(user_id=user_id)
+
+    asyncio.run(
+        cb_open(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_update(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona:style:motivator",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_update(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona:verbosity:detailed",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_save(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona:save",
+                message=message,
+            )
+        )
+    )
+
+    saved = profile_store.load(user_id)
+    assert saved["persona"] == "motivator"
+    assert saved["persona_profile"] == {
+        "style": "motivator",
+        "verbosity": "detailed",
+        "motivation": "strong",
+        "emoji": "normal",
+    }
+    mem = ms.load_memory(user_id)
+    assert mem.get("persona_draft") is None
+    assert message.answers[-1][0] == templates.menu_persona_saved_message(
+        "\n".join(
+            [
+                "Style: Motivator",
+                "Verbosity: Detailed",
+                "Motivation: Strong",
+                "Emoji: Normal",
+            ]
+        )
+    )
+
+
+def test_menu_personalization_persona_cancel_discards_draft(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 103
+    profile_store = DummyProfileStore(
+        {
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "supportive",
+        }
+    )
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile=None,
+        tx_store=tx_store,
+        profile_store=profile_store,
+    )
+
+    cb_open = dp.callback_query.handlers["cb_menu_personalization_items"]
+    cb_update = dp.callback_query.handlers["cb_menu_personalization_persona_update"]
+    cb_cancel = dp.callback_query.handlers["cb_menu_personalization_persona_cancel"]
+    message = DummyMessage(user_id=user_id)
+
+    asyncio.run(
+        cb_open(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_update(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona:style:motivator",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_cancel(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona:cancel",
+                message=message,
+            )
+        )
+    )
+
+    saved = profile_store.load(user_id)
+    assert saved["persona"] == "supportive"
+    assert saved["persona_profile"] == {
+        "style": "supportive",
+        "verbosity": "balanced",
+        "motivation": "soft",
+        "emoji": "normal",
+    }
+    mem = ms.load_memory(user_id)
+    assert mem.get("persona_draft") is None
+    assert message.answers[-1][0] == templates.menu_personalization_message(
+        persona_label="Supportive",
+        activity_label="Quiet",
+        reports_label="Min",
+        uncat_label="Перед звітом",
+        ai_label="AI explanations ON",
+    )
+
+
+def test_menu_personalization_persona_reset_sets_canonical_defaults(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 104
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "motivator",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_open = dp.callback_query.handlers["cb_menu_personalization_items"]
+    cb_reset = dp.callback_query.handlers["cb_menu_personalization_persona_reset"]
+    message = DummyMessage(user_id=user_id)
+
+    asyncio.run(
+        cb_open(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona",
+                message=message,
+            )
+        )
+    )
+    asyncio.run(
+        cb_reset(
+            DummyCallbackQuery(
+                user_id=user_id,
+                data="menu:personalization:persona:reset",
+                message=message,
+            )
+        )
+    )
+
+    mem = ms.load_memory(user_id)
+    assert mem.get("persona_draft") == {
+        "style": "rational",
+        "verbosity": "concise",
+        "motivation": "balanced",
+        "emoji": "minimal",
+    }
+    assert "Style: Rational" in message.answers[-1][0]
+    assert "Emoji: Minimal" in message.answers[-1][0]
+
+
+def test_menu_personalization_persona_preview_stale_without_draft_alert(tmp_path: Path):
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 105
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "supportive",
+        },
+        tx_store=tx_store,
+    )
+
+    cb_preview = dp.callback_query.handlers["cb_menu_personalization_persona_preview"]
+    message = DummyMessage(user_id=user_id)
+    query = DummyCallbackQuery(
+        user_id=user_id,
+        data="menu:personalization:persona:preview",
+        message=message,
+    )
+
+    asyncio.run(cb_preview(query))
+
+    assert message.answers == []
+    assert query.answer_calls[-1] == (templates.stale_button_message(), True, None)
+
+
+def test_menu_reports_ai_prompt_includes_persona_suffix(tmp_path: Path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class StoreWithFacts:
+        def load(self, telegram_user_id: int, period_key: str):
+            return SimpleNamespace(
+                facts={
+                    "totals": {"real_spend_total_uah": 123.0},
+                    "coverage": {
+                        "coverage_from_ts": 1_700_000_000,
+                        "coverage_to_ts": 1_700_086_400,
+                        "requested_from_ts": 1_700_000_000,
+                        "requested_to_ts": 1_700_086_400,
+                    },
+                }
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str, model: str):
+            return None
+
+        def generate_report_v2(self, system: str, user: str, *, max_tokens: int = 700):
+            captured["system"] = system
+            captured["user"] = user
+            return SimpleNamespace(
+                summary="ok",
+                changes=["c1"],
+                recs=["r1"],
+                next_step="n1",
+            )
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(openai_client_module, "OpenAIClient", FakeOpenAIClient)
+
+    tx_store = TxStore(tmp_path / "tx")
+    user_id = 106
+    dp = _build_dispatcher(
+        cfg=UserConfig(
+            telegram_user_id=user_id,
+            mono_token="token",
+            selected_account_ids=["acc1"],
+            chat_id=None,
+            autojobs_enabled=False,
+            updated_at=0.0,
+        ),
+        profile={
+            "onboarding_completed": True,
+            "activity_mode": "quiet",
+            "uncategorized_prompt_frequency": "before_report",
+            "persona": "supportive",
+            "persona_profile": {
+                "style": "supportive",
+                "verbosity": "detailed",
+                "motivation": "soft",
+                "emoji": "normal",
+            },
+        },
+        tx_store=tx_store,
+        store=StoreWithFacts(),
+        settings=SimpleNamespace(openai_api_key="key", openai_model="gpt"),
+        render_report_for_user=lambda *a, **k: "REPORT",
+    )
+
+    cb_menu_run_report_mode = dp.callback_query.handlers["cb_menu_run_report_mode"]
+    message = DummyMessage(user_id=user_id)
+    query = DummyCallbackQuery(user_id=user_id, data="menu:reports:run:today:ai", message=message)
+
+    asyncio.run(cb_menu_run_report_mode(query))
+
+    assert "style=supportive" in str(captured["system"])
+    assert "verbosity=detailed" in str(captured["system"])
+    assert "motivation=soft" in str(captured["system"])
+    assert "emoji=normal" in str(captured["system"])

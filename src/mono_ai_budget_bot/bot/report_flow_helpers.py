@@ -72,7 +72,8 @@ async def compute_and_cache_reports_for_user(
     now_ts = int(time.time())
     profile_from = now_ts - 90 * 24 * 60 * 60
     profile_records = tx_store.load_range(tg_id, account_ids, profile_from, now_ts)
-    profile = build_user_profile(profile_records)
+    profile_existing = profile_store.load(tg_id) or {}
+    profile = {**profile_existing, **build_user_profile(profile_records)}
     pub = None
     try:
         pub = MonobankPublicClient()

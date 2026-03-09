@@ -7,6 +7,10 @@ from aiogram.types import CallbackQuery, Message
 from mono_ai_budget_bot.currency import MonobankPublicClient
 from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.nlq.pipeline import handle_nlq
+from mono_ai_budget_bot.settings.persona import (
+    build_persona_prompt_suffix,
+    normalize_persona_settings,
+)
 from mono_ai_budget_bot.taxonomy.presets import build_taxonomy_preset
 from mono_ai_budget_bot.uncat.ui import list_leaf_options
 
@@ -398,13 +402,14 @@ def build_handler_runtime(
                         api_key=settings.openai_api_key, model=settings.openai_model
                     )
                     try:
-                        profile = profile_store.load(tg_id) or {}
+                        profile = normalize_persona_settings(profile_store.load(tg_id) or {})
                         system = (
                             "Ти допомагаєш з персональною фінансовою аналітикою. "
                             "Працюй лише на основі переданих фактів. "
                             "Не вигадуй дані. "
                             "Не давай інвестиційних, медичних або юридичних порад. "
-                            "Поверни JSON з полями: summary, changes, recs, next_step."
+                            "Поверни JSON з полями: summary, changes, recs, next_step. "
+                            + build_persona_prompt_suffix(profile)
                         )
                         user = (
                             f"Період: {period_label}\n"

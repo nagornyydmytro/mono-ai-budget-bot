@@ -8,6 +8,10 @@ from aiogram.types import CallbackQuery, Message
 from mono_ai_budget_bot.analytics.enrich import enrich_period_facts
 from mono_ai_budget_bot.nlq import memory_store
 from mono_ai_budget_bot.nlq.types import NLQRequest
+from mono_ai_budget_bot.settings.persona import (
+    build_persona_prompt_suffix,
+    normalize_persona_settings,
+)
 
 from . import templates
 from .clarify import validate_ok_or_alert
@@ -57,13 +61,14 @@ async def _build_ai_block_from_facts(
 
     client = OpenAIClient(api_key=ctx.settings.openai_api_key, model=ctx.settings.openai_model)
     try:
-        profile = ctx.profile_store.load(tg_id) or {}
+        profile = normalize_persona_settings(ctx.profile_store.load(tg_id) or {})
         system = (
             "Ти допомагаєш з персональною фінансовою аналітикою. "
             "Працюй лише на основі переданих фактів. "
             "Не вигадуй дані. "
             "Не давай інвестиційних, медичних або юридичних порад. "
-            "Поверни JSON з полями: summary, changes, recs, next_step."
+            "Поверни JSON з полями: summary, changes, recs, next_step. "
+            + build_persona_prompt_suffix(profile)
         )
         user = f"Період: {period_label}\nФакти: {facts}\nПрофіль: {profile}"
         res = client.generate_report_v2(system, user)

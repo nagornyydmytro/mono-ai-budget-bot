@@ -199,6 +199,100 @@ def build_personalization_menu_keyboard() -> Any:
     )
 
 
+def build_persona_editor_keyboard(persona_profile: dict[str, str]) -> Any:
+    style = str(persona_profile.get("style") or "")
+    verbosity = str(persona_profile.get("verbosity") or "")
+    motivation = str(persona_profile.get("motivation") or "")
+    emoji = str(persona_profile.get("emoji") or "")
+    return _build_rows(
+        [
+            [
+                (
+                    "🤝 Supportive" if style == "supportive" else "⬜️ Supportive",
+                    "menu:personalization:persona:style:supportive",
+                )
+            ],
+            [
+                (
+                    "🧠 Rational" if style == "rational" else "⬜️ Rational",
+                    "menu:personalization:persona:style:rational",
+                )
+            ],
+            [
+                (
+                    "🔥 Motivator" if style == "motivator" else "⬜️ Motivator",
+                    "menu:personalization:persona:style:motivator",
+                )
+            ],
+            [
+                (
+                    "✍️ Concise" if verbosity == "concise" else "⬜️ Concise",
+                    "menu:personalization:persona:verbosity:concise",
+                )
+            ],
+            [
+                (
+                    "🧾 Balanced" if verbosity == "balanced" else "⬜️ Balanced",
+                    "menu:personalization:persona:verbosity:balanced",
+                )
+            ],
+            [
+                (
+                    "📚 Detailed" if verbosity == "detailed" else "⬜️ Detailed",
+                    "menu:personalization:persona:verbosity:detailed",
+                )
+            ],
+            [
+                (
+                    "🌿 Soft" if motivation == "soft" else "⬜️ Soft",
+                    "menu:personalization:persona:motivation:soft",
+                )
+            ],
+            [
+                (
+                    "⚖️ Balanced" if motivation == "balanced" else "⬜️ Balanced",
+                    "menu:personalization:persona:motivation:balanced",
+                )
+            ],
+            [
+                (
+                    "🚀 Strong" if motivation == "strong" else "⬜️ Strong",
+                    "menu:personalization:persona:motivation:strong",
+                )
+            ],
+            [
+                (
+                    "🙂 Minimal emoji" if emoji == "minimal" else "⬜️ Minimal emoji",
+                    "menu:personalization:persona:emoji:minimal",
+                )
+            ],
+            [
+                (
+                    "✨ Normal emoji" if emoji == "normal" else "⬜️ Normal emoji",
+                    "menu:personalization:persona:emoji:normal",
+                )
+            ],
+            [("👀 Preview", "menu:personalization:persona:preview")],
+            [
+                ("💾 Save", "menu:personalization:persona:save"),
+                ("↺ Reset", "menu:personalization:persona:reset"),
+            ],
+            [(BTN_CANCEL, "menu:personalization:persona:cancel")],
+            [(BTN_BACK, "menu:personalization")],
+        ]
+    )
+
+
+def build_persona_preview_keyboard() -> Any:
+    return _build_rows(
+        [
+            [("💾 Save", "menu:personalization:persona:save")],
+            [(BTN_BACK, "menu:personalization:persona")],
+            [(BTN_CANCEL, "menu:personalization:persona:cancel")],
+        ]
+    )
+
+
 def build_activity_mode_keyboard(current_mode: str) -> Any:
     rows = [
         [

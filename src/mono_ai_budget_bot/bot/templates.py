@@ -762,6 +762,50 @@ def menu_personalization_item_message(*, title: str, current_value: str) -> str:
     ).strip()
 
 
+def menu_persona_editor_message(*, current_value: str, draft_value: str) -> str:
+    return "\n".join(
+        [
+            "🧑 *Persona editor*",
+            "",
+            "Persona впливає тільки на wording та стиль assistant/AI blocks.",
+            "Вона не змінює суми, періоди, coverage або інші deterministic facts.",
+            "",
+            "Збережено зараз:",
+            current_value,
+            "",
+            "Draft:",
+            draft_value,
+            "",
+            "Обери параметри нижче, потім Preview або Save.",
+        ]
+    ).strip()
+
+
+def menu_persona_preview_message(draft_value: str) -> str:
+    return "\n".join(
+        [
+            "👀 *Persona preview*",
+            "",
+            "Ось як буде виглядати поточний draft persona:",
+            draft_value,
+            "",
+            "Можна зберегти або повернутися до редагування.",
+        ]
+    ).strip()
+
+
+def menu_persona_saved_message(saved_value: str) -> str:
+    return "\n".join(
+        [
+            "✅ *Persona збережена*",
+            "",
+            saved_value,
+            "",
+            "Нова persona буде використовуватись у user-facing wording там, де це передбачено.",
+        ]
+    ).strip()
+
+
 def menu_activity_mode_message(current_mode_label: str) -> str:
     return "\n".join(
         [
