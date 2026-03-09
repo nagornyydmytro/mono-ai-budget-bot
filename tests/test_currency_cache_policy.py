@@ -140,3 +140,68 @@ def test_render_currency_screen_text_shows_cache_freshness_and_refresh_failure()
     assert "USD/UAH" in text
     assert "EUR/UAH" in text
     assert "PLN/UAH" in text
+
+
+def test_render_currency_screen_text_shows_cache_source_label():
+    snapshot = CurrencySnapshot(
+        rates=[
+            MonoCurrencyRate(
+                currencyCodeA=840,
+                currencyCodeB=980,
+                date=1_700_000_000,
+                rateBuy=40.0,
+                rateSell=41.0,
+                rateCross=None,
+            )
+        ],
+        source="cache",
+        requested_refresh=False,
+        fetch_failed_error=None,
+    )
+
+    text = render_currency_screen_text(snapshot)
+
+    assert "Джерело: кеш" in text
+    assert "Monobank API" not in text
+    assert "Оновлення не вдалося" not in text
+
+
+def test_render_currency_screen_text_shows_network_refresh_label():
+    snapshot = CurrencySnapshot(
+        rates=[
+            MonoCurrencyRate(
+                currencyCodeA=840,
+                currencyCodeB=980,
+                date=1_700_000_000,
+                rateBuy=40.0,
+                rateSell=41.0,
+                rateCross=None,
+            )
+        ],
+        source="network",
+        requested_refresh=True,
+        fetch_failed_error=None,
+    )
+
+    text = render_currency_screen_text(snapshot)
+
+    assert "Джерело: Monobank API (refresh)" in text
+    assert "Оновлення не вдалося" not in text
+
+
+def test_currency_snapshot_force_refresh_uses_network_when_fetch_succeeds(
+    monkeypatch, tmp_path: Path
+):
+    client = MonobankPublicClient(cache_root=tmp_path / "mono_public")
+    client._cache.set("mono_public:bank-currency:v1", _sample_rates(), ttl_seconds=300)
+    monkeypatch.setattr(client, "_request_json", lambda path: _sample_rates())
+
+    try:
+        snapshot = client.currency_snapshot(force_refresh=True)
+    finally:
+        client.close()
+
+    assert snapshot.source == "network"
+    assert snapshot.requested_refresh is True
+    assert snapshot.fetch_failed_error is None
+    assert len(snapshot.rates) == 3

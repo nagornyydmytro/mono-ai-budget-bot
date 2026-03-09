@@ -205,3 +205,45 @@ def test_router_detects_currency_convert_intent_for_symbol_prefix():
     assert out["amount"] == 100.0
     assert out["from"] == "USD"
     assert out["to"] == "UAH"
+
+
+def test_parse_currency_conversion_query_returns_none_for_missing_target_currency():
+    assert parse_currency_conversion_query("1500 грн") is None
+
+
+def test_parse_currency_conversion_query_returns_none_for_missing_source_currency():
+    assert parse_currency_conversion_query("1500 в USD") is None
+
+
+def test_parse_currency_conversion_query_returns_none_for_zero_amount():
+    assert parse_currency_conversion_query("0 грн в USD") is None
+
+
+def test_convert_amount_returns_same_amount_for_same_currency():
+    rates = _rates()
+    uah = alpha_to_numeric("UAH")
+    assert uah == 980
+    out = convert_amount(123.45, from_num=uah, to_num=uah, rates=rates)
+    assert out == 123.45
+
+
+def test_executor_currency_convert_missing_amount_has_guided_message():
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    msg = ex.execute_intent(
+        telegram_user_id=1,
+        intent_payload={"intent": "currency_convert", "from": "UAH", "to": "USD"},
+    )
+    assert "Не бачу суму для конвертації" in msg
+    assert "1500 грн в USD" in msg
+
+
+def test_executor_currency_convert_missing_currency_has_guided_message():
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    msg = ex.execute_intent(
+        telegram_user_id=1,
+        intent_payload={"intent": "currency_convert", "amount": 1500},
+    )
+    assert "Не бачу валюту" in msg
+    assert "$100 в грн" in msg
