@@ -219,6 +219,54 @@ async def maybe_send_activity_proactive_messages(
         await safe_send(bot, u.chat_id, text, logger)
 
 
+def build_scheduled_auto_report_text(
+    u,
+    *,
+    period: str,
+    profile_store: ProfileStore,
+    report_store,
+    render_report_text,
+) -> str | None:
+    if not getattr(u, "autojobs_enabled", True):
+        return None
+    if not getattr(u, "chat_id", None):
+        return None
+
+    prof = profile_store.load(u.telegram_user_id) or {}
+    if not is_activity_enabled(prof, "auto_reports"):
+        return None
+
+    stored = report_store.load(u.telegram_user_id, period)
+    if stored is None:
+        return None
+
+    return render_report_text(u.telegram_user_id, period, getattr(stored, "facts", None))
+
+
+async def maybe_send_scheduled_auto_report(
+    u,
+    *,
+    period: str,
+    bot,
+    profile_store: ProfileStore,
+    report_store,
+    render_report_text,
+    logger: logging.Logger,
+) -> bool:
+    text = build_scheduled_auto_report_text(
+        u,
+        period=period,
+        profile_store=profile_store,
+        report_store=report_store,
+        render_report_text=render_report_text,
+    )
+    if text is None:
+        return False
+
+    await safe_send(bot, u.chat_id, text, logger)
+    return True
+
+
 def start_jobs(
     scheduler: AsyncIOScheduler,
     *,
@@ -328,15 +376,17 @@ def start_jobs(
             if not ok:
                 continue
 
-            prof = profile_store.load(u.telegram_user_id) or {}
-            if not is_activity_enabled(prof, "auto_reports"):
+            text = build_scheduled_auto_report_text(
+                u,
+                period="week",
+                profile_store=profile_store,
+                report_store=report_store,
+                render_report_text=render_report_text,
+            )
+            if text is None:
                 continue
 
-            stored = report_store.load(u.telegram_user_id, "week")
-            if stored is None:
-                continue
             await maybe_send_uncat_prompt(u, mode="before_report")
-            text = render_report_text(u.telegram_user_id, "week", stored.facts)
             await safe_send(bot, u.chat_id, text, logger)
 
         logger.info("Scheduler: weekly_report done")
@@ -348,15 +398,17 @@ def start_jobs(
             if not ok:
                 continue
 
-            prof = profile_store.load(u.telegram_user_id) or {}
-            if not is_activity_enabled(prof, "auto_reports"):
+            text = build_scheduled_auto_report_text(
+                u,
+                period="month",
+                profile_store=profile_store,
+                report_store=report_store,
+                render_report_text=render_report_text,
+            )
+            if text is None:
                 continue
 
-            stored = report_store.load(u.telegram_user_id, "month")
-            if stored is None:
-                continue
             await maybe_send_uncat_prompt(u, mode="before_report")
-            text = render_report_text(u.telegram_user_id, "month", stored.facts)
             await safe_send(bot, u.chat_id, text, logger)
 
         logger.info("Scheduler: monthly_report done")

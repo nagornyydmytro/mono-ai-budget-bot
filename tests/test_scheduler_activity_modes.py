@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 from mono_ai_budget_bot.bot.scheduler import (
     build_activity_proactive_messages,
+    build_scheduled_auto_report_text,
     maybe_send_activity_proactive_messages,
+    maybe_send_scheduled_auto_report,
 )
 
 
@@ -212,4 +214,192 @@ def test_maybe_send_activity_proactive_messages_skips_when_autojobs_disabled():
         )
     )
 
+    assert bot.sent == []
+
+
+def test_build_scheduled_auto_report_text_quiet_returns_none():
+    profile_store = DummyProfileStore(
+        {
+            "activity_mode": "quiet",
+            "activity": {
+                "mode": "quiet",
+                "toggles": {
+                    "auto_reports": False,
+                    "uncat_prompts": False,
+                    "trends_alerts": False,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": False,
+                    "coach_nudges": False,
+                },
+                "custom_toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": True,
+                    "trends_alerts": True,
+                    "anomalies_alerts": True,
+                    "forecast_alerts": True,
+                    "coach_nudges": True,
+                },
+            },
+        }
+    )
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=True, chat_id=777)
+
+    text = build_scheduled_auto_report_text(
+        user,
+        period="week",
+        profile_store=profile_store,
+        report_store=report_store,
+        render_report_text=lambda user_id,
+        period,
+        facts: f"{period}:{facts['totals']['real_spend_total_uah']}",
+    )
+
+    assert text is None
+
+
+def test_build_scheduled_auto_report_text_loud_returns_rendered_text():
+    profile_store = DummyProfileStore(
+        {
+            "activity_mode": "loud",
+            "activity": {
+                "mode": "loud",
+                "toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": True,
+                    "trends_alerts": True,
+                    "anomalies_alerts": True,
+                    "forecast_alerts": True,
+                    "coach_nudges": True,
+                },
+                "custom_toggles": {
+                    "auto_reports": False,
+                    "uncat_prompts": False,
+                    "trends_alerts": False,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": False,
+                    "coach_nudges": False,
+                },
+            },
+        }
+    )
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=True, chat_id=777)
+
+    text = build_scheduled_auto_report_text(
+        user,
+        period="month",
+        profile_store=profile_store,
+        report_store=report_store,
+        render_report_text=lambda user_id,
+        period,
+        facts: f"REPORT:{period}:{facts['totals']['real_spend_total_uah']}",
+    )
+
+    assert text == "REPORT:month:456.0"
+
+
+def test_build_scheduled_auto_report_text_custom_respects_auto_reports_toggle():
+    profile_store = DummyProfileStore(
+        {
+            "activity_mode": "custom",
+            "activity": {
+                "mode": "custom",
+                "toggles": {
+                    "auto_reports": False,
+                    "uncat_prompts": True,
+                    "trends_alerts": True,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": False,
+                    "coach_nudges": False,
+                },
+                "custom_toggles": {
+                    "auto_reports": False,
+                    "uncat_prompts": True,
+                    "trends_alerts": True,
+                    "anomalies_alerts": False,
+                    "forecast_alerts": False,
+                    "coach_nudges": False,
+                },
+            },
+        }
+    )
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=True, chat_id=777)
+
+    text = build_scheduled_auto_report_text(
+        user,
+        period="week",
+        profile_store=profile_store,
+        report_store=report_store,
+        render_report_text=lambda user_id, period, facts: "SHOULD NOT HAPPEN",
+    )
+
+    assert text is None
+
+
+def test_maybe_send_scheduled_auto_report_sends_when_enabled():
+    bot = DummyBot()
+    profile_store = DummyProfileStore(
+        {
+            "activity_mode": "custom",
+            "activity": {
+                "mode": "custom",
+                "toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": False,
+                    "trends_alerts": False,
+                    "anomalies_alerts": True,
+                    "forecast_alerts": False,
+                    "coach_nudges": True,
+                },
+                "custom_toggles": {
+                    "auto_reports": True,
+                    "uncat_prompts": False,
+                    "trends_alerts": False,
+                    "anomalies_alerts": True,
+                    "forecast_alerts": False,
+                    "coach_nudges": True,
+                },
+            },
+        }
+    )
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=True, chat_id=777)
+
+    sent = asyncio.run(
+        maybe_send_scheduled_auto_report(
+            user,
+            period="week",
+            bot=bot,
+            profile_store=profile_store,
+            report_store=report_store,
+            render_report_text=lambda user_id, period, facts: f"SEND:{period}",
+            logger=logging.getLogger("test"),
+        )
+    )
+
+    assert sent is True
+    assert bot.sent == [(777, "SEND:week", None)]
+
+
+def test_maybe_send_scheduled_auto_report_skips_when_autojobs_disabled():
+    bot = DummyBot()
+    profile_store = DummyProfileStore({"activity_mode": "loud"})
+    report_store = DummyReportStore(_facts())
+    user = SimpleNamespace(telegram_user_id=1, autojobs_enabled=False, chat_id=777)
+
+    sent = asyncio.run(
+        maybe_send_scheduled_auto_report(
+            user,
+            period="month",
+            bot=bot,
+            profile_store=profile_store,
+            report_store=report_store,
+            render_report_text=lambda user_id, period, facts: "SEND:month",
+            logger=logging.getLogger("test"),
+        )
+    )
+
+    assert sent is False
     assert bot.sent == []
