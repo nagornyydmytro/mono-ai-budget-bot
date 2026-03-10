@@ -58,6 +58,10 @@ def nlq_recipient_ambiguous_no_options(*, alias: str) -> str:
     return f"Кого саме маєш на увазі під '{alias}'? Напиши точне ім'я отримувача як у виписці."
 
 
+def nlq_recipient_not_found(*, alias: str) -> str:
+    return f"Не знайшов отримувача '{alias}' у твоїй виписці за цей період."
+
+
 def nlq_prefix_today() -> str:
     return "Сьогодні"
 

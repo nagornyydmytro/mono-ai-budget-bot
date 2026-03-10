@@ -21,13 +21,16 @@ from mono_ai_budget_bot.currency import MonobankPublicClient, alpha_to_numeric, 
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.nlq.memory_store import (
     load_memory,
-    resolve_merchant_filters,
-    resolve_recipient_candidates,
     save_memory,
     set_pending_intent,
 )
 from mono_ai_budget_bot.nlq.query_engine import QueryEngine, QueryFilter
 from mono_ai_budget_bot.nlq.query_spec import spec_from_intent_payload
+from mono_ai_budget_bot.nlq.resolver import (
+    resolve_category_by_evidence,
+    resolve_merchant_by_evidence,
+    resolve_recipient_by_evidence,
+)
 from mono_ai_budget_bot.nlq.tabular import (
     render_top_categories,
     render_top_merchants,
@@ -53,9 +56,6 @@ from .executor_support import (
     has_spend_match as _has_spend_match,
 )
 from .executor_support import (
-    merchant_filters_for_payload as _merchant_filters_for_payload,
-)
-from .executor_support import (
     normalize_coverage_status_for_nlq as _normalize_coverage_status_for_nlq,
 )
 from .executor_support import (
@@ -69,9 +69,6 @@ from .executor_support import (
 )
 from .executor_support import (
     sum_previous_period_filtered as _sum_previous_period_filtered,
-)
-from .executor_support import (
-    top_recipient_candidates as _top_recipient_candidates,
 )
 
 _GENERIC_RECIPIENT_ALIAS_PREFIXES = ("дівчин", "дівчат", "мам", "тат", "оренд", "квартир")
@@ -97,6 +94,19 @@ def _recipient_name_stems(alias: str) -> list[str]:
 def _is_generic_recipient_alias(alias: str) -> bool:
     s = norm(alias)
     return any(s.startswith(prefix) for prefix in _GENERIC_RECIPIENT_ALIAS_PREFIXES)
+
+
+def _direct_recipient_alias_from_memory(mem: dict[str, Any], alias: str | None) -> str | None:
+    key = str(alias or "").strip().lower()
+    if not key:
+        return None
+    aliases = mem.get("recipient_aliases")
+    if not isinstance(aliases, dict):
+        return None
+    value = aliases.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip().lower()
+    return None
 
 
 def _direct_recipient_candidates(
@@ -314,13 +324,21 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
     if intent == "compare_to_baseline":
         recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
+        recipient_target = str(intent_payload.get("recipient_target") or "").strip()
+        recipient_mode = str(intent_payload.get("recipient_mode") or "").strip().lower()
+        if bool(intent_payload.get("recipient_explicit_name")) and not recipient_mode:
+            recipient_mode = "explicit"
         entity_kind = str(intent_payload.get("entity_kind") or "spend").strip()
 
-        merchant_filter = (
-            resolve_merchant_filters(telegram_user_id, intent_payload.get("merchant_contains"))
-            or []
+        merchant_resolution = resolve_merchant_by_evidence(
+            telegram_user_id,
+            merchant_contains=intent_payload.get("merchant_contains"),
+            merchant_targets=intent_payload.get("merchant_targets"),
         )
-        alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
+        merchant_filter = merchant_resolution.normalized_values
+        alias_raw = (
+            merchant_resolution.alias or str(intent_payload.get("merchant_contains") or "").strip()
+        )
         if alias_raw and _should_clarify_alias(mem, alias_raw):
             if not _has_spend_match(rows, merchant_filter):
                 candidates = suggest_merchant_candidates_detailed(rows, limit=8)
@@ -333,27 +351,56 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                         candidates=candidates,
                     )
 
-        category = str(intent_payload.get("category") or "").strip() or None
+        category_resolution = resolve_category_by_evidence(
+            category=intent_payload.get("category"),
+            category_targets=intent_payload.get("category_targets"),
+        )
+        category = (
+            category_resolution.normalized_values[0]
+            if category_resolution.normalized_values
+            else None
+        )
 
         recipient_match: str | None = None
         if recipient_alias:
-            ra = mem.get("recipient_aliases") or {}
-            if not isinstance(ra, dict) or recipient_alias not in ra:
-                kind_prefix = "transfer_in" if entity_kind == "transfer_in" else "transfer_out"
-                options = _top_recipient_candidates(rows, kind_prefix=kind_prefix, limit=5)
-                set_pending_intent(
-                    telegram_user_id, intent_payload, kind="recipient", options=options
+            recipient_match = _direct_recipient_alias_from_memory(mem, recipient_alias)
+            if recipient_match is None:
+                recipient_resolution = resolve_recipient_by_evidence(
+                    telegram_user_id,
+                    rows,
+                    alias=recipient_alias,
+                    target=recipient_target,
+                    mode=recipient_mode,
+                    intent_name="transfer_in_sum"
+                    if entity_kind == "transfer_in"
+                    else "transfer_out_sum",
                 )
 
-                if options:
-                    return templates.nlq_recipient_ambiguous_with_options(
-                        alias=recipient_alias, options=options
+                if recipient_resolution.decision == "matched":
+                    recipient_match = recipient_resolution.normalized_values[0]
+                elif recipient_resolution.decision == "clarify":
+                    set_pending_intent(
+                        telegram_user_id,
+                        intent_payload,
+                        kind="recipient",
+                        options=recipient_resolution.display_values,
                     )
-                return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
-
-            v = ra.get(recipient_alias)
-            if isinstance(v, str) and v.strip():
-                recipient_match = v.strip().lower()
+                    return templates.nlq_recipient_ambiguous_with_options(
+                        alias=recipient_target or recipient_alias,
+                        options=recipient_resolution.display_values,
+                    )
+                elif recipient_mode == "explicit":
+                    return templates.nlq_recipient_not_found(
+                        alias=recipient_target or recipient_alias
+                    )
+                else:
+                    set_pending_intent(
+                        telegram_user_id,
+                        intent_payload,
+                        kind="recipient",
+                        options=[],
+                    )
+                    return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
 
         window_days = max(1, int((ts_to - ts_from + 86399) // 86400))
         lookback_days = max(28, min(180, window_days * 6))
@@ -413,82 +460,64 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if recipient_explicit_name and not recipient_mode:
         recipient_mode = "explicit"
 
+    recipient_match: str | None = None
     if intent.startswith("transfer_") and recipient_alias:
-        kind_prefix = "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
-        learned_candidates = resolve_recipient_candidates(telegram_user_id, recipient_alias) or []
-        direct_candidates = _direct_recipient_candidates(
-            rows,
-            alias=recipient_alias,
-            kind_prefix=kind_prefix,
-            limit=5,
-        )
-
-        if recipient_mode == "explicit":
-            recipient_candidates_pref = learned_candidates or direct_candidates
-        else:
-            recipient_candidates_pref = learned_candidates
-
-        if len(recipient_candidates_pref) > 1:
-            set_pending_intent(
+        recipient_match = _direct_recipient_alias_from_memory(mem, recipient_alias)
+        if recipient_match is None:
+            recipient_resolution = resolve_recipient_by_evidence(
                 telegram_user_id,
-                intent_payload,
-                kind="recipient",
-                options=recipient_candidates_pref,
-            )
-            return templates.nlq_recipient_ambiguous_with_options(
-                alias=recipient_alias, options=recipient_candidates_pref
+                rows,
+                alias=recipient_alias,
+                target=recipient_target,
+                mode=recipient_mode,
+                intent_name=intent,
             )
 
-        if not recipient_candidates_pref:
-            if recipient_mode == "explicit":
+            if recipient_resolution.decision == "matched":
+                recipient_match = recipient_resolution.normalized_values[0]
+            elif recipient_resolution.decision == "clarify":
+                set_pending_intent(
+                    telegram_user_id,
+                    intent_payload,
+                    kind="recipient",
+                    options=recipient_resolution.display_values,
+                )
+                return templates.nlq_recipient_ambiguous_with_options(
+                    alias=recipient_target or recipient_alias,
+                    options=recipient_resolution.display_values,
+                )
+            elif recipient_mode == "explicit":
+                return templates.nlq_recipient_not_found(alias=recipient_target or recipient_alias)
+            else:
                 set_pending_intent(
                     telegram_user_id,
                     intent_payload,
                     kind="recipient",
                     options=[],
                 )
-                return templates.nlq_recipient_ambiguous_no_options(
-                    alias=recipient_target or recipient_alias
-                )
+                return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
 
-            options = direct_candidates or _top_recipient_candidates(
-                rows,
-                kind_prefix=kind_prefix,
-                limit=5,
-            )
-            set_pending_intent(
-                telegram_user_id,
-                intent_payload,
-                kind="recipient",
-                options=options or [],
-            )
-            if options:
-                return templates.nlq_recipient_ambiguous_with_options(
-                    alias=recipient_alias, options=options
-                )
-
-            return templates.nlq_recipient_ambiguous_no_options(alias=recipient_alias)
-
-    merchant_filter = _merchant_filters_for_payload(
-        telegram_user_id, intent_payload.get("merchant_contains")
+    merchant_resolution = resolve_merchant_by_evidence(
+        telegram_user_id,
+        merchant_contains=intent_payload.get("merchant_contains"),
+        merchant_targets=intent_payload.get("merchant_targets"),
     )
-
-    recipient_match: str | None = None
-    if recipient_alias and intent.startswith("transfer_"):
-        recipient_candidates = resolve_recipient_candidates(telegram_user_id, recipient_alias) or []
-        if not recipient_candidates and recipient_mode == "explicit":
-            recipient_candidates = _direct_recipient_candidates(
-                rows,
-                alias=recipient_alias,
-                kind_prefix=(
-                    "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
-                ),
-                limit=5,
-            )
-        if len(recipient_candidates) == 1:
-            recipient_match = recipient_candidates[0].strip().lower()
+    merchant_filter = merchant_resolution.normalized_values
 
     filter_intent = _filter_intent_for_payload(intent, intent_payload)
+
+    merchant_resolution = resolve_merchant_by_evidence(
+        telegram_user_id,
+        merchant_contains=intent_payload.get("merchant_contains"),
+        merchant_targets=intent_payload.get("merchant_targets"),
+    )
+    merchant_filter = merchant_resolution.normalized_values
+
+    filter_intent = _filter_intent_for_payload(intent, intent_payload)
+    category_resolution = resolve_category_by_evidence(
+        category=intent_payload.get("category"),
+        category_targets=intent_payload.get("category_targets"),
+    )
 
     engine = QueryEngine()
     filtered = engine.filter_rows(
@@ -498,7 +527,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             category=(
                 spec.category
                 if spec is not None
-                else str(intent_payload.get("category") or "").strip() or None
+                else (
+                    category_resolution.normalized_values[0]
+                    if category_resolution.normalized_values
+                    else None
+                )
             ),
             merchant_contains=merchant_filter,
             recipient_contains=recipient_match,
@@ -507,7 +540,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if bool(intent_payload.get("merchant_exact")) and merchant_filter:
         filtered = _apply_exact_merchant_filter(filtered, merchant_filter)
 
-    alias_raw = str(intent_payload.get("merchant_contains") or "").strip()
+    alias_raw = (
+        merchant_resolution.alias or str(intent_payload.get("merchant_contains") or "").strip()
+    )
     if (
         filter_intent.startswith("spend_")
         and intent
