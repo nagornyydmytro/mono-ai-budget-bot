@@ -60,6 +60,11 @@ def test_semantic_boundary_exact_canonical_questions_stay_deterministic(text, in
         "поясни як коуч мої витрати за місяць",
         "що це говорить про мої звички витрат за місяць",
         "поясни мої витрати за місяць людською мовою",
+        "які в мене патерни витрат у барах",
+        "більше йде на регулярні витрати чи на разові покупки",
+        "що це говорить про мої звички",
+        "наскільки більше я зазвичай купую в novus ніж в atb",
+        "наскільки частіше я витрачаю в маку ніж в kfc більше 1000 грн",
     ],
 )
 def test_semantic_boundary_open_ended_finance_prompts_go_to_safe_llm(text):
@@ -115,6 +120,20 @@ def test_semantic_boundary_too_ambiguous_open_questions_go_to_clarification(text
             NLQIntent(
                 name="compare_to_previous_period",
                 slots={"intent": "compare_to_previous_period", "days": 30},
+            ),
+        ),
+        (
+            "наскільки більше я зазвичай купую в novus ніж в atb",
+            NLQIntent(
+                name="between_entities",
+                slots={
+                    "intent": "between_entities",
+                    "days": 30,
+                    "comparison_mode": "between_entities",
+                    "target_type": "merchant",
+                    "merchant_targets": ["novus", "atb"],
+                    "entity_kind": "spend",
+                },
             ),
         ),
     ],

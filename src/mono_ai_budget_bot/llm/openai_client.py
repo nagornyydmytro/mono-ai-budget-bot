@@ -83,11 +83,22 @@ class ToolModeResult:
 class NLQInterpretationV1(BaseModel):
     model_config = {"extra": "forbid"}
 
-    mode: Literal["narrative", "clarify", "unsupported"]
+    mode: Literal[
+        "narrative",
+        "narrative_answer",
+        "clarify",
+        "semantic_clarify",
+        "unsupported",
+    ]
     answer: Optional[str] = None
     question: Optional[str] = None
 
     def clean(self) -> "NLQInterpretationV1":
+        if self.mode == "narrative_answer":
+            self.mode = "narrative"
+        elif self.mode == "semantic_clarify":
+            self.mode = "clarify"
+
         if self.answer is not None:
             self.answer = self.answer.strip()
         if self.question is not None:
@@ -449,14 +460,13 @@ class OpenAIClient:
             "Ти не рахуєш гроші самостійно, не вигадуєш факти, не працюєш з raw storage, "
             "не повертаєш tool calls, не пишеш у storage і не працюєш із секретами. "
             "Тобі дають тільки user_text, canonical query schema і safe facts payload. "
-            "Якщо фактів достатньо для м'якого персонального пояснення — поверни mode='narrative'. "
-            "Якщо фактів не вистачає або треба уточнення — поверни mode='clarify'. "
+            "Якщо фактів достатньо для змістовної user-facing відповіді — поверни mode='narrative_answer'. "
+            "Якщо фактів не вистачає, питання надто неоднозначне або треба звузити запит — поверни mode='semantic_clarify'. "
             "Якщо запит поза межами персональної фінансової аналітики — поверни mode='unsupported'. "
-            "Поверни тільки JSON-об'єкт строго за схемою NLQInterpretationV1 без зайвих полів."
-            "Для open-ended personal finance questions ти можеш повернути route='narrative'. "
-            "Якщо question просить пояснення, інтерпретацію, pattern analysis або reasoning — "
-            "не редукуй це до count/sum. "
-            "answer має бути user-facing українською, коротко і змістовно."
+            "Не редукуй reasoning-heavy запити до простого count/sum, якщо користувач просить патерни, звички, регулярність, "
+            "аномалії, інтерпретацію порівнянь, merchant/category explanation або currency explanation. "
+            "Поверни тільки JSON-об'єкт строго за схемою NLQInterpretationV1 без зайвих полів. "
+            "answer або question мають бути user-facing українською, коротко і змістовно."
         )
         user = (
             f"user_text={user_text}\n"

@@ -169,6 +169,21 @@ _ABSTRACT_FINANCE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SEMANTIC_REASONING_RE = re.compile(
+    r"\b("
+    r"патерн\w*|звичк\w*|поведінк\w*|"
+    r"регулярн\w*|разов\w*|one\s*off|recurring|habit\w*|pattern\w*|"
+    r"аномал\w*|незвичн\w*|interpret\w*|інтерпрет\w*|"
+    r"що\s+це\s+говорить|"
+    r"наскільки\s+більше|наскільки\s+частіше|частіше|рідше|зазвичай|"
+    r"більше\s+йде\s+на|"
+    r"чому\s+саме|поясни\s+чому|"
+    r"порівняй.*(novus|atb|мак|kfc)|"
+    r"курс\w*|валют\w*|currency"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _NARRATIVE_ONLY_RE = re.compile(
     r"\b("
     r"опиши|describe|"
@@ -177,7 +192,11 @@ _NARRATIVE_ONLY_RE = re.compile(
     r"людськ\w*\s+мов|human\s+language|"
     r"м'?які\s+висновк|soft\s+conclusion|"
     r"як\s+коуч|as\s+coach|coach|"
-    r"регулярн\w*\s+повсякденн\w*|разов\w*\s+велик\w*\s+покупк\w*|one\s*off|regular\s+everyday"
+    r"регулярн\w*\s+повсякденн\w*|разов\w*\s+велик\w*\s+покупк\w*|one\s*off|regular\s+everyday|"
+    r"патерн\w*|звичк\w*|поведінк\w*|"
+    r"наскільки\s+більше|наскільки\s+частіше|частіше|рідше|зазвичай|"
+    r"поясни\s+чому|інтерпрет\w*|аномал\w*|незвичн\w*|"
+    r"курс\w*|валют\w*|currency"
     r")\b",
     re.IGNORECASE,
 )
@@ -478,6 +497,9 @@ def _should_handoff_deterministic_intent(
     if _OPEN_ENDED_FINANCE_RE.search(text):
         return True
 
+    if _SEMANTIC_REASONING_RE.search(text):
+        return True
+
     if _MULTI_CLAUSE_RE.search(text):
         return True
 
@@ -537,7 +559,16 @@ def _needs_open_question_clarification(
         return False
     if not _is_narrative_candidate(req):
         return False
-    return _FINANCE_SUBJECT_RE.search(req.text or "") is None
+
+    text = req.text or ""
+
+    if _SEMANTIC_REASONING_RE.search(text):
+        return False
+
+    if _FINANCE_SUBJECT_RE.search(text):
+        return False
+
+    return _OPEN_ENDED_FINANCE_RE.search(text) is not None
 
 
 def _open_question_clarification_text(
@@ -683,7 +714,10 @@ def _llm_tool_mode_intent(req: NLQRequest) -> NLQIntent | NLQResponse | None:
 
 def _is_narrative_candidate(req: NLQRequest) -> bool:
     text = req.text or ""
-    return _NARRATIVE_ONLY_RE.search(text) is not None
+    return (
+        _NARRATIVE_ONLY_RE.search(text) is not None
+        or _SEMANTIC_REASONING_RE.search(text) is not None
+    )
 
 
 def _llm_plan_intent(req: NLQRequest) -> NLQIntent | None:
@@ -731,8 +765,64 @@ def _schema_to_payload(schema: CanonicalQuerySchema) -> dict[str, object]:
     }
 
 
-def _load_narrative_facts(req: NLQRequest) -> dict[str, object] | None:
-    period = _narrative_period_from_text(req.text)
+def _semantic_period(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> str:
+    schema = _build_canonical_query_schema(req, deterministic_intent)
+    label = str(schema.period.get("label") or "").strip().lower()
+    days = schema.period.get("days")
+
+    if label in {"сьогодні", "вчора"}:
+        return "today"
+    try:
+        if days is not None and int(days) <= 7:
+            return "week"
+    except Exception:
+        pass
+    return "month"
+
+
+def _safe_slot_summary(deterministic_intent: NLQIntent | None) -> dict[str, object]:
+    if deterministic_intent is None:
+        return {}
+
+    slots = dict(deterministic_intent.slots or {})
+    allowlist = {
+        "intent",
+        "days",
+        "period_label",
+        "entity_kind",
+        "category",
+        "category_targets",
+        "merchant_contains",
+        "merchant_targets",
+        "recipient_alias",
+        "recipient_target",
+        "recipient_targets",
+        "threshold_uah",
+        "direction",
+        "comparison_mode",
+        "aggregation",
+        "target_type",
+    }
+
+    summary: dict[str, object] = {}
+    for key in allowlist:
+        if key not in slots:
+            continue
+        value = slots.get(key)
+        if value in (None, "", [], {}):
+            continue
+        summary[key] = value
+    return summary
+
+
+def _load_narrative_facts(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> dict[str, object] | None:
+    period = _semantic_period(req, deterministic_intent)
     try:
         payload = execute_tool_call(
             req.telegram_user_id,
@@ -761,11 +851,32 @@ def _load_narrative_facts(req: NLQRequest) -> dict[str, object] | None:
     if not isinstance(facts.get("totals"), dict):
         return None
 
-    return payload
+    safe_payload: dict[str, object] = {
+        "tool": "query_facts",
+        "period": period,
+        "facts": facts,
+        "slot_summary": _safe_slot_summary(deterministic_intent),
+    }
+
+    if deterministic_intent is not None:
+        try:
+            safe_payload["deterministic_preview"] = {
+                "intent": deterministic_intent.name,
+                "answer": execute_intent(
+                    req.telegram_user_id, dict(deterministic_intent.slots or {})
+                ),
+            }
+        except Exception:
+            pass
+
+    return safe_payload
 
 
-def _missing_narrative_facts_text(req: NLQRequest) -> str:
-    period = _narrative_period_from_text(req.text)
+def _missing_narrative_facts_text(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> str:
+    period = _semantic_period(req, deterministic_intent)
     label = {
         "today": "сьогодні",
         "week": "тиждень",
@@ -790,10 +901,10 @@ def _llm_narrative_response(
         return None
 
     schema = _build_canonical_query_schema(req, deterministic_intent)
-    facts_payload = _load_narrative_facts(req)
+    facts_payload = _load_narrative_facts(req, deterministic_intent)
     if facts_payload is None:
         return NLQResponse(
-            result=NLQResult(text=_missing_narrative_facts_text(req)),
+            result=NLQResult(text=_missing_narrative_facts_text(req, deterministic_intent)),
             clarification=None,
         )
 
@@ -806,7 +917,12 @@ def _llm_narrative_response(
     except Exception:
         return None
 
-    mode = str(raw.get("mode") or "").strip()
+    mode = str(raw.get("mode") or "").strip().lower()
+    if mode == "narrative_answer":
+        mode = "narrative"
+    elif mode == "semantic_clarify":
+        mode = "clarify"
+
     if mode == "narrative":
         answer = str(raw.get("answer") or "").strip()
         if not answer:
@@ -816,7 +932,7 @@ def _llm_narrative_response(
                 text=answer,
                 meta={
                     "mode": "llm_narrative",
-                    "period": _narrative_period_from_text(req.text),
+                    "period": _semantic_period(req, deterministic_intent),
                 },
             ),
             clarification=None,
@@ -831,7 +947,22 @@ def _llm_narrative_response(
                 text=question,
                 meta={
                     "mode": "llm_clarify",
-                    "period": _narrative_period_from_text(req.text),
+                    "period": _semantic_period(req, deterministic_intent),
+                },
+            ),
+            clarification=None,
+        )
+
+    if mode == "unsupported":
+        return NLQResponse(
+            result=NLQResult(
+                text=(
+                    "Зараз не можу дати коректне пояснення без ризику вигадати зайве. "
+                    "Уточни період, сутність або метрику, яку хочеш інтерпретувати."
+                ),
+                meta={
+                    "mode": "llm_unsupported",
+                    "period": _semantic_period(req, deterministic_intent),
                 },
             ),
             clarification=None,
@@ -881,40 +1012,11 @@ def _load_validation_rows(user_id: int, now_ts: int, days: int = 180):
 
 
 def _maybe_handle_open_ended_finance(req: NLQRequest, intent: NLQIntent) -> NLQResponse | None:
-    settings = load_settings()
-    if not settings.openai_api_key:
+    if not _SEMANTIC_REASONING_RE.search(req.text or "") and not _OPEN_ENDED_FINANCE_RE.search(
+        req.text or ""
+    ):
         return None
-
-    try:
-        client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
-    except Exception:
-        return None
-
-    try:
-        user = f"question={req.text}\nslots={intent.slots}"
-        out = client.interpret_nlq(user_text=user, facts_scope="full")
-    except Exception:
-        try:
-            client.close()
-        except Exception:
-            pass
-        return None
-
-    try:
-        client.close()
-    except Exception:
-        pass
-
-    if not isinstance(out, dict):
-        return None
-
-    answer = str(out.get("answer") or "").strip()
-    route_kind = str(out.get("route") or "").strip().lower()
-
-    if route_kind in {"narrative", "answer"} and answer:
-        return NLQResponse(result=NLQResult(text=answer), clarification=None)
-
-    return None
+    return _llm_narrative_response(req, intent)
 
 
 def handle_nlq(req: NLQRequest) -> NLQResponse:
