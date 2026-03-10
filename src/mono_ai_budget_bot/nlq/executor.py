@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import math
+import re
 import time
-from statistics import median
 from typing import Any
 
 from mono_ai_budget_bot.analytics.classify import classify_kind
@@ -54,6 +54,9 @@ from .executor_support import (
 )
 from .executor_support import (
     has_spend_match as _has_spend_match,
+)
+from .executor_support import (
+    merchant_filters_for_payload as _merchant_filters_for_payload,
 )
 from .executor_support import (
     normalize_coverage_status_for_nlq as _normalize_coverage_status_for_nlq,
@@ -335,7 +338,10 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             merchant_contains=intent_payload.get("merchant_contains"),
             merchant_targets=intent_payload.get("merchant_targets"),
         )
-        merchant_filter = merchant_resolution.normalized_values
+        merchant_filter = merchant_resolution.normalized_values or _merchant_filters_for_payload(
+            telegram_user_id,
+            intent_payload.get("merchant_contains"),
+        )
         alias_raw = (
             merchant_resolution.alias or str(intent_payload.get("merchant_contains") or "").strip()
         )
@@ -502,16 +508,10 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         merchant_contains=intent_payload.get("merchant_contains"),
         merchant_targets=intent_payload.get("merchant_targets"),
     )
-    merchant_filter = merchant_resolution.normalized_values
-
-    filter_intent = _filter_intent_for_payload(intent, intent_payload)
-
-    merchant_resolution = resolve_merchant_by_evidence(
+    merchant_filter = merchant_resolution.normalized_values or _merchant_filters_for_payload(
         telegram_user_id,
-        merchant_contains=intent_payload.get("merchant_contains"),
-        merchant_targets=intent_payload.get("merchant_targets"),
+        intent_payload.get("merchant_contains"),
     )
-    merchant_filter = merchant_resolution.normalized_values
 
     filter_intent = _filter_intent_for_payload(intent, intent_payload)
     category_resolution = resolve_category_by_evidence(
@@ -581,6 +581,68 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             return f"{coverage_warning}\n\n{text}"
         return text
 
+    canonical_kind = (
+        spec.kind if spec is not None else str(intent_payload.get("entity_kind") or "spend")
+    )
+    canonical_metric = spec.metric if spec is not None else "sum"
+    canonical_filtered = filtered
+
+    def _sum_current(rows_subset) -> int:
+        return engine.sum_for_kind(rows_subset, canonical_kind)
+
+    def _count_current(rows_subset) -> int:
+        return engine.count_for_rows(rows_subset)
+
+    def _previous_value() -> tuple[int, int]:
+        prev_from_ts, prev_total_cents = _sum_previous_period_filtered(
+            tx_store,
+            telegram_user_id,
+            account_ids,
+            current_from_ts=ts_from,
+            current_to_ts=ts_to,
+            filter_intent=filter_intent,
+            category=(
+                spec.category
+                if spec is not None
+                else (
+                    category_resolution.normalized_values[0]
+                    if category_resolution.normalized_values
+                    else None
+                )
+            ),
+            merchant_filter=merchant_filter,
+            recipient_match=recipient_match,
+            merchant_exact=bool(intent_payload.get("merchant_exact")),
+        )
+        if canonical_metric == "count":
+            prev_rows = tx_store.load_range(
+                telegram_user_id=telegram_user_id,
+                account_ids=account_ids,
+                ts_from=prev_from_ts,
+                ts_to=ts_from,
+            )
+            prev_rows = engine.filter_rows(
+                prev_rows,
+                QueryFilter(
+                    intent=filter_intent,
+                    category=(
+                        spec.category
+                        if spec is not None
+                        else (
+                            category_resolution.normalized_values[0]
+                            if category_resolution.normalized_values
+                            else None
+                        )
+                    ),
+                    merchant_contains=merchant_filter,
+                    recipient_contains=recipient_match,
+                ),
+            )
+            if bool(intent_payload.get("merchant_exact")) and merchant_filter:
+                prev_rows = _apply_exact_merchant_filter(prev_rows, merchant_filter)
+            return prev_from_ts, len(prev_rows)
+        return prev_from_ts, prev_total_cents
+
     if intent in {"threshold_query", "count_over", "count_under"}:
         threshold_uah = float(intent_payload.get("threshold_uah") or 0.0)
         threshold_cents = max(1, int(round(threshold_uah * 100)))
@@ -609,7 +671,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return _with_cov(f"{prefix} було {len(matched)} операцій {cmp_text} {amount_text}.")
 
     if intent == "last_time":
-        threshold_uah = intent_payload.get("threshold_uah")
+        threshold_uah = (
+            spec.threshold_uah if spec is not None else intent_payload.get("threshold_uah")
+        )
         try:
             threshold_cents = (
                 int(round(float(threshold_uah) * 100)) if threshold_uah is not None else None
@@ -617,28 +681,26 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         except Exception:
             threshold_cents = None
 
+        rows_for_last = canonical_filtered
         if threshold_cents is not None and threshold_cents > 0:
-            filtered = [r for r in filtered if abs(int(r.amount)) > threshold_cents]
+            rows_for_last = [r for r in rows_for_last if abs(int(r.amount)) > threshold_cents]
 
-        if not filtered:
+        last_row = engine.last_row(rows_for_last)
+        if last_row is None:
             return _with_cov("Не знайшов жодної операції для такого запиту.")
-        last_row = max(filtered, key=lambda r: int(r.time))
         return _with_cov(
             f"Остання операція була {format_ts_local(int(last_row.time))[:16]}: {last_row.description} — {format_money_grn(abs(int(last_row.amount)) / 100)}."
         )
 
     if intent == "recurrence_summary":
-        if not filtered:
+        if not canonical_filtered:
             return _with_cov(f"{prefix}: збігів не знайшов.")
 
-        recurring = _recurring_rows_only(filtered)
-        rows_for_summary = recurring if recurring else filtered
-
-        day_keys = sorted({int(r.time) // 86400 for r in rows_for_summary})
-        gaps = [int(day_keys[i] - day_keys[i - 1]) for i in range(1, len(day_keys))]
-        median_gap = int(median(gaps)) if gaps else 0
+        recurring = _recurring_rows_only(canonical_filtered)
+        rows_for_summary = recurring if recurring else canonical_filtered
+        op_count, active_days, median_gap = engine.recurrence_stats(rows_for_summary)
         return _with_cov(
-            f"{prefix}: {len(rows_for_summary)} операцій у {len(day_keys)} активних днях. Медіанний інтервал — {median_gap} дн."
+            f"{prefix}: {op_count} операцій у {active_days} активних днях. Медіанний інтервал — {median_gap} дн."
         )
 
     if intent in {"spend_summary_short", "spend_insights_three", "spend_unusual_summary"}:
@@ -759,42 +821,86 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return _with_cov(f"{prefix}: явних незвичних патернів не бачу.")
 
     if intent == "compare_to_previous_period":
-        category_name = (
-            spec.category
-            if spec is not None
-            else str(intent_payload.get("category") or "").strip() or None
+        current_value = (
+            _count_current(canonical_filtered)
+            if canonical_metric == "count"
+            else _sum_current(canonical_filtered)
         )
+        _, previous_value = _previous_value()
 
-        current_total_cents = engine.sum_cents(filtered, filter_intent)
-        prev_from_ts, prev_total_cents = _sum_previous_period_filtered(
-            tx_store,
-            telegram_user_id,
-            account_ids,
-            current_from_ts=ts_from,
-            current_to_ts=ts_to,
-            filter_intent=filter_intent,
-            category=category_name,
-            merchant_filter=merchant_filter,
-            recipient_match=recipient_match,
-            merchant_exact=bool(intent_payload.get("merchant_exact")),
-        )
+        delta_value = int(current_value - previous_value)
+        sign = "+" if delta_value >= 0 else ""
 
-        delta_cents = int(current_total_cents - prev_total_cents)
-        sign = "+" if delta_cents >= 0 else ""
-
-        if current_total_cents > prev_total_cents:
+        if current_value > previous_value:
             verdict = "більші"
-        elif current_total_cents < prev_total_cents:
+        elif current_value < previous_value:
             verdict = "менші"
         else:
             verdict = "такі самі"
 
+        if canonical_metric == "count":
+            return _with_cov(
+                f"{prefix}: {current_value} операцій. "
+                f"За попередній такий самий період: {previous_value}. "
+                f"Різниця: {sign}{delta_value}. "
+                f"Висновок: подій {verdict}."
+            )
+
         return _with_cov(
-            f"{prefix}: {format_money_grn(current_total_cents / 100)}. "
-            f"За попередній такий самий період: {format_money_grn(prev_total_cents / 100)}. "
-            f"Різниця: {sign}{format_decimal_2(delta_cents / 100)} грн. "
+            f"{prefix}: {format_money_grn(current_value / 100)}. "
+            f"За попередній такий самий період: {format_money_grn(previous_value / 100)}. "
+            f"Різниця: {sign}{format_decimal_2(delta_value / 100)} грн. "
             f"Висновок: витрати {verdict}."
         )
+
+    if intent == "between_entities":
+        if spec is None or spec.compare_mode != "between_entities":
+            return templates.nlq_unsupported_message()
+
+        comparisons = engine.compare_entities(rows, spec=spec)
+        comparisons = [item for item in comparisons if item.label.strip()]
+        if len(comparisons) < 2:
+            return _with_cov(f"{prefix}: не вистачає даних для порівняння.")
+
+        left = comparisons[0]
+        right = comparisons[1]
+
+        if spec.compare_metric == "count":
+            left_value = left.count
+            right_value = right.count
+            unit = "операцій"
+            delta_text = str(left_value - right_value)
+            value_text = (
+                f"{left.label}: {left_value} {unit}; {right.label}: {right_value} {unit}. "
+                f"Різниця: {delta_text}."
+            )
+        elif spec.compare_metric == "avg_ticket":
+            left_value = left.avg_ticket_cents
+            right_value = right.avg_ticket_cents
+            delta_text = format_decimal_2((left_value - right_value) / 100)
+            value_text = (
+                f"{left.label}: середній чек {format_money_grn(left_value / 100)}; "
+                f"{right.label}: середній чек {format_money_grn(right_value / 100)}. "
+                f"Різниця: {delta_text} грн."
+            )
+        else:
+            left_value = left.total_cents
+            right_value = right.total_cents
+            delta_text = format_decimal_2((left_value - right_value) / 100)
+            value_text = (
+                f"{left.label}: {format_money_grn(left_value / 100)}; "
+                f"{right.label}: {format_money_grn(right_value / 100)}. "
+                f"Різниця: {delta_text} грн."
+            )
+
+        if left_value > right_value:
+            verdict = f"Більше припало на {left.label}."
+        elif left_value < right_value:
+            verdict = f"Більше припало на {right.label}."
+        else:
+            verdict = "Показники однакові."
+
+        return _with_cov(f"{prefix}: {value_text} {verdict}")
 
     if intent == "top_merchants":
         top_n_raw = intent_payload.get("top_n")
@@ -932,22 +1038,13 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             return _with_cov(f"{prefix}: витрат не знайшов.")
 
         if top_n == 1:
-            first = table.lines[0]
-            if ". " in first:
-                first = first.split(". ", 1)[1]
-            return _with_cov(f"{prefix}: найбільша категорія — {first}")
+            first_line = str(table.lines[0] or "").strip()
+            first_line = re.sub(r"^\s*1\.\s*", "", first_line)
+            return _with_cov(f"{prefix}: найбільша категорія — {first_line}")
 
         return _with_cov(f"{prefix}:\n{table.title}:\n" + "\n".join(table.lines))
 
-    if intent == "category_share":
-        category_name = (
-            spec.category
-            if spec is not None
-            else str(intent_payload.get("category") or "").strip() or None
-        )
-        if not category_name:
-            return templates.nlq_unsupported_message()
-
+    if intent in {"category_share", "merchant_share"}:
         spend_rows = engine.filter_rows(
             rows,
             QueryFilter(
@@ -957,29 +1054,71 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 recipient_contains=None,
             ),
         )
-        category_rows = engine.filter_rows(
+
+        if intent == "category_share":
+            category_name = (
+                spec.category
+                if spec is not None
+                else str(intent_payload.get("category") or "").strip() or None
+            )
+            if not category_name:
+                return templates.nlq_unsupported_message()
+
+            matched_rows = engine.filter_rows(
+                rows,
+                QueryFilter(
+                    intent="spend_sum",
+                    category=category_name,
+                    merchant_contains=[],
+                    recipient_contains=None,
+                ),
+            )
+            numerator_cents = engine.sum_for_kind(matched_rows, "spend")
+            share = engine.share_percent(
+                numerator_rows=matched_rows,
+                denominator_rows=spend_rows,
+                kind="spend",
+            )
+            return _with_cov(
+                f"{prefix}: {category_name} — {format_money_grn(numerator_cents / 100)}, це {format_decimal_2(share)}% від усіх витрат."
+            )
+
+        merchant_label = (
+            spec.merchant_contains
+            if spec is not None
+            else str(intent_payload.get("merchant_contains") or "").strip()
+        )
+        if not merchant_label:
+            return templates.nlq_unsupported_message()
+
+        matched_rows = engine.filter_rows(
             rows,
             QueryFilter(
                 intent="spend_sum",
-                category=category_name,
-                merchant_contains=[],
+                category=None,
+                merchant_contains=merchant_filter,
                 recipient_contains=None,
             ),
         )
+        if bool(intent_payload.get("merchant_exact")) and merchant_filter:
+            matched_rows = _apply_exact_merchant_filter(matched_rows, merchant_filter)
 
-        total_cents = engine.sum_cents(spend_rows, "spend_sum") if spend_rows else 0
-        category_cents = engine.sum_cents(category_rows, "spend_sum") if category_rows else 0
-
-        if total_cents <= 0:
-            return _with_cov(f"{prefix}: витрат не знайшов.")
-
-        share = (category_cents / total_cents) * 100.0
+        numerator_cents = engine.sum_for_kind(matched_rows, "spend")
+        share = engine.share_percent(
+            numerator_rows=matched_rows,
+            denominator_rows=spend_rows,
+            kind="spend",
+        )
         return _with_cov(
-            f"{prefix}: {category_name} — {format_money_grn(category_cents / 100)}, це {format_decimal_2(share)}% від усіх витрат."
+            f"{prefix}: {merchant_label} — {format_money_grn(numerator_cents / 100)}, це {format_decimal_2(share)}% від усіх витрат."
         )
 
     if intent == "spend_sum":
-        spend_basis = str(intent_payload.get("spend_basis") or "gross").strip().lower()
+        spend_basis = (
+            spec.spend_basis
+            if spec is not None
+            else str(intent_payload.get("spend_basis") or "gross").strip().lower()
+        )
         use_real_spend = (
             spend_basis == "real"
             and not merchant_filter
@@ -994,7 +1133,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             total_uah = float(totals.get("real_spend_total_uah") or 0.0)
             return _with_cov(templates.nlq_spend_sum_line(prefix, format_money_grn(total_uah)))
 
-        total_cents = engine.sum_cents(filtered, intent)
+        total_cents = _sum_current(canonical_filtered)
         parts: list[str] = [
             templates.nlq_spend_sum_line(prefix, format_money_grn(total_cents / 100))
         ]
@@ -1032,31 +1171,37 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return _with_cov("\n".join(parts))
 
     if intent == "spend_count":
-        return _with_cov(templates.nlq_spend_count_line(prefix, len(filtered)))
+        return _with_cov(templates.nlq_spend_count_line(prefix, _count_current(canonical_filtered)))
 
     if intent == "income_sum":
-        total_cents = engine.sum_cents(filtered, intent)
+        total_cents = _sum_current(canonical_filtered)
         return _with_cov(templates.nlq_income_sum_line(prefix, format_money_grn(total_cents / 100)))
 
     if intent == "income_count":
-        return _with_cov(templates.nlq_income_count_line(prefix, len(filtered)))
+        return _with_cov(
+            templates.nlq_income_count_line(prefix, _count_current(canonical_filtered))
+        )
 
     if intent == "transfer_out_sum":
-        total_cents = engine.sum_cents(filtered, intent)
+        total_cents = _sum_current(canonical_filtered)
         return _with_cov(
             templates.nlq_transfer_out_sum_line(prefix, format_money_grn(total_cents / 100))
         )
 
     if intent == "transfer_out_count":
-        return _with_cov(templates.nlq_transfer_out_count_line(prefix, len(filtered)))
+        return _with_cov(
+            templates.nlq_transfer_out_count_line(prefix, _count_current(canonical_filtered))
+        )
 
     if intent == "transfer_in_sum":
-        total_cents = engine.sum_cents(filtered, intent)
+        total_cents = _sum_current(canonical_filtered)
         return _with_cov(
             templates.nlq_transfer_in_sum_line(prefix, format_money_grn(total_cents / 100))
         )
 
     if intent == "transfer_in_count":
-        return _with_cov(templates.nlq_transfer_in_count_line(prefix, len(filtered)))
+        return _with_cov(
+            templates.nlq_transfer_in_count_line(prefix, _count_current(canonical_filtered))
+        )
 
-    return templates.nlq_not_implemented_yet()
+    return templates.nlq_unsupported_message()
