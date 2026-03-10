@@ -191,3 +191,24 @@ def test_pending_clarify_is_abandoned_when_user_asks_new_full_question(tmp_path,
 
     mem = ms.load_memory(1)
     assert mem.get("pending_kind") is None
+
+
+def test_recipient_exact_text_followup_uses_same_pending_contract(tmp_path, monkeypatch):
+    _patch_stores(monkeypatch, tmp_path)
+
+    ms.set_pending_intent(
+        1,
+        payload={"intent": "transfer_out_sum", "days": 30, "recipient_alias": "дівчині"},
+        kind="recipient",
+        options=["Anna K.", "Kate S."],
+    )
+
+    resp = handle_nlq(NLQRequest(telegram_user_id=1, text="Anna K.", now_ts=2000))
+    assert resp.result is not None
+    assert "грн" in resp.result.text or "переказ" in resp.result.text.lower()
+
+    mem = ms.load_memory(1)
+    ra = mem.get("recipient_aliases")
+    assert isinstance(ra, dict)
+    assert ra.get("дівчині") == "anna k."
+    assert mem.get("pending_kind") is None

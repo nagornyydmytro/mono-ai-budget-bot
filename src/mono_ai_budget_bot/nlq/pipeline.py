@@ -10,14 +10,15 @@ from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.llm.tooling import execute_tool_call
 from mono_ai_budget_bot.nlq.executor import execute_intent
 from mono_ai_budget_bot.nlq.memory_store import (
+    get_pending_contract,
     get_pending_manual_mode,
     load_memory,
-    pending_is_alive,
     pop_pending_action,
     pop_pending_manual_mode,
     save_category_alias,
     save_memory,
     save_recipient_alias,
+    update_pending_options,
 )
 from mono_ai_budget_bot.nlq.models import (
     AnswerStrategy,
@@ -1025,15 +1026,17 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
     manual_mode = get_pending_manual_mode(req.telegram_user_id, now_ts=req.now_ts)
     if manual_mode is not None:
         expected = str(manual_mode.get("expected") or "").strip() or "merchant_or_recipient"
-        pending = mem.get("pending_intent")
-        pending_options = mem.get("pending_options")
-        options: list[str] | None
-        if isinstance(pending_options, list):
-            options = [x.strip() for x in pending_options if isinstance(x, str) and x.strip()]
-            if not options:
-                options = None
-        else:
-            options = None
+        contract = get_pending_contract(req.telegram_user_id, now_ts=req.now_ts)
+        pending = (
+            contract.get("original_query_spec")
+            if isinstance(contract, dict) and isinstance(contract.get("original_query_spec"), dict)
+            else None
+        )
+        options = (
+            contract.get("options")
+            if isinstance(contract, dict) and isinstance(contract.get("options"), list)
+            else None
+        )
 
         rows = _load_validation_rows(req.telegram_user_id, req.now_ts)
         selected, suggested, err = _manual_entry_try_resolve(
@@ -1054,8 +1057,7 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
             mem = load_memory(req.telegram_user_id)
         else:
             if suggested:
-                mem["pending_options"] = list(suggested)
-                save_memory(req.telegram_user_id, mem)
+                update_pending_options(req.telegram_user_id, list(suggested))
                 lines = [
                     (err or "Не знайшов відповідність."),
                     "Вибери номер або введи точну назву як у виписці:",
@@ -1069,24 +1071,18 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 clarification=None,
             )
 
-    pending = mem.get("pending_intent")
-    pending_options = mem.get("pending_options")
-
-    options: list[str] | None
-    if isinstance(pending_options, list):
-        options = [x.strip() for x in pending_options if isinstance(x, str) and x.strip()]
-        if not options:
-            options = None
-    else:
-        options = None
-
-    if pending and not pending_is_alive(mem, now_ts=req.now_ts):
-        pop_pending_action(req.telegram_user_id)
-        pending = None
-        options = None
-        mem = load_memory(req.telegram_user_id)
-
-    pending_kind = mem.get("pending_kind")
+    contract = get_pending_contract(req.telegram_user_id, now_ts=req.now_ts)
+    pending = (
+        contract.get("original_query_spec")
+        if isinstance(contract, dict) and isinstance(contract.get("original_query_spec"), dict)
+        else None
+    )
+    options = (
+        contract.get("options")
+        if isinstance(contract, dict) and isinstance(contract.get("options"), list)
+        else None
+    )
+    pending_kind = contract.get("kind") if isinstance(contract, dict) else None
 
     if isinstance(pending, dict):
         if _looks_like_new_nlq_question(req.text, options):
@@ -1179,8 +1175,7 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                     return NLQResponse(result=NLQResult(text=text), clarification=None)
 
                 if suggested:
-                    mem["pending_options"] = list(suggested)
-                    save_memory(req.telegram_user_id, mem)
+                    update_pending_options(req.telegram_user_id, list(suggested))
                     lines = [
                         (err or "Не знайшов відповідність."),
                         "Вибери номер або введи точне ім'я як у виписці:",

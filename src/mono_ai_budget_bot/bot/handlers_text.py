@@ -109,8 +109,8 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
         if not await validate_ok_or_alert(query, ok):
             return
 
-        mem = memory_store.load_memory(tg_id)
-        kind = mem.get("pending_kind") if isinstance(mem.get("pending_kind"), str) else None
+        contract = memory_store.get_pending_contract(tg_id, now_ts=now_ts)
+        kind = contract.get("kind") if isinstance(contract, dict) else None
         expected, hint = _nlq_other_manual_mode(kind)
 
         memory_store.set_pending_manual_mode(
@@ -487,11 +487,11 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                     if kb is not None:
                         await message.answer(resp.result.text, reply_markup=kb)
                         return
-                kind = mem.get("pending_kind")
-                opts = mem.get("pending_options")
-                pending_id = (
-                    mem.get("pending_id") if isinstance(mem.get("pending_id"), str) else None
-                )
+
+                contract = memory_store.get_pending_contract(user_id, now_ts=now_ts)
+                kind = contract.get("kind") if isinstance(contract, dict) else None
+                opts = contract.get("options") if isinstance(contract, dict) else None
+                pending_id = contract.get("id") if isinstance(contract, dict) else None
 
                 if _is_standard_nlq_clarify_kind(kind) and isinstance(opts, list) and opts:
                     kb = build_nlq_clarify_keyboard(

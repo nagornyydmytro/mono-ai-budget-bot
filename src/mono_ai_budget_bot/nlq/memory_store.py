@@ -41,6 +41,48 @@ DEFAULT_MERCHANT_ALIASES = {
 DEFAULT_CATEGORY_ALIASES: dict[str, list[str]] = {}
 
 
+def _normalize_pending_options(options: list[str] | None) -> list[str] | None:
+    if not isinstance(options, list):
+        return None
+    out: list[str] = []
+    for x in options:
+        if isinstance(x, str) and x.strip():
+            out.append(x.strip())
+    return out or None
+
+
+def _pending_entity_type(kind: str | None) -> str | None:
+    k = str(kind or "").strip()
+    if k in {"recipient", "merchant", "category"}:
+        return k
+    if k in {"alias", "category_alias"}:
+        return "alias"
+    if k == "paging":
+        return "paging"
+    if k == "coverage_cta":
+        return "action"
+    return None
+
+
+def _build_pending_snapshot(
+    *,
+    pending_id: str,
+    ttl_sec: int,
+    kind: str | None,
+    options: list[str] | None,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "id": pending_id,
+        "ttl_sec": int(ttl_sec),
+        "one_time_use": True,
+        "options": list(options) if isinstance(options, list) else None,
+        "entity_type": _pending_entity_type(kind),
+        "kind": kind,
+        "original_query_spec": dict(payload) if isinstance(payload, dict) else None,
+    }
+
+
 def _default_memory() -> dict[str, Any]:
     return {
         "merchant_aliases": dict(DEFAULT_MERCHANT_ALIASES),
@@ -261,13 +303,23 @@ def set_pending_intent(
     options: list[str] | None = None,
 ) -> None:
     mem = load_memory(telegram_user_id)
-    mem["pending_intent"] = payload
+    normalized_options = _normalize_pending_options(options)
+    pid = secrets.token_hex(8)
+    ttl_sec = 600
+
+    mem["pending_intent"] = dict(payload) if isinstance(payload, dict) else None
     mem["pending_kind"] = kind
-    mem["pending_options"] = options
-    mem["pending_id"] = secrets.token_hex(8)
+    mem["pending_options"] = normalized_options
+    mem["pending_id"] = pid
     mem["pending_created_ts"] = int(time.time())
-    mem["pending_ttl_sec"] = 600
-    mem["pending_snapshot"] = {"options": options, "kind": kind}
+    mem["pending_ttl_sec"] = ttl_sec
+    mem["pending_snapshot"] = _build_pending_snapshot(
+        pending_id=pid,
+        ttl_sec=ttl_sec,
+        kind=kind,
+        options=normalized_options,
+        payload=(payload if isinstance(payload, dict) else None),
+    )
     mem["pending_manual_mode"] = None
     save_memory(telegram_user_id, mem)
 
@@ -278,20 +330,77 @@ def pop_pending_intent(telegram_user_id: int) -> dict[str, Any] | None:
     mem["pending_intent"] = None
     mem["pending_kind"] = None
     mem["pending_options"] = None
+    mem["pending_id"] = None
+    mem["pending_created_ts"] = None
+    mem["pending_ttl_sec"] = None
+    mem["pending_snapshot"] = None
+    mem["pending_manual_mode"] = None
     save_memory(telegram_user_id, mem)
     return p if isinstance(p, dict) else None
 
 
 def get_pending_options(telegram_user_id: int) -> list[str] | None:
     mem = load_memory(telegram_user_id)
-    opts = mem.get("pending_options")
-    if not isinstance(opts, list):
+    return _normalize_pending_options(mem.get("pending_options"))
+
+
+def update_pending_options(telegram_user_id: int, options: list[str] | None) -> None:
+    mem = load_memory(telegram_user_id)
+    normalized_options = _normalize_pending_options(options)
+    mem["pending_options"] = normalized_options
+
+    snapshot = mem.get("pending_snapshot")
+    if isinstance(snapshot, dict):
+        snapshot["options"] = list(normalized_options) if normalized_options is not None else None
+        mem["pending_snapshot"] = snapshot
+
+    save_memory(telegram_user_id, mem)
+
+
+def get_pending_contract(
+    telegram_user_id: int,
+    *,
+    now_ts: int,
+) -> dict[str, Any] | None:
+    mem = load_memory(telegram_user_id)
+    if not pending_is_alive(mem, now_ts=int(now_ts)):
+        pop_pending_action(telegram_user_id)
         return None
-    out: list[str] = []
-    for x in opts:
-        if isinstance(x, str) and x.strip():
-            out.append(x.strip())
-    return out or None
+
+    pending = mem.get("pending_intent")
+    if not isinstance(pending, dict):
+        return None
+
+    kind = mem.get("pending_kind") if isinstance(mem.get("pending_kind"), str) else None
+    pid = mem.get("pending_id") if isinstance(mem.get("pending_id"), str) else None
+    ttl_sec = mem.get("pending_ttl_sec")
+    try:
+        ttl_i = int(ttl_sec)
+    except Exception:
+        ttl_i = 600
+
+    options = _normalize_pending_options(mem.get("pending_options"))
+    snapshot = mem.get("pending_snapshot")
+    if not isinstance(snapshot, dict):
+        snapshot = _build_pending_snapshot(
+            pending_id=(pid or ""),
+            ttl_sec=ttl_i,
+            kind=kind,
+            options=options,
+            payload=pending,
+        )
+        mem["pending_snapshot"] = snapshot
+        save_memory(telegram_user_id, mem)
+
+    snapshot["id"] = pid
+    snapshot["ttl_sec"] = ttl_i
+    snapshot["one_time_use"] = True
+    snapshot["options"] = list(options) if options is not None else None
+    snapshot["entity_type"] = _pending_entity_type(kind)
+    snapshot["kind"] = kind
+    snapshot["original_query_spec"] = dict(pending)
+
+    return snapshot
 
 
 def get_pending_id(telegram_user_id: int) -> str | None:
