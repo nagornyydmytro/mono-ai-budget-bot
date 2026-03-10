@@ -100,6 +100,12 @@ class ParsedConversion:
     to_alpha: str
 
 
+@dataclass(frozen=True)
+class ParsedRateQuery:
+    base_alpha: str
+    quote_alpha: str
+
+
 def alpha_to_numeric(alpha: str) -> int | None:
     a = (alpha or "").strip().upper()
     return _ALPHA_TO_NUM.get(a)
@@ -127,6 +133,37 @@ def _alpha_from_token(tok: str) -> str | None:
         return s.upper()
 
     return None
+
+
+def parse_currency_rate_query(text: str) -> ParsedRateQuery | None:
+    t = (text or "").strip()
+    if not t:
+        return None
+
+    s = t.lower()
+    if re.search(r"\b(курс|rate|exchange\s+rate)\b", s, re.IGNORECASE) is None:
+        return None
+    if _AMOUNT_RE.search(t) is not None:
+        return None
+
+    quote_alpha = "UAH"
+    if re.search(r"\b(до|в|у|to|in)\b", s, re.IGNORECASE):
+        parts = re.split(r"\b(?:до|в|у|to|in)\b", t, maxsplit=1, flags=re.IGNORECASE)
+        if len(parts) == 2:
+            maybe_quote = _alpha_from_token(parts[1])
+            if maybe_quote is not None:
+                quote_alpha = maybe_quote
+
+    base_alpha: str | None = None
+    for token in re.split(r"[\s:/,;!?()\-\u2013\u2014]+", t):
+        base_alpha = _alpha_from_token(token)
+        if base_alpha is not None and base_alpha != quote_alpha:
+            break
+
+    if base_alpha is None:
+        return None
+
+    return ParsedRateQuery(base_alpha=base_alpha, quote_alpha=quote_alpha)
 
 
 def parse_currency_conversion_query(text: str) -> ParsedConversion | None:

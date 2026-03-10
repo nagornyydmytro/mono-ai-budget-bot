@@ -104,6 +104,6 @@ def canonical_intent_family(intent_name: str | None) -> IntentFamily:
         return "explanation"
     if name == "what_if":
         return "simulation"
-    if name == "currency_convert":
+    if name in {"currency_convert", "currency_rate"}:
         return "conversion"
     return "unknown"

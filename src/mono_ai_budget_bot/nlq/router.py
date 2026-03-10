@@ -4,7 +4,7 @@ import re
 import time
 from typing import Any
 
-from mono_ai_budget_bot.currency import parse_currency_conversion_query
+from mono_ai_budget_bot.currency import parse_currency_conversion_query, parse_currency_rate_query
 from mono_ai_budget_bot.nlq.models import QueryIntent, Slots, canonical_intent_family
 from mono_ai_budget_bot.nlq.slot_extractor import extract_slots
 from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
@@ -402,6 +402,14 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "amount": conv.amount,
             "from": conv.from_alpha,
             "to": conv.to_alpha,
+        }
+
+    rate_q = parse_currency_rate_query(text)
+    if rate_q is not None:
+        return {
+            "intent": "currency_rate",
+            "from": rate_q.base_alpha,
+            "to": rate_q.quote_alpha,
         }
 
     extracted = extract_slots(text, now_ts).slots

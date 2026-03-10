@@ -30,6 +30,7 @@ IntentName = Literal[
     "recurrence_summary",
     "what_if",
     "currency_convert",
+    "currency_rate",
 ]
 
 FactsScope = Literal[

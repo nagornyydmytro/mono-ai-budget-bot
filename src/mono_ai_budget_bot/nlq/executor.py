@@ -174,15 +174,7 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     if intent == "unsupported":
         return templates.nlq_unsupported_message()
 
-    if intent == "currency_convert":
-        amount = intent_payload.get("amount")
-        try:
-            amt = float(amount)
-        except Exception:
-            return templates.nlq_currency_missing_amount()
-        if amt <= 0:
-            return templates.nlq_currency_amount_nonpositive()
-
+    if intent in {"currency_convert", "currency_rate"}:
         from_alpha = str(intent_payload.get("from") or "").strip().upper()
         to_alpha = str(intent_payload.get("to") or "").strip().upper()
         if not from_alpha or not to_alpha:
@@ -206,6 +198,20 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                     pub.close()
             except Exception:
                 pass
+
+        if intent == "currency_rate":
+            out = convert_amount(1.0, from_num=from_num, to_num=to_num, rates=rates)
+            if out is None:
+                return templates.nlq_currency_pair_missing(from_alpha, to_alpha)
+            return f"1 {from_alpha} ≈ {format_decimal_2(out)} {to_alpha}"
+
+        amount = intent_payload.get("amount")
+        try:
+            amt = float(amount)
+        except Exception:
+            return templates.nlq_currency_missing_amount()
+        if amt <= 0:
+            return templates.nlq_currency_amount_nonpositive()
 
         out = convert_amount(amt, from_num=from_num, to_num=to_num, rates=rates)
         if out is None:

@@ -2,6 +2,7 @@ from mono_ai_budget_bot.currency.convert import (
     alpha_to_numeric,
     convert_amount,
     parse_currency_conversion_query,
+    parse_currency_rate_query,
 )
 from mono_ai_budget_bot.currency.models import MonoCurrencyRate
 from mono_ai_budget_bot.nlq.router import parse_nlq_intent
@@ -247,3 +248,64 @@ def test_executor_currency_convert_missing_currency_has_guided_message():
     )
     assert "Не бачу валюту" in msg
     assert "$100 в грн" in msg
+
+
+def test_parse_currency_conversion_query_supports_spelled_out_amount_query():
+    c = parse_currency_conversion_query("скільки буде 100 доларів у гривнях")
+    assert c is not None
+    assert c.amount == 100.0
+    assert c.from_alpha == "USD"
+    assert c.to_alpha == "UAH"
+
+
+def test_parse_currency_rate_query_variants():
+    q1 = parse_currency_rate_query("який зараз курс долара")
+    assert q1 is not None
+    assert q1.base_alpha == "USD"
+    assert q1.quote_alpha == "UAH"
+
+    q2 = parse_currency_rate_query("курс євро в доларах")
+    assert q2 is not None
+    assert q2.base_alpha == "EUR"
+    assert q2.quote_alpha == "USD"
+
+
+def test_router_detects_currency_rate_intent():
+    out = parse_nlq_intent("який зараз курс долара")
+    assert out["intent"] == "currency_rate"
+    assert out["from"] == "USD"
+    assert out["to"] == "UAH"
+
+
+def test_executor_currency_rate_success(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    class DummyPublicClient:
+        def currency(self, *args, **kwargs):
+            return _rates()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(ex, "MonobankPublicClient", DummyPublicClient)
+
+    msg = ex.execute_intent(
+        telegram_user_id=1,
+        intent_payload={"intent": "currency_rate", "from": "USD", "to": "UAH"},
+    )
+    assert "1 USD" in msg
+    assert "UAH" in msg
+    assert "40.00" in msg
+
+
+def test_currency_explain_question_goes_to_safe_llm():
+    import mono_ai_budget_bot.nlq.pipeline as pl
+    from mono_ai_budget_bot.nlq.types import NLQRequest
+
+    req = NLQRequest(
+        telegram_user_id=1,
+        text="що вигідніше зараз: тримати в usd чи eur",
+        now_ts=1000,
+    )
+
+    assert pl._select_answer_policy(req, None) == "safe_llm"

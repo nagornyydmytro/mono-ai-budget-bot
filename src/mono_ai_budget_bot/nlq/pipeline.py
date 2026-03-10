@@ -255,6 +255,7 @@ _ALLOWED_PLANNER_INTENTS = {
     "recurrence_summary",
     "what_if",
     "currency_convert",
+    "currency_rate",
 }
 
 
@@ -374,7 +375,7 @@ def _facts_scope_from_intent(intent_name: str | None) -> str:
         return "explanation"
     if name == "what_if":
         return "simulation"
-    if name == "currency_convert":
+    if name in {"currency_convert", "currency_rate"}:
         return "conversion"
     return "unknown"
 
