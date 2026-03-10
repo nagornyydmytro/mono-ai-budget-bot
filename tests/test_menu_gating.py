@@ -379,8 +379,9 @@ def test_refresh_latest_from_guided_gating_runs_even_if_onboarding_not_completed
     refresh_query = DummyCallbackQuery(user_id=1, data="menu:data:refresh", message=message)
     asyncio.run(cb_data_refresh(refresh_query))
 
-    assert len(message.answers) == 2
+    assert len(message.answers) == 3
     assert message.answers[1][0] == templates.ledger_refresh_progress_message()
+    assert message.answers[2][0] == templates.refresh_done_message(0, 0, 0)
     assert refresh_query.answer_calls[-1] == (None, False, None)
     assert sync_calls == [(1, 30)]
 
@@ -469,7 +470,6 @@ def test_menu_insights_opens_canonical_submenu(tmp_path: Path):
         [("📈 Trends", "menu:insights:trends")],
         [("🚨 Anomalies", "menu:insights:anomalies")],
         [("🧮 What-if", "menu:insights:whatif")],
-        [("🔮 Forecast", "menu:insights:forecast")],
         [("🧠 Explain", "menu:insights:explain")],
         [("⬅️ Назад", "menu:root")],
     ]
@@ -778,11 +778,13 @@ def test_menu_insight_forecast_opens_button_first_submenu(tmp_path: Path):
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert text == templates.menu_insights_forecast_message()
+    assert text == templates.menu_insights_message()
     assert _kb_dump(kb) == [
-        [("💸 Real spend projection", "menu:insights:forecast:view:spend")],
-        [("💰 Income projection", "menu:insights:forecast:view:income")],
-        [("⬅️ Назад", "menu:insights")],
+        [("📈 Trends", "menu:insights:trends")],
+        [("🚨 Anomalies", "menu:insights:anomalies")],
+        [("🧮 What-if", "menu:insights:whatif")],
+        [("🧠 Explain", "menu:insights:explain")],
+        [("⬅️ Назад", "menu:root")],
     ]
     assert query.answer_calls[-1] == (None, False, None)
 
@@ -955,12 +957,14 @@ def test_menu_insight_forecast_variant_renders_deterministic_projection(tmp_path
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
-    assert "🔮 *Forecast*" in text
-    assert "Детермінована проєкція витрат" in text
-    assert "Forecast (deterministic projection)" in text
-    assert "456.00 ₴" in text
-    assert "не prediction magic" in text
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:insights:forecast")]]
+    assert text == templates.menu_insights_message()
+    assert _kb_dump(kb) == [
+        [("📈 Trends", "menu:insights:trends")],
+        [("🚨 Anomalies", "menu:insights:anomalies")],
+        [("🧮 What-if", "menu:insights:whatif")],
+        [("🧠 Explain", "menu:insights:explain")],
+        [("⬅️ Назад", "menu:root")],
+    ]
     assert query.answer_calls[-1] == (None, False, None)
 
 
@@ -1218,6 +1222,15 @@ def test_menu_reports_custom_opens_mode_picker(monkeypatch, tmp_path: Path):
 def test_menu_reports_custom_ai_starts_manual_flow(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
 
+    import mono_ai_budget_bot.bot.handlers_reports as handlers_reports
+
+    class _FixedDate(handlers_reports.date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 3, 9)
+
+    monkeypatch.setattr(handlers_reports, "date", _FixedDate)
+
     tx_store = TxStore(tmp_path / "tx")
     tx_store.update_coverage_window(
         1,
@@ -1254,19 +1267,38 @@ def test_menu_reports_custom_ai_starts_manual_flow(monkeypatch, tmp_path: Path):
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
+    kb_dump = _kb_dump(kb)
+
     assert text == templates.menu_reports_custom_start_prompt()
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:reports")]]
+    assert kb_dump[0] == [
+        ("◀️", "menu:reports:custom:cal:nav:start:2026:3:-1"),
+        ("березень 2026", "menu:reports:custom:cal:noop"),
+        ("▶️", "menu:reports:custom:cal:nav:start:2026:3:1"),
+    ]
+    assert kb_dump[-1] == [("⬅️ Назад", "menu:reports")]
     assert mem["pending_manual_mode"] == {
         "expected": "report_custom_start",
         "hint": "YYYY-MM-DD",
         "source": "reports_custom",
     }
-    assert mem["reports_custom"] == {"want_ai": True}
+    assert mem["reports_custom"] == {
+        "want_ai": True,
+        "calendar": {"step": "start", "year": 2026, "month": 3},
+    }
     assert query.answer_calls[-1] == (None, False, None)
 
 
 def test_menu_reports_custom_det_starts_manual_flow(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(ms, "BASE_DIR", tmp_path / "memory")
+
+    import mono_ai_budget_bot.bot.handlers_reports as handlers_reports
+
+    class _FixedDate(handlers_reports.date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 3, 9)
+
+    monkeypatch.setattr(handlers_reports, "date", _FixedDate)
 
     tx_store = TxStore(tmp_path / "tx")
     tx_store.update_coverage_window(
@@ -1304,14 +1336,24 @@ def test_menu_reports_custom_det_starts_manual_flow(monkeypatch, tmp_path: Path)
 
     assert len(message.answers) == 1
     text, kb = message.answers[0]
+    kb_dump = _kb_dump(kb)
+
     assert text == templates.menu_reports_custom_start_prompt()
-    assert _kb_dump(kb) == [[("⬅️ Назад", "menu:reports")]]
+    assert kb_dump[0] == [
+        ("◀️", "menu:reports:custom:cal:nav:start:2026:3:-1"),
+        ("березень 2026", "menu:reports:custom:cal:noop"),
+        ("▶️", "menu:reports:custom:cal:nav:start:2026:3:1"),
+    ]
+    assert kb_dump[-1] == [("⬅️ Назад", "menu:reports")]
     assert mem["pending_manual_mode"] == {
         "expected": "report_custom_start",
         "hint": "YYYY-MM-DD",
         "source": "reports_custom",
     }
-    assert mem["reports_custom"] == {"want_ai": False}
+    assert mem["reports_custom"] == {
+        "want_ai": False,
+        "calendar": {"step": "start", "year": 2026, "month": 3},
+    }
     assert query.answer_calls[-1] == (None, False, None)
 
 

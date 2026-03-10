@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
@@ -160,6 +161,143 @@ def _parse_llm_json_strict(raw: str, model: type[BaseModel]) -> BaseModel:
     return model.model_validate(data)
 
 
+def _is_scalar(value: Any) -> bool:
+    return isinstance(value, (str, int, float, bool))
+
+
+def _scalar_to_text(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value).strip()
+
+
+def _report_item_to_text(item: Any, *, key_hint: str | None = None) -> str:
+    if _is_scalar(item):
+        text = _scalar_to_text(item)
+        if key_hint and text:
+            return f"{key_hint}: {text}"
+        return text
+
+    if isinstance(item, dict):
+        label = ""
+        for field in (
+            "text",
+            "summary",
+            "title",
+            "label",
+            "name",
+            "message",
+            "body",
+            "description",
+        ):
+            value = item.get(field)
+            if _is_scalar(value) and _scalar_to_text(value):
+                label = _scalar_to_text(value)
+                break
+
+        parts: list[str] = []
+        for key, value in item.items():
+            if key in {
+                "text",
+                "summary",
+                "title",
+                "label",
+                "name",
+                "message",
+                "body",
+                "description",
+            }:
+                continue
+            if _is_scalar(value):
+                text = _scalar_to_text(value)
+                if text:
+                    parts.append(f"{key}={text}")
+            elif isinstance(value, dict):
+                nested_parts: list[str] = []
+                for nested_key, nested_value in value.items():
+                    if _is_scalar(nested_value):
+                        nested_text = _scalar_to_text(nested_value)
+                        if nested_text:
+                            nested_parts.append(f"{nested_key}={nested_text}")
+                if nested_parts:
+                    parts.append(f"{key}: " + ", ".join(nested_parts))
+
+        prefix = label or (str(key_hint).strip() if key_hint else "")
+        if prefix and parts:
+            return f"{prefix}: " + "; ".join(parts)
+        if prefix:
+            return prefix
+        if parts:
+            return "; ".join(parts)
+        return ""
+
+    if isinstance(item, list):
+        parts = [_report_item_to_text(x) for x in item]
+        parts = [p for p in parts if p]
+        return "; ".join(parts)
+
+    text = str(item).strip()
+    if key_hint and text:
+        return f"{key_hint}: {text}"
+    return text
+
+
+def _normalize_report_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = [_report_item_to_text(item) for item in value]
+        return [item for item in items if item]
+    if isinstance(value, dict):
+        items = [_report_item_to_text(item, key_hint=str(key)) for key, item in value.items()]
+        return [item for item in items if item]
+    text = _report_item_to_text(value)
+    return [text] if text else []
+
+
+def _normalize_report_payload(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "summary": _report_item_to_text(data.get("summary")),
+        "changes": _normalize_report_list(data.get("changes")),
+        "recs": _normalize_report_list(data.get("recs")),
+        "next_step": _report_item_to_text(data.get("next_step")),
+    }
+
+
+_TECHNICAL_REPORT_RE = re.compile(
+    r"(?:\b[a-z][a-z0-9_]{2,}\s*=)|(?:\b(?:transactions_count|total_income|total_spend|real_spend|real_spend_total_uah|spend_total_uah|income_total_uah|transfer_in|transfer_out|pct_change|delta)\b)",
+    re.IGNORECASE,
+)
+
+
+def _looks_technical_report_text(text: str) -> bool:
+    s = str(text or "").strip()
+    if not s:
+        return False
+    return _TECHNICAL_REPORT_RE.search(s) is not None
+
+
+def _report_needs_repair(report: LLMReportV2) -> bool:
+    if _looks_technical_report_text(report.summary):
+        return True
+
+    technical_items = 0
+    total_items = 0
+
+    for item in [*report.changes, *report.recs]:
+        total_items += 1
+        if _looks_technical_report_text(item):
+            technical_items += 1
+
+    if report.recs and all(_looks_technical_report_text(x) for x in report.recs):
+        return True
+
+    if total_items >= 3 and technical_items >= 2:
+        return True
+
+    return False
+
+
 class OpenAIClient:
     def __init__(self, api_key: str, model: str = "gpt-4o-mini", timeout_s: float = 30.0):
         if not api_key:
@@ -192,10 +330,17 @@ class OpenAIClient:
         except Exception:
             return ""
 
-    def generate_report_v2(self, system: str, user: str, *, max_tokens: int = 700) -> LLMReportV2:
+    def _generate_report_v2_once(
+        self,
+        system: str,
+        user: str,
+        *,
+        max_tokens: int = 700,
+        temperature: float = 0.2,
+    ) -> LLMReportV2:
         payload = {
             "model": self.model,
-            "temperature": 0.2,
+            "temperature": temperature,
             "max_tokens": max_tokens,
             "messages": [
                 {"role": "system", "content": system},
@@ -206,8 +351,37 @@ class OpenAIClient:
         resp = self._post(payload)
         raw = self._extract_text(resp)
         data = _parse_llm_json(raw)
-        model = LLMReportV2.model_validate(data)
+        normalized = _normalize_report_payload(data)
+        model = LLMReportV2.model_validate(normalized)
         return model.clean()
+
+    def generate_report_v2(self, system: str, user: str, *, max_tokens: int = 700) -> LLMReportV2:
+        model = self._generate_report_v2_once(system, user, max_tokens=max_tokens, temperature=0.2)
+        if not _report_needs_repair(model):
+            return model
+
+        repair_system = (
+            "Ти редактор AI-блоку для персональної фінансової аналітики. "
+            "Перепиши невдалу чернетку у КОРИСНИЙ користувацький JSON. "
+            "Пиши українською, природно і коротко. "
+            "Не використовуй technical keys, snake_case, key=value, JSON-like fragments. "
+            "Не дублюй блок 'Факти' і не переписуй всі totals без нового висновку. "
+            "Додай лише нові інсайти: драйвери змін, нетипові патерни, концентрацію витрат, controllable actions. "
+            "Якщо великі transfer_in/transfer_out, чітко відрізняй 'всі списання' від 'реальних витрат'. "
+            "Якщо суттєва частина real spend є uncategorized, прямо скажи, що категорійна картина неповна. "
+            "Поверни тільки JSON з полями summary, changes, recs, next_step."
+        )
+        repair_user = (
+            f"Оригінальний system prompt:\n{system}\n\n"
+            f"Контекст і facts:\n{user}\n\n"
+            f"Невдала чернетка:\n{json.dumps(model.model_dump(), ensure_ascii=False)}"
+        )
+        return self._generate_report_v2_once(
+            repair_system,
+            repair_user,
+            max_tokens=max_tokens,
+            temperature=0.0,
+        )
 
     def plan_nlq(self, *, user_text: str, now_ts: int, max_tokens: int = 450) -> dict[str, Any]:
         system = (
@@ -279,6 +453,10 @@ class OpenAIClient:
             "Якщо фактів не вистачає або треба уточнення — поверни mode='clarify'. "
             "Якщо запит поза межами персональної фінансової аналітики — поверни mode='unsupported'. "
             "Поверни тільки JSON-об'єкт строго за схемою NLQInterpretationV1 без зайвих полів."
+            "Для open-ended personal finance questions ти можеш повернути route='narrative'. "
+            "Якщо question просить пояснення, інтерпретацію, pattern analysis або reasoning — "
+            "не редукуй це до count/sum. "
+            "answer має бути user-facing українською, коротко і змістовно."
         )
         user = (
             f"user_text={user_text}\n"

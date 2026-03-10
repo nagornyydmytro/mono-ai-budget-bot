@@ -7,9 +7,11 @@ from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
 
 from . import templates
 from .accounts_ui import render_accounts_screen
+from .errors import map_monobank_error
 from .handlers_common import HandlerContext
 from .menu_flow import render_menu_screen
 from .onboarding_flow import begin_manual_token_entry, open_accounts_picker, show_data_status
+from .report_flow_helpers import compute_and_cache_reports_for_user
 from .ui import (
     build_back_keyboard,
     build_bootstrap_history_keyboard,
@@ -81,9 +83,32 @@ def register_data_handlers(dp, *, ctx: HandlerContext, monobank_client_cls_facto
         if query.message:
             await query.message.answer(templates.ledger_refresh_progress_message())
 
-        import asyncio
+        async def _send_followup(text: str) -> None:
+            if query.message:
+                await query.message.answer(text)
+                return
+            send_message = getattr(ctx.bot, "send_message", None)
+            if callable(send_message):
+                await send_message(tg_id, text)
 
-        asyncio.create_task(ctx.sync_user_ledger(tg_id, cfg, days_back=30))
+        try:
+            res = await ctx.sync_user_ledger(tg_id, cfg, days_back=30)
+            await compute_and_cache_reports_for_user(
+                tg_id,
+                list(cfg.selected_account_ids or []),
+                ctx.profile_store,
+            )
+            await _send_followup(
+                templates.refresh_done_message(
+                    accounts=int(getattr(res, "accounts", 0) or 0),
+                    fetched_requests=int(getattr(res, "fetched_requests", 0) or 0),
+                    appended=int(getattr(res, "appended", 0) or 0),
+                )
+            )
+        except Exception as e:
+            mapped = map_monobank_error(e)
+            await _send_followup(templates.error(mapped or str(e)))
+
         await query.answer()
 
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:data:status")

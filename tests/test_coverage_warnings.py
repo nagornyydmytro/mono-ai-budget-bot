@@ -148,3 +148,33 @@ def test_nlq_executor_suppresses_partial_warning_for_small_right_edge_lag(monkey
 
     s = execute_intent(1, {"intent": "spend_sum", "days": 1})
     assert not s.startswith("⚠️ Дані неповні для запитаного періоду.")
+
+
+def test_reports_renderer_explains_uncategorized_gap_in_category_shares(tmp_path: Path) -> None:
+    rs = ReportsStore(base_dir=tmp_path / "reports_cfg")
+    tg_id = 1
+
+    facts = {
+        "totals": {
+            "real_spend_total_uah": 1000.0,
+            "spend_total_uah": 1000.0,
+            "income_total_uah": 0.0,
+            "transfer_in_total_uah": 0.0,
+            "transfer_out_total_uah": 0.0,
+        },
+        "categories_real_spend": {
+            "Маркет/Побут": 600.0,
+        },
+        "category_shares_real_spend": {
+            "Маркет/Побут": 60.0,
+        },
+        "top_categories_named_real_spend": [
+            {"category": "Маркет/Побут", "amount_uah": 600.0},
+        ],
+        "uncategorized_real_spend_total_uah": 400.0,
+    }
+
+    text = render_report_for_user(rs, tg_id, "week", facts)
+    assert "Некатегоризовані витрати" in text
+    assert "400.00 ₴" in text
+    assert "сума часток у категоріях може бути меншою за 100%" in text

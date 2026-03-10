@@ -369,14 +369,14 @@ def test_templates_menu_reports_custom_blocks_message_snapshot():
 def test_templates_menu_reports_custom_start_prompt_snapshot():
     assert (
         templates.menu_reports_custom_start_prompt()
-        == "🛠️ *Custom report*\n\nВведи *start date* у форматі `YYYY-MM-DD`."
+        == "🛠️ *Custom report*\n\nОбери *start date* кнопками в календарі нижче.\nЗа потреби можеш також ввести дату вручну у форматі `YYYY-MM-DD`."
     )
 
 
 def test_templates_menu_reports_custom_end_prompt_snapshot():
     assert (
         templates.menu_reports_custom_end_prompt("2026-03-01")
-        == "🛠️ *Custom report*\n\nStart date: `2026-03-01`\nТепер введи *end date* у форматі `YYYY-MM-DD`."
+        == "🛠️ *Custom report*\n\nStart date: `2026-03-01`\nТепер обери *end date* кнопками в календарі нижче.\nЗа потреби можеш також ввести дату вручну у форматі `YYYY-MM-DD`."
     )
 
 

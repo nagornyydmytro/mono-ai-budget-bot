@@ -31,6 +31,7 @@ from .ui import (
     build_currency_screen_keyboard,
     build_main_menu_keyboard,
     build_onboarding_resume_keyboard,
+    build_saved_to_root_keyboard,
     build_start_menu_keyboard,
     build_uncat_empty_keyboard,
     build_uncat_review_keyboard,
@@ -418,6 +419,14 @@ def build_handler_runtime(
                             "Працюй лише на основі переданих фактів. "
                             "Не вигадуй дані. "
                             "Не давай інвестиційних, медичних або юридичних порад. "
+                            "Пиши українською, коротко і природно. "
+                            "Не дублюй блок 'Факти' і не переписуй всі totals без нового висновку. "
+                            "Не використовуй technical keys, snake_case, key=value, JSON-like fragments. "
+                            "У summary дай 1–3 речення лише з висновками. "
+                            "У changes пиши лише нетривіальні зміни vs previous period. "
+                            "У recs давай 1–3 конкретні дії, прив'язані до фактів, а не загальні фрази. "
+                            "Якщо великі transfer_in/transfer_out, чітко відрізняй 'всі списання' від 'реальних витрат'. "
+                            "Якщо uncategorized_real_spend_total_uah суттєвий, прямо скажи, що категорійна картина неповна. "
                             "Поверни JSON з полями: summary, changes, recs, next_step. "
                             + build_persona_prompt_suffix(profile)
                         )
@@ -437,12 +446,16 @@ def build_handler_runtime(
                         res.next_step,
                     )
                 except Exception as e:
-                    logger.warning("LLM unavailable, sending facts-only. err=%s", e)
+                    s = str(e)
+                    if "429" in s and "Too Many Requests" in s:
+                        logger.info("LLM rate-limited, sending facts-only. err=%s", e)
+                    else:
+                        logger.warning("LLM unavailable, sending facts-only. err=%s", e)
                     await message.answer(map_llm_error(e))
                     ai_block = None
 
         text = render_report_for_user(tg_id, period, stored.facts, ai_block=ai_block)
-        await message.answer(text)
+        await message.answer(text, reply_markup=build_saved_to_root_keyboard())
 
     return {
         "sync_onboarding_progress": _sync_onboarding_progress,

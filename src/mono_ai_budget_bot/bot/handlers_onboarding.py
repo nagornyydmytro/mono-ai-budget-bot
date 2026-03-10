@@ -24,6 +24,7 @@ from .ui import (
     build_bootstrap_picker_keyboard,
     build_reports_custom_blocks_keyboard,
     build_reports_custom_period_keyboard,
+    build_rows_keyboard,
     build_saved_to_root_keyboard,
     build_vertical_options_keyboard,
 )
@@ -170,9 +171,13 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         prev_selected = picker.get("prev_selected") if isinstance(picker, dict) else None
         prev_set = set(prev_selected) if isinstance(prev_selected, list) else None
         cur_set = set(cfg.selected_account_ids or []) if cfg else set()
-        changed = bool(source == "data_menu" and prev_set is not None and prev_set != cur_set)
+        is_token_reset = source == "token_reset"
+        changed = bool(
+            (source == "data_menu" and prev_set is not None and prev_set != cur_set)
+            or is_token_reset
+        )
 
-        if changed and tg_id is not None:
+        if changed and tg_id is not None and not is_token_reset:
             wipe_user_financial_cache(
                 tg_id,
                 tx_store=ctx.tx_store,
@@ -184,6 +189,8 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
 
         if isinstance(mem, dict):
             mem.pop("accounts_picker", None)
+            if is_token_reset:
+                mem["bootstrap_flow"] = {"source": "token_reset"}
             memory_store.save_memory(tg_id, mem)
 
         prof = ctx.profile_store.load(tg_id) or {}
@@ -203,7 +210,9 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
             await query.answer()
             return
 
-        kb = build_bootstrap_picker_keyboard(include_skip=(onboarding_done and not changed))
+        kb = build_bootstrap_picker_keyboard(
+            include_skip=(onboarding_done and not changed and not is_token_reset)
+        )
 
         if query.message:
             await query.message.edit_text(
@@ -276,6 +285,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
         bootstrap_flow = mem.get("bootstrap_flow") if isinstance(mem, dict) else None
         flow_source = bootstrap_flow.get("source") if isinstance(bootstrap_flow, dict) else None
         from_data_menu = flow_source == "data_menu"
+        from_token_reset = flow_source == "token_reset"
 
         if query.data == "boot_skip":
             ctx.sync_onboarding_progress(tg_id)
@@ -323,7 +333,7 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
                 await query.message.edit_text(templates.bootstrap_started_message(days))
         await query.answer("Старт")
 
-        if not from_data_menu:
+        if not from_data_menu and not from_token_reset:
             kb2 = build_vertical_options_keyboard(
                 [
                     ("⚡ Мінімальний", "tax_preset_min"),
@@ -375,6 +385,18 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
                                 fetched_requests=res.fetched_requests,
                                 appended=res.appended,
                             )
+                            await ctx.bot.send_message(chat_id, text)
+                        elif from_token_reset:
+                            text = templates.bootstrap_done_message(
+                                accounts=res.accounts,
+                                fetched_requests=res.fetched_requests,
+                                appended=res.appended,
+                            )
+                            await ctx.bot.send_message(
+                                chat_id,
+                                text,
+                                reply_markup=build_saved_to_root_keyboard(),
+                            )
                         else:
                             ctx.sync_onboarding_progress(tg_id)
                             onboarding_done = ctx.onboarding_done(tg_id)
@@ -388,14 +410,18 @@ def register_onboarding_handlers(dp, *, ctx: HandlerContext) -> None:
                             else:
                                 text = templates.bootstrap_done_onboarding_message()
 
-                        await ctx.bot.send_message(chat_id, text)
+                            await ctx.bot.send_message(chat_id, text)
 
             except Exception as e:
                 if chat_id is not None:
                     msg = map_monobank_error(e)
+                    retry_callback = str(query.data or "boot_90")
                     await ctx.bot.send_message(
                         chat_id,
                         templates.error(f"Помилка bootstrap: {md_escape(msg or str(e))}"),
+                        reply_markup=build_rows_keyboard(
+                            [[("🔁 Спробувати ще раз", retry_callback)]]
+                        ),
                     )
 
         asyncio.create_task(job())

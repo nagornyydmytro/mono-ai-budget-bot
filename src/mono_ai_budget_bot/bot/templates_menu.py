@@ -16,14 +16,19 @@ def menu_reports_mode_message(period_label: str) -> str:
 
 
 def menu_reports_custom_start_prompt() -> str:
-    return "🛠️ *Custom report*\n\nВведи *start date* у форматі `YYYY-MM-DD`."
+    return (
+        "🛠️ *Custom report*\n\n"
+        "Обери *start date* кнопками в календарі нижче.\n"
+        "За потреби можеш також ввести дату вручну у форматі `YYYY-MM-DD`."
+    )
 
 
 def menu_reports_custom_end_prompt(start_date: str) -> str:
     return (
         "🛠️ *Custom report*\n\n"
         f"Start date: `{start_date}`\n"
-        "Тепер введи *end date* у форматі `YYYY-MM-DD`."
+        "Тепер обери *end date* кнопками в календарі нижче.\n"
+        "За потреби можеш також ввести дату вручну у форматі `YYYY-MM-DD`."
     )
 
 

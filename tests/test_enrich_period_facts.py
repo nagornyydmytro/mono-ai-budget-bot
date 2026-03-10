@@ -114,3 +114,41 @@ def test_enrich_period_facts_month_is_deterministic_for_same_input():
     facts2 = enrich_period_facts(records, days_back=30, now_ts=now)
 
     assert facts1 == facts2
+
+
+def test_enrich_period_facts_trends_use_previous_window_and_do_not_contradict_comparison():
+    now = 200 * 86400 + 12
+
+    records: list[TxRecord] = []
+
+    for d in range(14, 9, -1):
+        records.append(
+            _mk(
+                time=now - d * 86400 + 10,
+                amount=-20000,
+                mcc=5814,
+                description="mcd",
+            )
+        )
+
+    for d in range(7, 2, -1):
+        records.append(
+            _mk(
+                time=now - d * 86400 + 10,
+                amount=-8000,
+                mcc=5814,
+                description="mcd",
+            )
+        )
+
+    facts: dict[str, Any] = enrich_period_facts(records, days_back=7, now_ts=now)
+
+    trends = facts["trends"]
+    declining = trends.get("declining") or []
+    labels = {str(x.get("label") or "") for x in declining if isinstance(x, dict)}
+
+    assert "Кафе/Ресторани" in labels
+
+    cmp_categories = facts["comparison"]["categories"]
+    cafes_cmp = cmp_categories["Кафе/Ресторани"]
+    assert float(cafes_cmp["delta_uah"]) < 0.0

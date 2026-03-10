@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from aiogram.types import CallbackQuery, Message
 
+from mono_ai_budget_bot.storage.wipe import wipe_user_financial_cache
+
 
 def resolve_start_text(*, users, tg_id: int, start_text: str, connected_text: str) -> str:
     cfg = users.load(tg_id)
@@ -152,6 +154,15 @@ async def submit_manual_token(
     connect_success_confirm_text: str,
     render_accounts_screen,
     error_text_factory,
+    manual_source: str | None,
+    profile_store,
+    tx_store,
+    report_store,
+    rules_store,
+    uncat_store,
+    uncat_pending_store,
+    load_memory,
+    save_memory,
 ) -> bool:
     if text_lower == "cancel":
         pop_pending_manual_mode(user_id)
@@ -176,9 +187,45 @@ async def submit_manual_token(
         await message.answer(mapped or error_text_factory("Помилка перевірки токена."))
         return True
 
+    manual_source = str(manual_source or "").strip()
+    is_token_reset_flow = manual_source == "data_menu"
+
+    if is_token_reset_flow:
+        wipe_user_financial_cache(
+            user_id,
+            tx_store=tx_store,
+            report_store=report_store,
+            rules_store=rules_store,
+            uncat_store=uncat_store,
+            uncat_pending_store=uncat_pending_store,
+        )
+
     users.save(user_id, mono_token=mono_token, selected_account_ids=[])
+
     sync_onboarding_progress(user_id)
     pop_pending_manual_mode(user_id)
+
+    if is_token_reset_flow:
+        prof = profile_store.load(user_id) or {}
+        onb = prof.get("onboarding")
+        if not isinstance(onb, dict):
+            onb = {}
+
+        onb["accounts_confirmed"] = False
+        onb["bootstrap_requested"] = False
+        onb.pop("bootstrap_days", None)
+        onb["completed"] = False
+
+        prof["onboarding"] = onb
+        prof["onboarding_completed"] = False
+        profile_store.save(user_id, prof)
+
+        mem = load_memory(user_id)
+        mem["accounts_picker"] = {
+            "source": "token_reset",
+            "prev_selected": [],
+        }
+        save_memory(user_id, mem)
 
     accounts = [
         {"id": a.id, "currencyCode": a.currencyCode, "maskedPan": a.maskedPan}

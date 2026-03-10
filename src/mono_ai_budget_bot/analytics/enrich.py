@@ -30,12 +30,20 @@ def enrich_period_facts(
     current_facts["refunds"] = build_refund_insights(pairs, start_ts=cur_start, end_ts=cur_end)
 
     current_records = [r for r in records if cur_start <= int(r.time) < cur_end]
+    trend_records = list(records)
     ignore_ids = refund_ignore_ids(pairs)
     if ignore_ids:
         current_records = [r for r in current_records if r.id not in ignore_ids]
+        trend_records = [r for r in trend_records if r.id not in ignore_ids]
+
+    trend_rows = rows_from_ledger(trend_records)
     rows = rows_from_ledger(current_records)
 
-    current_facts["trends"] = compute_trends(rows, now_ts=now_ts, window_days=trends_window_days)
+    current_facts["trends"] = compute_trends(
+        trend_rows,
+        now_ts=now_ts,
+        window_days=trends_window_days,
+    )
 
     a = detect_anomalies(
         rows,

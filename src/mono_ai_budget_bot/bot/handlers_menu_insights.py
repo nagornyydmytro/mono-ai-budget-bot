@@ -9,7 +9,6 @@ from .handlers_common import HandlerContext
 from .menu_flow import render_menu_screen, render_placeholder_screen
 from .ui import (
     build_back_keyboard,
-    build_insights_forecast_keyboard,
     build_insights_guidance_keyboard,
     build_insights_menu_keyboard,
     build_insights_whatif_keyboard,
@@ -98,8 +97,8 @@ def register_insights_handlers(
         if insight_key == "menu:insights:forecast":
             await render_menu_screen(
                 query,
-                text=templates.menu_insights_forecast_message(),
-                reply_markup=build_insights_forecast_keyboard(),
+                text=templates.menu_insights_message(),
+                reply_markup=build_insights_menu_keyboard(),
             )
             return
 
@@ -215,37 +214,8 @@ def register_insights_handlers(
         ):
             return
 
-        tg_id = query.from_user.id if query.from_user else None
-        if tg_id is None:
-            await query.answer("Немає tg id", show_alert=True)
-            return
-
-        facts = load_month_facts(ctx, tg_id)
-        if not isinstance(facts, dict) or not facts:
-            await render_menu_screen(
-                query,
-                text=templates.menu_insights_needs_data_message("🔮 *Forecast*"),
-                reply_markup=build_insights_guidance_keyboard(),
-            )
-            return
-
-        metric = "income" if str(query.data or "").endswith(":income") else "spend"
-        body = render_forecast_projection_body(facts, metric)
-        if not body:
-            await render_menu_screen(
-                query,
-                text=templates.menu_insights_needs_data_message("🔮 *Forecast*"),
-                reply_markup=build_insights_guidance_keyboard(),
-            )
-            return
-
-        intro = (
-            "Детермінована проєкція доходів на основі вже підготовлених totals facts."
-            if metric == "income"
-            else "Детермінована проєкція витрат на основі вже підготовлених totals facts."
-        )
         await render_menu_screen(
             query,
-            text=templates.menu_insight_result_message("🔮 *Forecast*", intro, body),
-            reply_markup=build_back_keyboard("menu:insights:forecast"),
+            text=templates.menu_insights_message(),
+            reply_markup=build_insights_menu_keyboard(),
         )

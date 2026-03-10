@@ -196,3 +196,58 @@ def test_router_spend_unusual_summary():
 def test_router_explain_growth_alt_phrase():
     p = parse_nlq_intent("Чим пояснюється ріст витрат цього місяця?")
     assert p["intent"] == "explain_growth"
+
+
+def test_router_last_time_phrase_with_ya_and_explicit_merchant():
+    p = parse_nlq_intent("Коли я востаннє платив у Rozetka?")
+    assert p["intent"] == "last_time"
+    assert p["merchant_contains"] == "rozetka"
+    assert p["merchant_exact"] is True
+
+
+def test_router_generic_transfer_count_phrase():
+    p = parse_nlq_intent("Скільки у мене було переказів за останні 30 днів?")
+    assert p["intent"] == "transfer_out_count"
+    assert p["days"] == 30
+
+
+def test_router_real_spend_sum_phrase():
+    p = parse_nlq_intent("Яка в мене сума реальних витрат за останні 30 днів?")
+    assert p["intent"] == "spend_sum"
+    assert p["days"] == 30
+
+
+def test_router_top_category_does_not_capture_phrase_as_merchant():
+    p = parse_nlq_intent("На яку категорію я витратив найбільше за останні 7 днів?")
+    assert p["intent"] == "top_categories"
+    assert p["top_n"] == 1
+    assert p["merchant_contains"] is None
+
+
+def test_router_category_share_market_case_does_not_capture_merchant():
+    p = parse_nlq_intent("Яка частка витрат у маркеті за останні 30 днів?")
+    assert p["intent"] == "category_share"
+    assert p["category"] == "Маркет/Побут"
+    assert p["merchant_contains"] is None
+
+
+def test_router_multi_merchant_or_phrase():
+    p = parse_nlq_intent("Скільки я витратив у сільпо або novus за останні 30 днів?")
+    assert p["intent"] == "spend_sum"
+    assert p["merchant_contains"] == "сільпо або novus"
+
+
+def test_router_top_growth_with_previous_phrase():
+    p = parse_nlq_intent("Що виросло найбільше за останні 7 днів порівняно з попередніми 7?")
+    assert p["intent"] == "top_growth_categories"
+
+
+def test_router_top_decline_with_previous_phrase():
+    p = parse_nlq_intent("Що впало найбільше за останні 7 днів порівняно з попередніми 7?")
+    assert p["intent"] == "top_decline_categories"
+
+
+def test_router_transfer_with_explicit_recipient_name():
+    p = parse_nlq_intent("Скільки я переказав Юлії за останні 30 днів?")
+    assert p["intent"] == "transfer_out_sum"
+    assert p["recipient_alias"] == "юлії"

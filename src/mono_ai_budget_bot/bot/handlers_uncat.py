@@ -42,7 +42,12 @@ def register_uncat_handlers(dp, *, ctx: HandlerContext) -> None:
             Rule(id=rid, leaf_id=leaf_id, merchant_contains=item.description),
         )
 
-        remaining = [x for x in items if x.tx_id != item.tx_id]
+        description_key = item.description.lower().strip()
+        remaining = [
+            x
+            for x in items
+            if x.tx_id != item.tx_id and x.description.lower().strip() != description_key
+        ]
         ctx.uncat_store.save(tg_id, remaining)
 
         ctx.uncat_pending_store.mark_used(tg_id)

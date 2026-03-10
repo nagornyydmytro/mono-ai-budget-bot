@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 from pathlib import Path
@@ -455,13 +456,10 @@ def _prune_aliases(mem: dict[str, Any]) -> None:
     )
 
 
-def resolve_merchant_filters(
-    telegram_user_id: int, merchant_contains: str | None
+def _resolve_merchant_filters_single(
+    telegram_user_id: int,
+    raw: str,
 ) -> list[str] | None:
-    if not merchant_contains:
-        return None
-
-    raw = norm(merchant_contains)
     if not raw:
         return None
 
@@ -546,6 +544,40 @@ def resolve_merchant_filters(
                 return out
 
     return [raw]
+
+
+def resolve_merchant_filters(
+    telegram_user_id: int,
+    merchant_contains: str | None,
+) -> list[str] | None:
+    if not merchant_contains:
+        return None
+
+    raw = norm(merchant_contains)
+    if not raw:
+        return None
+
+    parts = [
+        norm(x)
+        for x in re.split(r"\b(?:або|or|чи)\b", raw, flags=re.IGNORECASE)
+        if isinstance(x, str) and norm(x)
+    ]
+    parts = list(dict.fromkeys(parts))
+    if not parts:
+        return None
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for part in parts:
+        resolved = _resolve_merchant_filters_single(telegram_user_id, part) or []
+        for item in resolved:
+            vv = norm(item)
+            if vv and vv not in seen:
+                seen.add(vv)
+                out.append(vv)
+
+    return out or None
 
 
 def resolve_merchant_alias(telegram_user_id: int, merchant_contains: str | None) -> str | None:

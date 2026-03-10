@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
 from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.bot.formatting import format_money_uah_pretty, format_ts_local
+from mono_ai_budget_bot.nlq.executor_support import normalize_coverage_status_for_nlq
 from mono_ai_budget_bot.reports.config import ReportsConfig
 from mono_ai_budget_bot.storage.reports_store import ReportsStore
 
@@ -62,11 +63,35 @@ def _render_coverage_warning(facts: dict) -> str | None:
     except Exception:
         return None
 
+    has_rows = False
+    totals = facts.get("totals")
+    if isinstance(totals, Mapping):
+        try:
+            has_rows = any(
+                abs(float(totals.get(key) or 0.0)) > 0.0
+                for key in (
+                    "real_spend_total_uah",
+                    "spend_total_uah",
+                    "income_total_uah",
+                    "transfer_in_total_uah",
+                    "transfer_out_total_uah",
+                )
+            )
+        except Exception:
+            has_rows = False
+
     status = classify_coverage(
         requested_from_ts=req_from,
         requested_to_ts=req_to,
         coverage_window=(cov_from, cov_to),
     )
+    if cov_from <= req_from:
+        status = normalize_coverage_status_for_nlq(
+            status,
+            (cov_from, cov_to),
+            req_to,
+            has_rows_in_window=has_rows,
+        )
     if status != CoverageStatus.partial:
         return None
 
@@ -91,6 +116,25 @@ def _render_totals_section(facts: dict) -> str | None:
         f"🔁 Перекази: +{md_escape(format_money_uah_pretty(tr_in))} / -{md_escape(format_money_uah_pretty(tr_out))}",
     ]
     return templates.section("Факти", summary_lines)
+
+
+def _render_uncategorized_block(facts: dict) -> str | None:
+    totals = _safe_get(facts, ["totals"], {}) or {}
+    real_spend = float(totals.get("real_spend_total_uah", 0.0) or 0.0)
+    uncategorized = float(facts.get("uncategorized_real_spend_total_uah", 0.0) or 0.0)
+
+    if real_spend <= 0.0 or uncategorized <= 0.0:
+        return None
+
+    uncategorized_share = round((uncategorized / real_spend) * 100.0, 1)
+    categorized_share = round(max(0.0, 100.0 - uncategorized_share), 1)
+
+    lines = [
+        f"• Ще не розкладено по категоріях: *{md_escape(format_money_uah_pretty(uncategorized))}* ({md_escape(f'{uncategorized_share:.1f}%')} реальних витрат)",
+        f"• Категоризована частина зараз покриває приблизно {md_escape(f'{categorized_share:.1f}%')} реальних витрат.",
+        "• Через це сума часток у категоріях може бути меншою за 100%.",
+    ]
+    return templates.section("Некатегоризовані витрати", lines)
 
 
 def _render_categories_deep_block(facts: dict) -> str | None:
@@ -178,6 +222,10 @@ def _render_breakdowns_section(facts: dict) -> str | None:
             amt = float(row.get("amount_uah", 0.0))
             items2.append(f"{i}. {m} — {md_escape(format_money_uah_pretty(amt))}")
         parts.append(templates.section("Топ мерчантів", items2))
+
+    uncategorized_block = _render_uncategorized_block(facts)
+    if uncategorized_block:
+        parts.append(uncategorized_block)
 
     deep_categories_block = _render_categories_deep_block(facts)
     if deep_categories_block:

@@ -12,7 +12,6 @@ def menu_insights_message() -> str:
             "• Trends",
             "• Anomalies",
             "• What-if",
-            "• Forecast",
             "• Explain",
         ]
     ).strip()

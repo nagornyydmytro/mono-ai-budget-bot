@@ -19,7 +19,14 @@ from mono_ai_budget_bot.nlq.memory_store import (
     save_memory,
     save_recipient_alias,
 )
-from mono_ai_budget_bot.nlq.resolver import resolve
+from mono_ai_budget_bot.nlq.models import (
+    AnswerStrategy,
+    CanonicalQuery,
+    QueryIntent,
+    Slots,
+    canonical_intent_family,
+)
+from mono_ai_budget_bot.nlq.resolver import resolve, resolve_canonical
 from mono_ai_budget_bot.nlq.router import route
 from mono_ai_budget_bot.nlq.types import (
     CanonicalQuerySchema,
@@ -133,6 +140,9 @@ _OPEN_ENDED_FINANCE_RE = re.compile(
     r"м'?які\s+висновк|soft\s+conclusion|"
     r"як\s+коуч|as\s+coach|coach|"
     r"підсумуй|сформулюй|опиши|describe|formulate|summari[sz]e|"
+    r"регулярн\w*\s+повсякденн\w*|"
+    r"разов\w*\s+велик\w*\s+покупк\w*|"
+    r"one\s*off|regular\s+everyday|"
     r"аналіз|analysis"
     r")\b",
     re.IGNORECASE,
@@ -166,7 +176,8 @@ _NARRATIVE_ONLY_RE = re.compile(
     r"що\s+це\s+говорить|what\s+does\s+this\s+say|"
     r"людськ\w*\s+мов|human\s+language|"
     r"м'?які\s+висновк|soft\s+conclusion|"
-    r"як\s+коуч|as\s+coach|coach"
+    r"як\s+коуч|as\s+coach|coach|"
+    r"регулярн\w*\s+повсякденн\w*|разов\w*\s+велик\w*\s+покупк\w*|one\s*off|regular\s+everyday"
     r")\b",
     re.IGNORECASE,
 )
@@ -259,6 +270,56 @@ def _is_tool_mode_candidate(text: str) -> bool:
     if not s:
         return False
     return _TOOL_MODE_HINT_RE.search(s) is not None
+
+
+def _normalize_text_value(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _detect_canonical_intent(req: NLQRequest) -> CanonicalQuery:
+    normalized = _normalize_text_value(req.text)
+    routed = route(
+        NLQRequest(telegram_user_id=req.telegram_user_id, text=normalized, now_ts=req.now_ts)
+    )
+    if routed is None:
+        return CanonicalQuery(
+            raw_text=req.text,
+            normalized_text=normalized,
+            intent=None,
+            slots=Slots({}),
+        )
+
+    return CanonicalQuery(
+        raw_text=req.text,
+        normalized_text=normalized,
+        intent=QueryIntent(name=routed.name, family=canonical_intent_family(routed.name)),
+        slots=Slots(dict(routed.slots or {})),
+    )
+
+
+def _resolve_canonical_query(req: NLQRequest, query: CanonicalQuery):
+    if query.intent is None:
+        return None
+    return resolve_canonical(
+        NLQRequest(
+            telegram_user_id=req.telegram_user_id, text=query.normalized_text, now_ts=req.now_ts
+        ),
+        NLQIntent(name=query.intent.name, slots=query.slots.to_payload()),
+    )
+
+
+def _choose_answer_strategy(
+    req: NLQRequest,
+    deterministic_intent: NLQIntent | None,
+) -> AnswerStrategy:
+    policy = _select_answer_policy(req, deterministic_intent)
+    if policy == "deterministic":
+        return AnswerStrategy(mode="deterministic", reason="canonical_deterministic")
+    if policy == "clarification":
+        return AnswerStrategy(mode="clarify", reason="semantic_ambiguity")
+    if policy == "safe_llm":
+        return AnswerStrategy(mode="llm", reason=_select_execution_route(req, deterministic_intent))
+    return AnswerStrategy(mode="none", reason="no_safe_route")
 
 
 def _facts_scope_from_intent(intent_name: str | None) -> str:
@@ -779,6 +840,27 @@ def _llm_narrative_response(
     return None
 
 
+def _looks_like_new_nlq_question(text: str, options: list[str] | None = None) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return False
+
+    low = s.lower()
+    if low in {"0", "cancel", "скасувати", "ні", "нет"}:
+        return False
+
+    if re.fullmatch(r"\d+(?:\s*,\s*\d+)*", s):
+        return False
+
+    if options and any(low == str(opt).strip().lower() for opt in options):
+        return False
+
+    if s.endswith("?"):
+        return True
+
+    return len(s.split()) >= 4
+
+
 def _load_validation_rows(user_id: int, now_ts: int, days: int = 180):
     days = max(7, min(int(days), 365))
     cfg = UserStore().load(int(user_id))
@@ -796,6 +878,43 @@ def _load_validation_rows(user_id: int, now_ts: int, days: int = 180):
         ts_from=ts_from,
         ts_to=ts_to,
     )
+
+
+def _maybe_handle_open_ended_finance(req: NLQRequest, intent: NLQIntent) -> NLQResponse | None:
+    settings = load_settings()
+    if not settings.openai_api_key:
+        return None
+
+    try:
+        client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+    except Exception:
+        return None
+
+    try:
+        user = f"question={req.text}\nslots={intent.slots}"
+        out = client.interpret_nlq(user_text=user, facts_scope="full")
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+        return None
+
+    try:
+        client.close()
+    except Exception:
+        pass
+
+    if not isinstance(out, dict):
+        return None
+
+    answer = str(out.get("answer") or "").strip()
+    route_kind = str(out.get("route") or "").strip().lower()
+
+    if route_kind in {"narrative", "answer"} and answer:
+        return NLQResponse(result=NLQResult(text=answer), clarification=None)
+
+    return None
 
 
 def handle_nlq(req: NLQRequest) -> NLQResponse:
@@ -864,15 +983,113 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
         options = None
         mem = load_memory(req.telegram_user_id)
 
+    pending_kind = mem.get("pending_kind")
+
     if isinstance(pending, dict):
-        pending_kind = mem.get("pending_kind")
-
-        if pending_kind == "paging" and _is_paging_continue(req.text):
+        if _looks_like_new_nlq_question(req.text, options):
             pop_pending_action(req.telegram_user_id)
-            text = execute_intent(req.telegram_user_id, pending)
-            return NLQResponse(result=NLQResult(text=text), clarification=None)
+            mem = load_memory(req.telegram_user_id)
+            pending = None
+            options = None
+            pending_kind = None
+        else:
+            pending_kind = mem.get("pending_kind")
 
-        if pending_kind == "category_alias" and options:
+            if pending_kind == "paging" and _is_paging_continue(req.text):
+                pop_pending_action(req.telegram_user_id)
+                text = execute_intent(req.telegram_user_id, pending)
+                return NLQResponse(result=NLQResult(text=text), clarification=None)
+
+            if pending_kind == "category_alias" and options:
+                alias_to_learn = str(pending.get("alias_to_learn") or "").strip()
+                selected = _parse_multi_select(req.text, options)
+
+                if alias_to_learn and selected:
+                    save_category_alias(req.telegram_user_id, alias_to_learn, selected)
+                    pop_pending_action(req.telegram_user_id)
+                    text = execute_intent(req.telegram_user_id, pending)
+                    return NLQResponse(result=NLQResult(text=text), clarification=None)
+
+                if alias_to_learn and req.text.strip().lower() in {
+                    "0",
+                    "cancel",
+                    "скасувати",
+                    "ні",
+                    "нет",
+                }:
+                    pop_pending_action(req.telegram_user_id)
+                    return NLQResponse(
+                        result=NLQResult(text="Ок, не зберігаю."), clarification=None
+                    )
+
+            if pending_kind == "recipient":
+                alias = _extract_recipient_alias(pending)
+                if alias and req.text.strip().lower() in {
+                    "0",
+                    "cancel",
+                    "скасувати",
+                    "ні",
+                    "нет",
+                }:
+                    pop_pending_action(req.telegram_user_id)
+                    return NLQResponse(
+                        result=NLQResult(text="Ок, не зберігаю."), clarification=None
+                    )
+
+                rows = _load_validation_rows(req.telegram_user_id, req.now_ts)
+                match_value = _resolve_followup_value(req.text, options).strip()
+
+                if (
+                    alias
+                    and match_value
+                    and _recipient_has_ledger_evidence(
+                        rows,
+                        value=match_value,
+                        pending_intent=pending,
+                    )
+                ):
+                    save_recipient_alias(req.telegram_user_id, alias, match_value)
+                    pop_pending_action(req.telegram_user_id)
+                    text = execute_intent(req.telegram_user_id, pending)
+                    return NLQResponse(result=NLQResult(text=text), clarification=None)
+
+                selected, suggested, err = _manual_entry_try_resolve(
+                    expected="recipient",
+                    user_text=req.text,
+                    pending_intent=pending,
+                    pending_options=options,
+                    rows=rows,
+                )
+
+                if (
+                    alias
+                    and selected
+                    and _recipient_has_ledger_evidence(
+                        rows,
+                        value=selected,
+                        pending_intent=pending,
+                    )
+                ):
+                    save_recipient_alias(req.telegram_user_id, alias, selected)
+                    pop_pending_action(req.telegram_user_id)
+                    text = execute_intent(req.telegram_user_id, pending)
+                    return NLQResponse(result=NLQResult(text=text), clarification=None)
+
+                if suggested:
+                    mem["pending_options"] = list(suggested)
+                    save_memory(req.telegram_user_id, mem)
+                    lines = [
+                        (err or "Не знайшов відповідність."),
+                        "Вибери номер або введи точне ім'я як у виписці:",
+                    ]
+                    for i, opt in enumerate(suggested, start=1):
+                        lines.append(f"{i}) {opt}")
+                    return NLQResponse(result=NLQResult(text="\n".join(lines)), clarification=None)
+
+                return NLQResponse(
+                    result=NLQResult(text=(err or "Не знайшов такого отримувача в виписці.")),
+                    clarification=None,
+                )
             alias_to_learn = str(pending.get("alias_to_learn") or "").strip()
             selected = _parse_multi_select(req.text, options)
 
@@ -959,23 +1176,39 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 clarification=None,
             )
 
-    deterministic_intent = route(req)
-    policy = _select_answer_policy(req, deterministic_intent)
-    strategy = _select_execution_route(req, deterministic_intent)
+    canonical_query = _detect_canonical_intent(req)
+    deterministic_intent = (
+        NLQIntent(name=canonical_query.intent.name, slots=canonical_query.slots.to_payload())
+        if canonical_query.intent is not None
+        else None
+    )
+
+    if deterministic_intent is not None:
+        slots = dict(deterministic_intent.slots or {})
+        if bool(slots.get("llm_candidate")) or str(slots.get("slots_confidence") or "") in {
+            "low",
+            "medium",
+        }:
+            llm_resp = _maybe_handle_open_ended_finance(req, deterministic_intent)
+            if llm_resp is not None:
+                return llm_resp
+
+    strategy_decision = _choose_answer_strategy(req, deterministic_intent)
 
     intent: NLQIntent | None
     narrative_resp: NLQResponse | None = None
 
-    if policy == "deterministic":
-        intent = deterministic_intent
-    elif policy == "clarification":
+    if strategy_decision.mode == "deterministic":
+        resolved_state = _resolve_canonical_query(req, canonical_query)
+        intent = resolved_state.to_intent() if resolved_state is not None else deterministic_intent
+    elif strategy_decision.mode == "clarify":
         text = _open_question_clarification_text(req, deterministic_intent)
         return NLQResponse(
             result=NLQResult(text=(text or "Уточни, будь ласка, свій запит.")),
             clarification=None,
         )
-    elif policy == "safe_llm":
-        if strategy == "tool_mode":
+    elif strategy_decision.mode == "llm":
+        if strategy_decision.reason == "tool_mode":
             tool_mode_out = _llm_tool_mode_intent(req)
             if isinstance(tool_mode_out, NLQResponse):
                 return tool_mode_out
@@ -991,7 +1224,7 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 )
             ):
                 narrative_resp = _llm_narrative_response(req, deterministic_intent)
-        elif strategy == "planner":
+        elif strategy_decision.reason == "planner":
             intent = _llm_plan_intent(req)
             if (
                 intent is None

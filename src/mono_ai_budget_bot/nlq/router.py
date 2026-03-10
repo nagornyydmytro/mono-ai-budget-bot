@@ -6,17 +6,13 @@ from typing import Any
 
 from mono_ai_budget_bot.currency import parse_currency_conversion_query
 from mono_ai_budget_bot.nlq.category_keywords import detect_category
+from mono_ai_budget_bot.nlq.models import QueryIntent, Slots, canonical_intent_family
 from mono_ai_budget_bot.nlq.periods import parse_period_range
 from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
 
 _DAYS_RE = re.compile(r"(\d{1,3})\s*(?:дн|днів|дня|days)\b", re.IGNORECASE)
 _INCOME_RE = re.compile(
     r"\b(дох(ід|оди|одів)|поповнен\w*|зачислен\w*|пополнен\w*|top\s*up|income|депозит)\b",
-    re.IGNORECASE,
-)
-
-_TRANSFER_OUT_RE = re.compile(
-    r"\b(скинув|скинула|скинути|переказ(ав|ала|ати)?|перев(ів|ела)|відправ(ив|ила|ити)?|send|sent)\b",
     re.IGNORECASE,
 )
 
@@ -39,9 +35,6 @@ _TRANSFER_IN_RE = re.compile(
 )
 
 _COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
-_RECIPIENT_ALIAS_RE = re.compile(
-    r"\b(дівчин(і|е|у|а)|мам(і|е|у|а)|тат(ові|у|а)|оренд(а|і|у)|квартир(а|і|у))\b", re.IGNORECASE
-)
 
 _COMPARE_RE = re.compile(
     r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян\w*|порівняй|порівняти|compare)\b",
@@ -89,8 +82,18 @@ _MERCHANT_NA_SEGMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_TRANSFER_OUT_RE = re.compile(
+    r"\b(скинув|скинула|скинути|переказ(ав|ала|ати|ував|увала|увати)?|переказ(и|ів)?|перев(ів|ела)|відправ(ив|ила|ити)?|send|sent)\b",
+    re.IGNORECASE,
+)
+
+_RECIPIENT_ALIAS_RE = re.compile(
+    r"\b(дівчин(і|е|у|а)|дівчат(ам|ами|ах)?|мам(і|е|у|а)|тат(ові|у|а)|оренд(а|і|у)|квартир(а|і|у))\b",
+    re.IGNORECASE,
+)
+
 _LAST_TIME_RE = re.compile(
-    r"\b(коли\s+останн(ій|є)|коли\s+востаннє|last\s+time|when\s+was\s+the\s+last)\b",
+    r"\b(коли(?:\s+\w+){0,3}\s+останн(ій|є)|коли(?:\s+\w+){0,3}\s+востаннє|last\s+time|when\s+was\s+the\s+last)\b",
     re.IGNORECASE,
 )
 
@@ -115,7 +118,7 @@ _TOP_MERCHANTS_RE = re.compile(
 )
 
 _TOP_GROWTH_RE = re.compile(
-    r"\b(що\s+найбільше\s+виросло|що\s+зараз\s+росте|що\s+росте)\b",
+    r"\b(що\s+найбільше\s+виросло|що\s+виросло\s+найбільше|що\s+зараз\s+росте|що\s+росте)\b",
     re.IGNORECASE,
 )
 
@@ -150,7 +153,7 @@ _MERCHANT_AFTER_PLACE_RE = re.compile(
 )
 
 _TOP_CATEGORIES_RE = re.compile(
-    r"\b(на\s+що\s+я\s+найбільше|яка\s+категорія\s+найбільш\w*|топ-?\s*\d*\s*категор)",
+    r"\b(на\s+що\s+я\s+найбільше|на\s+яку\s+категорію\s+я\s+витратив\s+найбільше|яка\s+категорія\s+найбільш\w*|топ-?\s*\d*\s*категор)",
     re.IGNORECASE,
 )
 
@@ -203,6 +206,64 @@ def _strip_period_tail(value: str) -> str:
     return s.strip(" .,!?:;\"'()[]{}").strip()
 
 
+def _strip_threshold_tail(value: str) -> str:
+    s = (value or "").strip()
+    if not s:
+        return ""
+
+    s = re.sub(
+        r"\s+(?:більше|более|more\s+than|over|понад|вище|дорожче|менше|меньше|less\s+than|under|дешевше|до)\s*\d+(?:[.,]\d+)?\s*(?:грн|uah|₴)?\s*$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s.strip(" .,!?:;\"'()[]{}").strip()
+
+
+def _extract_recipient_target(text: str) -> tuple[str | None, bool]:
+    original = (text or "").strip()
+    if not original:
+        return None, False
+
+    lower = original.lower()
+
+    m = _RECIPIENT_ALIAS_RE.search(lower)
+    if m is not None:
+        return str(m.group(1) or "").strip().lower() or None, False
+
+    m2 = re.search(
+        (
+            r"\b(?:"
+            r"переказ(?:ав|ала|ував|увала|увати|ати)?|"
+            r"перев(?:ів|ела|ести)?|"
+            r"відправ(?:ив|ила|ити)?"
+            r")\s+(.+?)(?:"
+            r"\s+\b(?:за\s+останні|за\s+\d{1,3}|цього|минулого|попереднього|last|today|вчора|yesterday)\b|"
+            r"[?.!,]|$)"
+        ),
+        original,
+        flags=re.IGNORECASE,
+    )
+    if m2 is None:
+        return None, False
+
+    raw = str(m2.group(1) or "").strip()
+    raw = re.split(r"\b(?:ніж|чем|than)\b", raw, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    raw = _strip_period_tail(raw)
+    raw = _strip_threshold_tail(raw)
+    raw = raw.strip(" .,!?:;\"'()[]{}").strip()
+
+    if not raw:
+        return None, False
+
+    raw_lower = raw.lower()
+    if raw_lower in {"на", "до", "в", "у", "комусь", "комусь із", "комусь з"}:
+        return None, False
+
+    explicit_name = re.match(r"^[A-ZА-ЯІЇЄҐ]", raw) is not None
+    return raw_lower, explicit_name
+
+
 def _extract_top_n(text: str) -> int:
     m = re.search(r"\bтоп-?\s*(\d{1,2})\b", text or "", flags=re.IGNORECASE)
     if m:
@@ -211,6 +272,12 @@ def _extract_top_n(text: str) -> int:
         except Exception:
             return 5
     if re.search(r"\bяка\s+категорія\s+найбільш\w*\b", text or "", flags=re.IGNORECASE):
+        return 1
+    if re.search(
+        r"\bна\s+яку\s+категорію\s+я\s+витратив\s+найбільше\b",
+        text or "",
+        flags=re.IGNORECASE,
+    ):
         return 1
     if re.search(r"\bде\s+я\s+витратив\s+найбільше\b", text or "", flags=re.IGNORECASE):
         return 1
@@ -245,6 +312,68 @@ def _looks_like_explicit_merchant(prep: str, cand: str) -> bool:
     has_quote = any(ch in s for ch in ("'", "’", "`"))
 
     return p == "на" and (latin or has_quote)
+
+
+def _extract_after_trigger(
+    text: str,
+    patterns: list[str],
+) -> str | None:
+    s = (text or "").strip()
+    if not s:
+        return None
+
+    for pat in patterns:
+        m = re.search(pat, s, flags=re.IGNORECASE)
+        if m is None:
+            continue
+        raw = str(m.group(1) or "").strip()
+        raw = re.split(
+            r"\b(?:за\s+останні|за\s+\d{1,3}|цього|минулого|попереднього|last|today|вчора|yesterday|ніж|чем|than)\b",
+            raw,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip()
+        raw = _strip_period_tail(raw)
+        raw = _strip_threshold_tail(raw)
+        raw = raw.strip(" .,!?:;\"'()[]{}").strip()
+        if raw:
+            return raw
+    return None
+
+
+def _looks_like_person_name(text: str) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return False
+    if re.match(r"^[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ'’`-]{2,}$", s) is not None:
+        return True
+    if (
+        re.match(r"^[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ'’`-]{2,}\s+[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ'’`-]{2,}$", s)
+        is not None
+    ):
+        return True
+    return False
+
+
+def _is_open_ended_finance_question(text: str) -> bool:
+    s = (text or "").strip().lower()
+    if not s:
+        return False
+
+    open_markers = [
+        "поясни",
+        "проаналізуй",
+        "що це говорить",
+        "який висновок",
+        "чи це нормально",
+        "чому так",
+        "регулярні повсякденні витрати",
+        "разові великі покупки",
+        "на що це схоже",
+        "що з цього найважливіше",
+        "що мене насторожує",
+    ]
+    return any(marker in s for marker in open_markers)
 
 
 def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any]:
@@ -379,19 +508,23 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     want_top_categories = _TOP_CATEGORIES_RE.search(t) is not None
     want_top_merchants = _TOP_MERCHANTS_RE.search(t) is not None
     want_share = _SHARE_RE.search(t) is not None
-    want_top_growth = _TOP_GROWTH_RE.search(t) is not None and _PREVIOUS_PERIOD_RE.search(t) is None
+    want_top_growth = _TOP_GROWTH_RE.search(t) is not None
     want_top_decline = _TOP_DECLINE_RE.search(t) is not None
     want_summary_short = _SUMMARY_SHORT_RE.search(t) is not None
     want_insights_three = _INSIGHTS_THREE_RE.search(t) is not None
     want_unusual = _UNUSUAL_RE.search(t) is not None
     want_explain_growth = _EXPLAIN_GROWTH_RE.search(t) is not None
     threshold_mode, threshold_uah = _parse_threshold_uah(t)
+    real_spend_only = (
+        re.search(r"\bреальн\w*\s+витрат\w*\b", t, flags=re.IGNORECASE) is not None
+        or re.search(r"\breal\s+spend\b", t, flags=re.IGNORECASE) is not None
+    )
 
     intent: str | None = None
     entity_kind = "spend"
     want_sum = bool(
         re.search(
-            r"\b(скільки|сколько|how\s+much|на\s+суму|сума|сумма|amount|sum)\b",
+            r"\b(скільки|сколько|how\s+much|на\s+суму|сума|сумма|amount|sum|яка\s+.*сума)\b",
             t,
             re.IGNORECASE,
         )
@@ -431,9 +564,18 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "кількість витрат",
             "скільки витрат було",
         ]
+        spend_sum_markers = [
+            "скільки",
+            "витратив",
+            "витрати",
+            "витрат",
+            "реальні витрати",
+            "сума витрат",
+            "spent",
+        ]
         if any(mk in t for mk in count_markers) or is_count:
             intent = "spend_count"
-        elif "скільки" in t or "витратив" in t or "витрати" in t or "spent" in t:
+        elif any(mk in t for mk in spend_sum_markers) or want_sum:
             intent = "spend_sum"
         else:
             intent = "unsupported"
@@ -458,29 +600,53 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
                 cand = cand.split(" на ")[-1].strip()
 
         cand = _strip_period_tail(cand)
+        cand = _strip_threshold_tail(cand)
         cand_category = detect_category(cand)
 
-        cand = _strip_period_tail(cand)
-        cand_category = detect_category(cand)
+        category_driven_query = (
+            want_top_categories or want_share or want_top_growth or want_top_decline
+        )
+        multi_merchant_query = (
+            re.search(r"\b(?:або|or|чи)\b", cand, flags=re.IGNORECASE) is not None
+        )
 
         if cand and not re.search(r"\b(\d+%|\d+)\b", cand):
             if _is_non_merchant_prepositional_phrase(merchant_prep or "", cand):
+                pass
+            elif cand.startswith("яку категорію"):
+                pass
+            elif category_driven_query and cand_category is not None:
                 pass
             else:
                 explicit_merchant = _looks_like_explicit_merchant(merchant_prep or "", cand)
 
                 if explicit_merchant:
-                    merchant = cand
-                    merchant_exact = True
-                    if category is not None and cand_category == category:
-                        category = None
+                    if not (category is not None and cand_category == category):
+                        merchant = cand
+                        merchant_exact = not multi_merchant_query
                 elif not (category is not None and cand_category == category):
                     merchant = cand
 
+    recipient_target = _extract_after_trigger(
+        text,
+        patterns=[
+            r"\b(?:переказ(?:ав|ала|ував|увала|увати|ати)?|перев(?:ів|ела|ести)?|відправ(?:ив|ила|ити)?)\s+(.+?)(?:[?.!,]|$)",
+        ],
+    )
+    recipient_mode = None
     recipient_alias = None
-    m3 = _RECIPIENT_ALIAS_RE.search(t)
-    if m3:
-        recipient_alias = m3.group(1).lower()
+    recipient_explicit_name = False
+
+    if recipient_target:
+        recipient_alias = recipient_target.lower()
+        if _looks_like_person_name(recipient_target):
+            recipient_mode = "explicit"
+            recipient_explicit_name = True
+        elif _RECIPIENT_ALIAS_RE.search(recipient_alias):
+            recipient_mode = "generic"
+        else:
+            recipient_mode = "explicit"
+            recipient_explicit_name = True
 
     if _INCOME_COUNT_OVERRIDE_RE.search(t):
         if intent in ("income_sum", "income_count"):
@@ -494,6 +660,10 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
 
     if want_compare_baseline:
         intent = "compare_to_baseline"
+    elif want_top_growth:
+        intent = "top_growth_categories"
+    elif want_top_decline:
+        intent = "top_decline_categories"
     elif want_compare_previous:
         intent = "compare_to_previous_period"
     elif want_summary_short:
@@ -533,6 +703,23 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     elif threshold_mode is not None and threshold_uah is not None:
         intent = "threshold_query"
 
+    llm_candidate = False
+    slots_confidence = "high"
+
+    if _is_open_ended_finance_question(text):
+        llm_candidate = True
+        slots_confidence = "low"
+
+    if intent in {"unsupported", None}:
+        llm_candidate = True
+        slots_confidence = "low"
+
+    if intent in {"transfer_out_sum", "transfer_out_count", "transfer_in_sum", "transfer_in_count"}:
+        if recipient_mode == "generic":
+            slots_confidence = "medium"
+        elif recipient_mode == "explicit":
+            slots_confidence = "medium"
+
     return {
         "intent": intent,
         "days": days,
@@ -541,10 +728,16 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "merchant_contains": merchant,
         "merchant_exact": merchant_exact,
         "recipient_alias": recipient_alias,
+        "recipient_target": recipient_target,
+        "recipient_mode": recipient_mode,
+        "recipient_explicit_name": recipient_explicit_name,
         "period_label": period_label,
         "category": category,
         "entity_kind": entity_kind,
         "threshold_uah": threshold_uah,
+        "spend_basis": "real" if real_spend_only else "gross",
+        "slots_confidence": slots_confidence,
+        "llm_candidate": llm_candidate,
         "top_n": _extract_top_n(t) if intent in {"top_categories", "top_merchants"} else None,
     }
 
@@ -553,4 +746,10 @@ def route(req: NLQRequest) -> NLQIntent | None:
     parsed = parse_nlq_intent(req.text, req.now_ts)
     if not parsed or parsed.get("intent") in (None, "unsupported"):
         return None
-    return NLQIntent(name=parsed["intent"], slots=parsed)
+
+    query_intent = QueryIntent(
+        name=str(parsed["intent"]),
+        family=canonical_intent_family(parsed.get("intent")),
+    )
+    payload = Slots(parsed).to_payload()
+    return NLQIntent(name=query_intent.name, slots=payload)

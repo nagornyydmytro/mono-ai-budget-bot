@@ -593,11 +593,12 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
     async def cb_menu_root(query: CallbackQuery) -> None:
         if not await ctx.gate_menu_query_or_resume(query):
             return
-        await render_menu_screen(
-            query,
-            text=templates.menu_root_message(),
-            reply_markup=build_main_menu_keyboard(),
-        )
+        if query.message:
+            await query.message.answer(
+                templates.menu_root_message(),
+                reply_markup=build_main_menu_keyboard(),
+            )
+        await query.answer()
 
     register_insights_handlers(
         dp,

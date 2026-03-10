@@ -232,3 +232,101 @@ def test_llm_tooling_path_is_read_only_and_does_not_write_storage():
 
     assert report_store.write_called is False
     assert tx_store.write_called is False
+
+
+def test_generate_report_v2_normalizes_object_like_changes_and_recs(monkeypatch):
+    client = OpenAIClient(api_key="sk-secret-123", model="gpt-4o-mini", timeout_s=1.0)
+
+    monkeypatch.setattr(
+        client,
+        "_post",
+        lambda payload: {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary":"Підсумок","changes":{"real_spend_total_uah":{"current":12000.5,"previous":9500.0,"pct_change":26.3}},"recs":[{"key":"taxi","title":"Зменшити таксі","current":795.16,"20%":159.03}],"next_step":"Перевір підписки"}'
+                    }
+                }
+            ]
+        },
+    )
+
+    try:
+        report = client.generate_report_v2("system", "user")
+        assert report.summary == "Підсумок"
+        assert report.changes == [
+            "real_spend_total_uah: current=12000.5; previous=9500.0; pct_change=26.3"
+        ]
+        assert report.recs == ["Зменшити таксі: key=taxi; current=795.16; 20%=159.03"]
+        assert report.next_step == "Перевір підписки"
+    finally:
+        client.close()
+
+
+def test_generate_report_v2_normalizes_scalar_changes_and_next_step_dict(monkeypatch):
+    client = OpenAIClient(api_key="sk-secret-123", model="gpt-4o-mini", timeout_s=1.0)
+
+    monkeypatch.setattr(
+        client,
+        "_post",
+        lambda payload: {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary":"Ок","changes":"Витрати виросли","recs":[],"next_step":{"title":"Перевір бюджет на кафе","days":7}}'
+                    }
+                }
+            ]
+        },
+    )
+
+    try:
+        report = client.generate_report_v2("system", "user")
+        assert report.changes == ["Витрати виросли"]
+        assert report.next_step == "Перевір бюджет на кафе: days=7"
+    finally:
+        client.close()
+
+
+def test_generate_report_v2_repairs_technical_draft_when_first_response_is_key_value_like(
+    monkeypatch,
+):
+    client = OpenAIClient(api_key="sk-secret-123", model="gpt-4o-mini", timeout_s=1.0)
+
+    calls: list[dict] = []
+
+    responses = [
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary":"transactions_count=37; total_income=1482.92; total_spend=16026.25","changes":["real_spend_total_uah: delta=12452.95; pct_change=348.5","income_total_uah: delta=409.92; pct_change=38.2"],"recs":["category=Маркет/Побут; amount=5883.88","category=Транспорт; amount=1855.38"],"next_step":"Перевір витрати"}'
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary":"За останні 7 днів головний стрибок витрат дали разові великі покупки та маркет, а не звичайна щоденна дрібна витрата.","changes":["Реальні витрати різко зросли відносно попередніх 7 днів, і основний внесок дали великі категорії витрат.","Категорія Маркет/Побут стала одним із ключових драйверів поточного тижня."],"recs":["Перевір, чи великі покупки цього тижня були разовими, щоб не сприймати їх як нову норму.","Окремо відстеж наступні 7 днів витрати на маркет і транспорт — це найконтрольованіші точки впливу."],"next_step":"На найближчі 7 днів зафіксуй ліміт на маркет і перевір, чи тижневі витрати повернуться до базового рівня."}'
+                    }
+                }
+            ]
+        },
+    ]
+
+    def fake_post(payload):
+        calls.append(payload)
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr(client, "_post", fake_post)
+
+    try:
+        report = client.generate_report_v2("system", "user")
+        assert len(calls) == 2
+        assert "transactions_count=" not in report.summary
+        assert all("=" not in item for item in report.changes)
+        assert all("=" not in item for item in report.recs)
+    finally:
+        client.close()

@@ -129,6 +129,86 @@ def build_report_mode_keyboard(*, det_callback: str, ai_callback: str, back_call
     )
 
 
+def build_reports_custom_calendar_keyboard(
+    *,
+    year: int,
+    month: int,
+    step: str,
+    start_date: str | None = None,
+    today_iso: str | None = None,
+) -> Any:
+    import calendar
+    from datetime import datetime, timezone
+
+    month_names = {
+        1: "січень",
+        2: "лютий",
+        3: "березень",
+        4: "квітень",
+        5: "травень",
+        6: "червень",
+        7: "липень",
+        8: "серпень",
+        9: "вересень",
+        10: "жовтень",
+        11: "листопад",
+        12: "грудень",
+    }
+    weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
+    if today_iso:
+        today = datetime.strptime(today_iso, "%Y-%m-%d").date()
+    else:
+        today = datetime.now(timezone.utc).date()
+
+    start_day = None
+    if start_date:
+        try:
+            start_day = datetime.strptime(start_date, "%Y-%m-%d").date()
+        except Exception:
+            start_day = None
+
+    rows: list[list[tuple[str, str]]] = []
+    rows.append(
+        [
+            ("◀️", f"menu:reports:custom:cal:nav:{step}:{year}:{month}:-1"),
+            (f"{month_names.get(month, str(month))} {year}", "menu:reports:custom:cal:noop"),
+            ("▶️", f"menu:reports:custom:cal:nav:{step}:{year}:{month}:1"),
+        ]
+    )
+    rows.append([(day, "menu:reports:custom:cal:noop") for day in weekdays])
+
+    cal = calendar.Calendar(firstweekday=0)
+    for week in cal.monthdayscalendar(year, month):
+        row: list[tuple[str, str]] = []
+        for day in week:
+            if day <= 0:
+                row.append((" ", "menu:reports:custom:cal:noop"))
+                continue
+
+            iso = f"{year:04d}-{month:02d}-{day:02d}"
+            try:
+                current_day = datetime.strptime(iso, "%Y-%m-%d").date()
+            except Exception:
+                row.append((str(day), "menu:reports:custom:cal:noop"))
+                continue
+
+            if current_day > today or (
+                step == "end" and start_day is not None and current_day < start_day
+            ):
+                row.append((str(day), "menu:reports:custom:cal:noop"))
+                continue
+
+            row.append((str(day), f"menu:reports:custom:cal:pick:{step}:{iso}"))
+        rows.append(row)
+
+    if step == "end" and start_date:
+        rows.append([(f"Start: {start_date}", "menu:reports:custom:cal:noop")])
+        rows.append([(BTN_BACK, "menu:reports:custom:cal:back:start")])
+    else:
+        rows.append([(BTN_BACK, "menu:reports")])
+    return _build_rows(rows)
+
+
 def build_data_menu_keyboard() -> Any:
     return _build_rows(
         [
@@ -149,7 +229,6 @@ def build_insights_menu_keyboard() -> Any:
             [("📈 Trends", "menu:insights:trends")],
             [("🚨 Anomalies", "menu:insights:anomalies")],
             [("🧮 What-if", "menu:insights:whatif")],
-            [("🔮 Forecast", "menu:insights:forecast")],
             [("🧠 Explain", "menu:insights:explain")],
             [(BTN_BACK, "menu:root")],
         ]

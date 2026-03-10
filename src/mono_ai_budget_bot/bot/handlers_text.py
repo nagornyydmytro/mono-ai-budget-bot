@@ -191,7 +191,12 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                     Rule(id=rid, leaf_id=leaf_id, merchant_contains=item.description),
                 )
 
-                remaining = [x for x in items if x.tx_id != item.tx_id]
+                description_key = item.description.lower().strip()
+                remaining = [
+                    x
+                    for x in items
+                    if x.tx_id != item.tx_id and x.description.lower().strip() != description_key
+                ]
                 ctx.uncat_store.save(user_id, remaining)
                 ctx.uncat_pending_store.mark_used(user_id)
                 ctx.uncat_pending_store.clear(user_id)
@@ -222,6 +227,15 @@ def register_text_handlers(dp, *, ctx: HandlerContext) -> None:
                 connect_success_confirm_text=templates.connect_success_confirm(),
                 render_accounts_screen=render_accounts_screen,
                 error_text_factory=templates.error,
+                manual_source=str(manual.get("source") or ""),
+                profile_store=ctx.profile_store,
+                tx_store=ctx.tx_store,
+                report_store=ctx.store,
+                rules_store=ctx.rules_store,
+                uncat_store=ctx.uncat_store,
+                uncat_pending_store=ctx.uncat_pending_store,
+                load_memory=memory_store.load_memory,
+                save_memory=memory_store.save_memory,
             )
             if handled:
                 return

@@ -5,6 +5,7 @@ import time
 from statistics import median
 from typing import Any
 
+from mono_ai_budget_bot.analytics.classify import classify_kind
 from mono_ai_budget_bot.analytics.compare import compare_window_to_baseline
 from mono_ai_budget_bot.analytics.coverage import CoverageStatus, classify_coverage
 from mono_ai_budget_bot.analytics.period_report import build_period_report_from_ledger
@@ -32,6 +33,7 @@ from mono_ai_budget_bot.nlq.tabular import (
     render_top_merchants,
     suggest_merchant_candidates_detailed,
 )
+from mono_ai_budget_bot.nlq.text_norm import norm
 from mono_ai_budget_bot.storage.tx_store import TxStore
 from mono_ai_budget_bot.storage.user_store import UserStore
 
@@ -71,6 +73,66 @@ from .executor_support import (
 from .executor_support import (
     top_recipient_candidates as _top_recipient_candidates,
 )
+
+_GENERIC_RECIPIENT_ALIAS_PREFIXES = ("дівчин", "дівчат", "мам", "тат", "оренд", "квартир")
+
+
+def _recipient_name_stems(alias: str) -> list[str]:
+    raw = norm(alias)
+    if not raw:
+        return []
+
+    out: list[str] = [raw]
+    for suffix in ("ії", "ій", "ію", "ия", "і", "у", "а", "ю", "я", "е", "о"):
+        if raw.endswith(suffix) and len(raw) - len(suffix) >= 3:
+            out.append(raw[: -len(suffix)])
+
+    dedup: list[str] = []
+    for item in out:
+        if item and item not in dedup:
+            dedup.append(item)
+    return dedup
+
+
+def _is_generic_recipient_alias(alias: str) -> bool:
+    s = norm(alias)
+    return any(s.startswith(prefix) for prefix in _GENERIC_RECIPIENT_ALIAS_PREFIXES)
+
+
+def _direct_recipient_candidates(
+    rows,
+    *,
+    alias: str,
+    kind_prefix: str,
+    limit: int = 5,
+) -> list[str]:
+    stems = _recipient_name_stems(alias)
+    if not stems:
+        return []
+
+    scored: dict[str, int] = {}
+
+    for r in rows:
+        kind = classify_kind(r.amount, r.mcc, r.description)
+        if kind_prefix == "transfer_out" and kind != "transfer_out":
+            continue
+        if kind_prefix == "transfer_in" and kind != "transfer_in":
+            continue
+
+        desc = str(r.description or "").strip()
+        if not desc:
+            continue
+
+        desc_norm = norm(desc)
+        if not desc_norm:
+            continue
+
+        tokens = desc_norm.split()
+        if any(stem in desc_norm or any(tok.startswith(stem) for tok in tokens) for stem in stems):
+            scored[desc] = scored.get(desc, 0) + abs(int(r.amount))
+
+    items = sorted(scored.items(), key=lambda kv: kv[1], reverse=True)
+    return [name for name, _ in items[:limit]]
 
 
 def _maybe_llm_rank_alias(alias: str, candidates: list[tuple[str, int]]) -> list[tuple[str, int]]:
@@ -345,24 +407,61 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         )
 
     recipient_alias = str(intent_payload.get("recipient_alias") or "").strip().lower()
+    recipient_target = str(intent_payload.get("recipient_target") or "").strip()
+    recipient_mode = str(intent_payload.get("recipient_mode") or "").strip().lower()
+    recipient_explicit_name = bool(intent_payload.get("recipient_explicit_name"))
+    if recipient_explicit_name and not recipient_mode:
+        recipient_mode = "explicit"
+
     if intent.startswith("transfer_") and recipient_alias:
+        kind_prefix = "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
         learned_candidates = resolve_recipient_candidates(telegram_user_id, recipient_alias) or []
-        if len(learned_candidates) > 1:
+        direct_candidates = _direct_recipient_candidates(
+            rows,
+            alias=recipient_alias,
+            kind_prefix=kind_prefix,
+            limit=5,
+        )
+
+        if recipient_mode == "explicit":
+            recipient_candidates_pref = learned_candidates or direct_candidates
+        else:
+            recipient_candidates_pref = learned_candidates
+
+        if len(recipient_candidates_pref) > 1:
             set_pending_intent(
                 telegram_user_id,
                 intent_payload,
                 kind="recipient",
-                options=learned_candidates,
+                options=recipient_candidates_pref,
             )
             return templates.nlq_recipient_ambiguous_with_options(
-                alias=recipient_alias, options=learned_candidates
+                alias=recipient_alias, options=recipient_candidates_pref
             )
 
-        if not learned_candidates:
-            kind_prefix = "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
-            options = _top_recipient_candidates(rows, kind_prefix=kind_prefix, limit=5)
-            set_pending_intent(telegram_user_id, intent_payload, kind="recipient", options=options)
+        if not recipient_candidates_pref:
+            if recipient_mode == "explicit":
+                set_pending_intent(
+                    telegram_user_id,
+                    intent_payload,
+                    kind="recipient",
+                    options=[],
+                )
+                return templates.nlq_recipient_ambiguous_no_options(
+                    alias=recipient_target or recipient_alias
+                )
 
+            options = direct_candidates or _top_recipient_candidates(
+                rows,
+                kind_prefix=kind_prefix,
+                limit=5,
+            )
+            set_pending_intent(
+                telegram_user_id,
+                intent_payload,
+                kind="recipient",
+                options=options or [],
+            )
             if options:
                 return templates.nlq_recipient_ambiguous_with_options(
                     alias=recipient_alias, options=options
@@ -377,8 +476,17 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     recipient_match: str | None = None
     if recipient_alias and intent.startswith("transfer_"):
         recipient_candidates = resolve_recipient_candidates(telegram_user_id, recipient_alias) or []
+        if not recipient_candidates and recipient_mode == "explicit":
+            recipient_candidates = _direct_recipient_candidates(
+                rows,
+                alias=recipient_alias,
+                kind_prefix=(
+                    "transfer_out" if intent.startswith("transfer_out_") else "transfer_in"
+                ),
+                limit=5,
+            )
         if len(recipient_candidates) == 1:
-            recipient_match = recipient_candidates[0]
+            recipient_match = recipient_candidates[0].strip().lower()
 
     filter_intent = _filter_intent_for_payload(intent, intent_payload)
 
@@ -466,6 +574,17 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return _with_cov(f"{prefix} було {len(matched)} операцій {cmp_text} {amount_text}.")
 
     if intent == "last_time":
+        threshold_uah = intent_payload.get("threshold_uah")
+        try:
+            threshold_cents = (
+                int(round(float(threshold_uah) * 100)) if threshold_uah is not None else None
+            )
+        except Exception:
+            threshold_cents = None
+
+        if threshold_cents is not None and threshold_cents > 0:
+            filtered = [r for r in filtered if abs(int(r.amount)) > threshold_cents]
+
         if not filtered:
             return _with_cov("Не знайшов жодної операції для такого запиту.")
         last_row = max(filtered, key=lambda r: int(r.time))
@@ -825,6 +944,21 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         )
 
     if intent == "spend_sum":
+        spend_basis = str(intent_payload.get("spend_basis") or "gross").strip().lower()
+        use_real_spend = (
+            spend_basis == "real"
+            and not merchant_filter
+            and not recipient_match
+            and (spec is None or spec.category is None)
+        )
+
+        if use_real_spend:
+            report = _build_current_period_report(rows, ts_from, ts_to)
+            current = report.get("current", {}) if isinstance(report, dict) else {}
+            totals = current.get("totals", {}) if isinstance(current, dict) else {}
+            total_uah = float(totals.get("real_spend_total_uah") or 0.0)
+            return _with_cov(templates.nlq_spend_sum_line(prefix, format_money_grn(total_uah)))
+
         total_cents = engine.sum_cents(filtered, intent)
         parts: list[str] = [
             templates.nlq_spend_sum_line(prefix, format_money_grn(total_cents / 100))

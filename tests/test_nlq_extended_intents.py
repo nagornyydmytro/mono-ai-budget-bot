@@ -207,3 +207,101 @@ def test_executor_top_categories_biggest_category_format(monkeypatch):
     )
     assert "Цього місяця: найбільша категорія —" in msg
     assert "\n1. " not in msg
+
+
+def test_executor_last_time_threshold_with_merchant(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: NOW_TS)
+    monkeypatch.setattr(
+        ex,
+        "load_memory",
+        lambda telegram_user_id: {
+            "recipient_aliases": {},
+            "merchant_aliases": {"сільпо": "silpo"},
+            "category_aliases": {},
+            "pending_intent": None,
+            "pending_kind": None,
+            "pending_options": None,
+        },
+    )
+    monkeypatch.setattr(ex, "save_memory", lambda telegram_user_id, data: None)
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "last_time",
+            "entity_kind": "spend",
+            "merchant_contains": "сільпо",
+            "threshold_uah": 100.0,
+            "days": 30,
+        },
+    )
+    assert "Остання операція була" in msg
+    assert "SILPO" in msg
+
+
+def test_executor_transfer_out_explicit_name_sets_recipient_clarify_when_needed(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: NOW_TS)
+    monkeypatch.setattr(
+        ex,
+        "load_memory",
+        lambda telegram_user_id: {
+            "recipient_aliases": {},
+            "merchant_aliases": {},
+            "category_aliases": {},
+            "pending_intent": None,
+            "pending_kind": None,
+            "pending_options": None,
+        },
+    )
+    monkeypatch.setattr(ex, "save_memory", lambda telegram_user_id, data: None)
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "transfer_out_sum",
+            "days": 30,
+            "recipient_alias": "мамі",
+            "recipient_explicit_name": False,
+        },
+    )
+    assert "Кого саме" in msg or "Не знайшов" in msg or "За останні 30 днів ти переказав" in msg
+
+
+def test_executor_transfer_out_explicit_name_uses_direct_ledger_match(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: NOW_TS)
+    monkeypatch.setattr(
+        ex,
+        "load_memory",
+        lambda telegram_user_id: {
+            "recipient_aliases": {},
+            "merchant_aliases": {},
+            "category_aliases": {},
+            "pending_intent": None,
+            "pending_kind": None,
+            "pending_options": None,
+        },
+    )
+    monkeypatch.setattr(ex, "save_memory", lambda telegram_user_id, data: None)
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "transfer_out_sum",
+            "days": 30,
+            "recipient_alias": "мама",
+            "recipient_explicit_name": True,
+        },
+    )
+    assert "За останні 30 днів ти переказав 190.00 грн." in msg

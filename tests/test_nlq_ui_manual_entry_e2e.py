@@ -167,3 +167,27 @@ def test_recipient_alias_is_not_saved_without_ledger_evidence(tmp_path, monkeypa
     mem = ms.load_memory(1)
     ra = mem.get("recipient_aliases")
     assert not isinstance(ra, dict) or "дівчині" not in ra
+
+
+def test_pending_clarify_is_abandoned_when_user_asks_new_full_question(tmp_path, monkeypatch):
+    _patch_stores(monkeypatch, tmp_path)
+
+    ms.set_pending_intent(
+        1,
+        payload={"intent": "spend_sum", "days": 30, "merchant_contains": "каршерінг"},
+        kind="category_alias",
+        options=["Getmancar", "Aston express"],
+    )
+
+    resp = handle_nlq(
+        NLQRequest(
+            telegram_user_id=1,
+            text="Скільки я витратив на транспорт за останні 30 днів?",
+            now_ts=2000,
+        )
+    )
+    assert resp.result is not None
+    assert "транспорт" in resp.result.text.lower() or "грн" in resp.result.text.lower()
+
+    mem = ms.load_memory(1)
+    assert mem.get("pending_kind") is None
