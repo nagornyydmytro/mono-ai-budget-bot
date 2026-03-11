@@ -83,19 +83,15 @@ def test_profile_store_roundtrip(tmp_path):
 
 def test_quiet_preserves_custom_toggles_and_custom_restores_them():
     prof = apply_onboarding_settings({}, activity_mode="custom")
-    prof = set_activity_toggle(prof, "forecast_alerts", True)
     prof = set_activity_toggle(prof, "coach_nudges", True)
 
     quiet = set_activity_mode(prof, "quiet")
     assert quiet["activity_mode"] == "quiet"
-    assert quiet["activity"]["toggles"]["forecast_alerts"] is False
     assert quiet["activity"]["toggles"]["coach_nudges"] is False
-    assert quiet["activity"]["custom_toggles"]["forecast_alerts"] is True
     assert quiet["activity"]["custom_toggles"]["coach_nudges"] is True
 
     restored = set_activity_mode(quiet, "custom")
     assert restored["activity_mode"] == "custom"
-    assert restored["activity"]["toggles"]["forecast_alerts"] is True
     assert restored["activity"]["toggles"]["coach_nudges"] is True
 
 
@@ -105,7 +101,6 @@ def test_activity_helpers_reflect_effective_behavior_flags():
     assert is_activity_enabled(prof, "uncat_prompts") is True
     assert is_activity_enabled(prof, "trends_alerts") is True
     assert is_activity_enabled(prof, "anomalies_alerts") is True
-    assert is_activity_enabled(prof, "forecast_alerts") is True
     assert is_activity_enabled(prof, "coach_nudges") is True
 
     prof = set_activity_mode(prof, "quiet")
@@ -113,7 +108,6 @@ def test_activity_helpers_reflect_effective_behavior_flags():
     assert is_activity_enabled(prof, "uncat_prompts") is False
     assert is_activity_enabled(prof, "trends_alerts") is False
     assert is_activity_enabled(prof, "anomalies_alerts") is False
-    assert is_activity_enabled(prof, "forecast_alerts") is False
     assert is_activity_enabled(prof, "coach_nudges") is False
 
     prof = set_activity_toggle(prof, "anomalies_alerts", True)
@@ -122,5 +116,4 @@ def test_activity_helpers_reflect_effective_behavior_flags():
     assert is_activity_enabled(prof, "uncat_prompts") is True
     assert is_activity_enabled(prof, "trends_alerts") is False
     assert is_activity_enabled(prof, "anomalies_alerts") is True
-    assert is_activity_enabled(prof, "forecast_alerts") is False
     assert is_activity_enabled(prof, "coach_nudges") is False

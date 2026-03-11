@@ -256,21 +256,6 @@ def build_activity_proactive_messages(profile: dict, facts: dict | None) -> list
                 f"🚨 Anomaly nudge\n{label}: факт {format_money_uah_pretty(fact_uah)} при базі ~{format_money_uah_pretty(base_uah)}."
             )
 
-    if is_activity_enabled(profile, "forecast_alerts"):
-        totals = facts.get("totals") or {}
-        if isinstance(totals, dict):
-            spend_uah = float(totals.get("real_spend_total_uah") or 0.0)
-            if spend_uah > 0:
-                messages.append(
-                    "\n".join(
-                        [
-                            "🔮 Forecast nudge",
-                            f"Поточна deterministic projection на 30 днів: ~{format_money_uah_pretty(spend_uah)} реальних витрат.",
-                            "Це механічна проєкція, а не prediction magic.",
-                        ]
-                    )
-                )
-
     if is_activity_enabled(profile, "coach_nudges"):
         whatifs = facts.get("whatif_suggestions") or []
         if isinstance(whatifs, list) and whatifs:

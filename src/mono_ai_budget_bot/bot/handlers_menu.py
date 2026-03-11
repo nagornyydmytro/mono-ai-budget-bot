@@ -393,31 +393,6 @@ def _render_whatif_pct_body(facts: dict, pct: int) -> str | None:
     return "\n".join(lines).strip()
 
 
-def _render_forecast_projection_body(facts: dict, metric: str) -> str | None:
-    totals = facts.get("totals") or {}
-    if not isinstance(totals, dict):
-        return None
-
-    if metric == "income":
-        label = "Надходження"
-        value = float(totals.get("income_total_uah") or 0.0)
-    else:
-        label = "Реальні витрати"
-        value = float(totals.get("real_spend_total_uah") or 0.0)
-
-    if value <= 0:
-        return None
-
-    return "\n".join(
-        [
-            "*Forecast (deterministic projection):*",
-            f"• База: останні 30 днів = {label.lower()} {format_money_uah_pretty(value)}",
-            f"• Якщо поточний темп збережеться, наступні 30 днів ≈ {format_money_uah_pretty(value)}",
-            "• Це не prediction magic і не ML-прогноз, а механічна проєкція з уже підготовленого 30-денного вікна.",
-        ]
-    ).strip()
-
-
 def _render_explain_body(facts: dict) -> str | None:
     trends = facts.get("trends") or {}
     anomalies_raw = facts.get("anomalies")
@@ -606,7 +581,6 @@ def register_menu_handlers(dp, *, ctx: HandlerContext) -> None:
         load_month_facts=_load_month_facts,
         render_insight_body=_render_insight_body,
         render_whatif_pct_body=_render_whatif_pct_body,
-        render_forecast_projection_body=_render_forecast_projection_body,
         render_explain_body=_render_explain_body,
     )
 

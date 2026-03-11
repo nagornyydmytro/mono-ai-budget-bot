@@ -255,16 +255,6 @@ def build_insights_whatif_keyboard() -> Any:
     )
 
 
-def build_insights_forecast_keyboard() -> Any:
-    return _build_rows(
-        [
-            [("💸 Real spend projection", "menu:insights:forecast:view:spend")],
-            [("💰 Income projection", "menu:insights:forecast:view:income")],
-            [(BTN_BACK, "menu:insights")],
-        ]
-    )
-
-
 def build_personalization_menu_keyboard() -> Any:
     return _build_rows(
         [
@@ -447,7 +437,6 @@ def build_activity_custom_toggles_keyboard(enabled: dict[str, bool]) -> Any:
         "uncat_prompts": "Uncategorized prompts",
         "trends_alerts": "Trend nudges",
         "anomalies_alerts": "Anomaly nudges",
-        "forecast_alerts": "Forecast nudges",
         "coach_nudges": "Coach nudges",
     }
     order = [
@@ -455,7 +444,6 @@ def build_activity_custom_toggles_keyboard(enabled: dict[str, bool]) -> Any:
         "uncat_prompts",
         "trends_alerts",
         "anomalies_alerts",
-        "forecast_alerts",
         "coach_nudges",
     ]
 

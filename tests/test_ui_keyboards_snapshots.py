@@ -149,7 +149,6 @@ def test_activity_custom_toggles_keyboard_snapshot():
             "uncat_prompts": False,
             "trends_alerts": True,
             "anomalies_alerts": False,
-            "forecast_alerts": False,
             "coach_nudges": True,
         }
     )
@@ -158,7 +157,6 @@ def test_activity_custom_toggles_keyboard_snapshot():
         [("❌ Uncategorized prompts", "menu:personalization:activity:toggle:uncat_prompts")],
         [("✅ Trend nudges", "menu:personalization:activity:toggle:trends_alerts")],
         [("❌ Anomaly nudges", "menu:personalization:activity:toggle:anomalies_alerts")],
-        [("❌ Forecast nudges", "menu:personalization:activity:toggle:forecast_alerts")],
         [("✅ Coach nudges", "menu:personalization:activity:toggle:coach_nudges")],
         [("✅ Done", "menu:personalization:done")],
         [("⬅️ Назад", "menu:personalization:activity")],

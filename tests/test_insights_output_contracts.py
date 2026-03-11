@@ -1,6 +1,5 @@
 from mono_ai_budget_bot.bot.handlers_menu import (
     _render_explain_body,
-    _render_forecast_projection_body,
     _render_insight_body,
     _render_whatif_pct_body,
 )
@@ -80,31 +79,6 @@ def test_render_whatif_pct_body_contract():
     assert "120.00 ₴/міс" in text
 
 
-def test_render_forecast_projection_body_contract_for_spend():
-    text = _render_forecast_projection_body(
-        {"totals": {"real_spend_total_uah": 456.0, "income_total_uah": 1234.0}},
-        "spend",
-    )
-
-    assert text is not None
-    assert "Forecast (deterministic projection)" in text
-    assert "реальні витрати 456.00 ₴" in text
-    assert "наступні 30 днів ≈ 456.00 ₴" in text
-    assert "не prediction magic" in text
-
-
-def test_render_forecast_projection_body_contract_for_income():
-    text = _render_forecast_projection_body(
-        {"totals": {"real_spend_total_uah": 456.0, "income_total_uah": 1234.0}},
-        "income",
-    )
-
-    assert text is not None
-    assert "Forecast (deterministic projection)" in text
-    assert "надходження 1 234.00 ₴" in text
-    assert "наступні 30 днів ≈ 1 234.00 ₴" in text
-
-
 def test_render_explain_body_contract():
     text = _render_explain_body(
         {
@@ -134,8 +108,4 @@ def test_render_explain_body_contract():
 def test_render_helpers_return_none_on_missing_or_invalid_data():
     assert _render_insight_body("menu:insights:trends", {}) is None
     assert _render_whatif_pct_body({}, 10) is None
-    assert _render_forecast_projection_body({}, "spend") is None
-    assert (
-        _render_forecast_projection_body({"totals": {"real_spend_total_uah": 0.0}}, "spend") is None
-    )
     assert _render_explain_body({"totals": {"real_spend_total_uah": 500.0}}) is None

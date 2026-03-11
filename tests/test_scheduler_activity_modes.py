@@ -82,7 +82,6 @@ def test_build_activity_proactive_messages_quiet_returns_no_messages():
                 "uncat_prompts": False,
                 "trends_alerts": False,
                 "anomalies_alerts": False,
-                "forecast_alerts": False,
                 "coach_nudges": False,
             },
             "custom_toggles": {
@@ -90,7 +89,6 @@ def test_build_activity_proactive_messages_quiet_returns_no_messages():
                 "uncat_prompts": True,
                 "trends_alerts": True,
                 "anomalies_alerts": True,
-                "forecast_alerts": True,
                 "coach_nudges": True,
             },
         },
@@ -109,7 +107,6 @@ def test_build_activity_proactive_messages_loud_returns_all_expected_messages():
                 "uncat_prompts": True,
                 "trends_alerts": True,
                 "anomalies_alerts": True,
-                "forecast_alerts": True,
                 "coach_nudges": True,
             },
             "custom_toggles": {
@@ -117,17 +114,15 @@ def test_build_activity_proactive_messages_loud_returns_all_expected_messages():
                 "uncat_prompts": True,
                 "trends_alerts": False,
                 "anomalies_alerts": False,
-                "forecast_alerts": False,
                 "coach_nudges": False,
             },
         },
     }
 
     msgs = build_activity_proactive_messages(profile, _facts())
-    assert len(msgs) == 4
+    assert len(msgs) == 3
     assert any("📈 Trends nudge" in x for x in msgs)
     assert any("🚨 Anomaly nudge" in x for x in msgs)
-    assert any("🔮 Forecast nudge" in x for x in msgs)
     assert any("🧮 Coach nudge" in x for x in msgs)
 
 
@@ -141,7 +136,6 @@ def test_build_activity_proactive_messages_custom_respects_selected_toggles_only
                 "uncat_prompts": True,
                 "trends_alerts": True,
                 "anomalies_alerts": False,
-                "forecast_alerts": True,
                 "coach_nudges": False,
             },
             "custom_toggles": {
@@ -149,16 +143,14 @@ def test_build_activity_proactive_messages_custom_respects_selected_toggles_only
                 "uncat_prompts": True,
                 "trends_alerts": True,
                 "anomalies_alerts": False,
-                "forecast_alerts": True,
                 "coach_nudges": False,
             },
         },
     }
 
     msgs = build_activity_proactive_messages(profile, _facts())
-    assert len(msgs) == 2
+    assert len(msgs) == 1
     assert any("📈 Trends nudge" in x for x in msgs)
-    assert any("🔮 Forecast nudge" in x for x in msgs)
     assert all("🚨 Anomaly nudge" not in x for x in msgs)
     assert all("🧮 Coach nudge" not in x for x in msgs)
 
@@ -175,7 +167,6 @@ def test_maybe_send_activity_proactive_messages_sends_only_allowed_outputs():
                     "uncat_prompts": True,
                     "trends_alerts": False,
                     "anomalies_alerts": True,
-                    "forecast_alerts": False,
                     "coach_nudges": True,
                 },
                 "custom_toggles": {
@@ -183,7 +174,6 @@ def test_maybe_send_activity_proactive_messages_sends_only_allowed_outputs():
                     "uncat_prompts": True,
                     "trends_alerts": False,
                     "anomalies_alerts": True,
-                    "forecast_alerts": False,
                     "coach_nudges": True,
                 },
             },
@@ -207,7 +197,6 @@ def test_maybe_send_activity_proactive_messages_sends_only_allowed_outputs():
     assert any("🚨 Anomaly nudge" in x for x in texts)
     assert any("🧮 Coach nudge" in x for x in texts)
     assert all("📈 Trends nudge" not in x for x in texts)
-    assert all("🔮 Forecast nudge" not in x for x in texts)
 
 
 def test_maybe_send_activity_proactive_messages_skips_when_autojobs_disabled():
@@ -565,7 +554,7 @@ def test_maybe_send_activity_proactive_messages_applies_cooldown_and_suppresses_
         )
     )
 
-    assert len(bot.sent) == 4
+    assert len(bot.sent) == 3
 
 
 def test_maybe_send_scheduled_auto_report_dedupes_same_period_report(monkeypatch):

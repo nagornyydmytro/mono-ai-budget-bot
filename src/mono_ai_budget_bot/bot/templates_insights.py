@@ -61,16 +61,5 @@ def menu_insights_whatif_message() -> str:
     ).strip()
 
 
-def menu_insights_forecast_message() -> str:
-    return "\n".join(
-        [
-            "🔮 *Forecast*",
-            "",
-            "Обери тип проєкції.",
-            "Це deterministic projection, а не prediction magic.",
-        ]
-    ).strip()
-
-
 def ai_insights_progress_message() -> str:
     return "🤖 Генерую AI інсайти…"

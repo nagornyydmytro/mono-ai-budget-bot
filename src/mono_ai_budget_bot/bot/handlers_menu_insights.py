@@ -22,7 +22,6 @@ def register_insights_handlers(
     load_month_facts: Callable[[HandlerContext, int], dict | None],
     render_insight_body: Callable[[str, dict], str | None],
     render_whatif_pct_body: Callable[[dict, int], str | None],
-    render_forecast_projection_body: Callable[[dict, str], str | None],
     render_explain_body: Callable[[dict], str | None],
 ) -> None:
     @dp.callback_query(lambda c: isinstance(c.data, str) and c.data == "menu:insights")
@@ -48,7 +47,6 @@ def register_insights_handlers(
             "menu:insights:trends",
             "menu:insights:anomalies",
             "menu:insights:whatif",
-            "menu:insights:forecast",
             "menu:insights:explain",
         }
     )
@@ -70,7 +68,6 @@ def register_insights_handlers(
             "menu:insights:trends": "📈 *Trends*",
             "menu:insights:anomalies": "🚨 *Anomalies*",
             "menu:insights:whatif": "🧮 *What-if*",
-            "menu:insights:forecast": "🔮 *Forecast*",
             "menu:insights:explain": "🧠 *Explain*",
         }
         section_label = label_map.get(str(query.data or ""), "✨ *Insights*")
@@ -91,14 +88,6 @@ def register_insights_handlers(
                 query,
                 text=templates.menu_insights_whatif_message(),
                 reply_markup=build_insights_whatif_keyboard(),
-            )
-            return
-
-        if insight_key == "menu:insights:forecast":
-            await render_menu_screen(
-                query,
-                text=templates.menu_insights_message(),
-                reply_markup=build_insights_menu_keyboard(),
             )
             return
 
@@ -199,23 +188,4 @@ def register_insights_handlers(
                 body,
             ),
             reply_markup=build_back_keyboard("menu:insights:whatif"),
-        )
-
-    @dp.callback_query(
-        lambda c: isinstance(c.data, str)
-        and c.data in {"menu:insights:forecast:view:spend", "menu:insights:forecast:view:income"}
-    )
-    async def cb_menu_insight_forecast_variants(query: CallbackQuery) -> None:
-        if not await ctx.gate_menu_dependencies(
-            query,
-            require_token=True,
-            require_accounts=True,
-            require_ledger=True,
-        ):
-            return
-
-        await render_menu_screen(
-            query,
-            text=templates.menu_insights_message(),
-            reply_markup=build_insights_menu_keyboard(),
         )

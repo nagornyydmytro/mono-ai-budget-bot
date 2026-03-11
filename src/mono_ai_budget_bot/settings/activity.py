@@ -9,7 +9,6 @@ ActivityToggleKey = Literal[
     "uncat_prompts",
     "trends_alerts",
     "anomalies_alerts",
-    "forecast_alerts",
     "coach_nudges",
 ]
 
@@ -18,7 +17,6 @@ _ACTIVITY_KEYS: tuple[ActivityToggleKey, ...] = (
     "uncat_prompts",
     "trends_alerts",
     "anomalies_alerts",
-    "forecast_alerts",
     "coach_nudges",
 )
 
@@ -30,7 +28,6 @@ def default_activity_toggles(mode: ActivityMode) -> dict[ActivityToggleKey, bool
             "uncat_prompts": False,
             "trends_alerts": False,
             "anomalies_alerts": False,
-            "forecast_alerts": False,
             "coach_nudges": False,
         }
 
@@ -40,7 +37,6 @@ def default_activity_toggles(mode: ActivityMode) -> dict[ActivityToggleKey, bool
             "uncat_prompts": True,
             "trends_alerts": False,
             "anomalies_alerts": False,
-            "forecast_alerts": False,
             "coach_nudges": False,
         }
 
@@ -49,7 +45,6 @@ def default_activity_toggles(mode: ActivityMode) -> dict[ActivityToggleKey, bool
         "uncat_prompts": True,
         "trends_alerts": True,
         "anomalies_alerts": True,
-        "forecast_alerts": True,
         "coach_nudges": True,
     }
 
