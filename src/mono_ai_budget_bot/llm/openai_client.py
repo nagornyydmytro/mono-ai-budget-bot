@@ -465,6 +465,10 @@ class OpenAIClient:
             "Якщо запит поза межами персональної фінансової аналітики — поверни mode='unsupported'. "
             "Не редукуй reasoning-heavy запити до простого count/sum, якщо користувач просить патерни, звички, регулярність, "
             "аномалії, інтерпретацію порівнянь, merchant/category explanation або currency explanation. "
+            "Не пиши технічні ключі, raw field names, schema_json, facts_json, slot_summary або debug-style текст. "
+            "Якщо даєш narrative answer, він має додавати нову цінність: висновок, причину або практичний next step, "
+            "а не просто повторювати totals. "
+            "Якщо просиш уточнення, формулюй його людською мовою, без технічних назв полів. "
             "Поверни тільки JSON-об'єкт строго за схемою NLQInterpretationV1 без зайвих полів. "
             "answer або question мають бути user-facing українською, коротко і змістовно."
         )

@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
+from mono_ai_budget_bot.bot import templates
 from mono_ai_budget_bot.config import load_settings
 from mono_ai_budget_bot.llm.openai_client import OpenAIClient
 from mono_ai_budget_bot.llm.tooling import execute_tool_call
@@ -579,10 +580,7 @@ def _open_question_clarification_text(
 ) -> str | None:
     if not _needs_open_question_clarification(req, deterministic_intent):
         return None
-    return (
-        "Уточни, будь ласка, що саме проаналізувати: витрати, доходи чи перекази. "
-        "Можеш також додати період, наприклад за місяць або за 7 днів."
-    )
+    return templates.nlq_clarify_scope_message()
 
 
 def _select_answer_policy(
@@ -891,6 +889,90 @@ def _missing_narrative_facts_text(
     )
 
 
+def _strip_llm_debug_text(text: str) -> str:
+    lines = [line.strip() for line in str(text or "").splitlines()]
+    bad_markers = (
+        "user_text=",
+        "schema_json=",
+        "facts_json=",
+        "slot_summary",
+        "merchant_targets",
+        "recipient_alias",
+        "threshold_uah",
+        "comparison_mode",
+        "target_type",
+        "original_query_spec",
+    )
+    kept = [line for line in lines if line and not any(marker in line for marker in bad_markers)]
+    cleaned = " ".join(kept) if kept else str(text or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _looks_like_total_only_llm_answer(answer: str) -> bool:
+    text = str(answer or "").strip()
+    if not text:
+        return False
+    if (
+        "За останні" not in text
+        and "Цього місяця" not in text
+        and "Вчора" not in text
+        and "Сьогодні" not in text
+    ):
+        return False
+    insight_markers = (
+        "бо ",
+        "тому що",
+        "схоже",
+        "ймовірно",
+        "це означає",
+        "виглядає",
+        "звич",
+        "патерн",
+        "регуляр",
+        "разов",
+        "аномал",
+        "варто",
+        "спробуй",
+        "зверни увагу",
+        "причин",
+    )
+    lowered = text.lower()
+    return not any(marker in lowered for marker in insight_markers)
+
+
+def _polish_llm_narrative_answer(answer: str, facts_payload: dict[str, object]) -> str | None:
+    cleaned = _strip_llm_debug_text(answer)
+    if not cleaned:
+        return None
+
+    preview = facts_payload.get("deterministic_preview")
+    preview_answer = preview.get("answer") if isinstance(preview, dict) else None
+    if isinstance(preview_answer, str) and cleaned == preview_answer.strip():
+        return (
+            "Бачу базовий підсумок по цифрах, але корисний висновок тут залежить від того, "
+            "що саме тебе цікавить: патерни, причини змін чи конкретне порівняння."
+        )
+
+    if _looks_like_total_only_llm_answer(cleaned):
+        return (
+            "Бачу базовий підсумок по цифрах, але тут ще варто уточнити, "
+            "який саме висновок тобі потрібен: патерни, звички, причини змін чи порівняння."
+        )
+
+    return cleaned
+
+
+def _polish_llm_clarify_question(question: str) -> str | None:
+    cleaned = _strip_llm_debug_text(question)
+    if not cleaned:
+        return None
+    cleaned = cleaned.rstrip(". ").strip()
+    if not cleaned.endswith("?"):
+        cleaned = f"{cleaned}?"
+    return cleaned
+
+
 def _llm_narrative_response(
     req: NLQRequest,
     deterministic_intent: NLQIntent | None,
@@ -925,8 +1007,13 @@ def _llm_narrative_response(
     elif mode == "semantic_clarify":
         mode = "clarify"
 
+    if mode == "narrative_answer":
+        mode = "narrative"
+    elif mode == "semantic_clarify":
+        mode = "clarify"
+
     if mode == "narrative":
-        answer = str(raw.get("answer") or "").strip()
+        answer = _polish_llm_narrative_answer(str(raw.get("answer") or ""), facts_payload)
         if not answer:
             return None
         return NLQResponse(
@@ -941,7 +1028,7 @@ def _llm_narrative_response(
         )
 
     if mode == "clarify":
-        question = str(raw.get("question") or "").strip()
+        question = _polish_llm_clarify_question(str(raw.get("question") or ""))
         if not question:
             return None
         return NLQResponse(

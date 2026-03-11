@@ -62,6 +62,63 @@ def nlq_recipient_not_found(*, alias: str) -> str:
     return f"Не знайшов отримувача '{alias}' у твоїй виписці за цей період."
 
 
+def nlq_clarify_scope_message() -> str:
+    return (
+        "Уточни, будь ласка, що саме проаналізувати: витрати, доходи чи перекази. "
+        "Можеш також додати період, наприклад за місяць або за 7 днів."
+    )
+
+
+def nlq_last_time_line(*, when_text: str, description: str, amount: str) -> str:
+    return f"Остання операція була {when_text}: {description} — {amount}."
+
+
+def nlq_recurrence_line(
+    *, prefix: str, operations: int, active_days: int, median_gap_days: int
+) -> str:
+    return (
+        f"{prefix}: {operations} операцій у {active_days} активних днях. "
+        f"Медіанний інтервал — {median_gap_days} дн."
+    )
+
+
+def nlq_share_line(*, prefix: str, label: str, amount: str, share_percent: str) -> str:
+    return f"{prefix}: {label} — {amount}, це {share_percent}% від усіх витрат."
+
+
+def nlq_compare_previous_money_line(
+    *,
+    prefix: str,
+    current_amount: str,
+    previous_amount: str,
+    delta_amount: str,
+    verdict: str,
+) -> str:
+    return (
+        f"{prefix}: {current_amount}. "
+        f"За попередній такий самий період: {previous_amount}. "
+        f"Різниця: {delta_amount} грн. "
+        f"Висновок: витрати {verdict}."
+    )
+
+
+def nlq_compare_previous_count_line(
+    *,
+    prefix: str,
+    current_count: int,
+    previous_count: int,
+    delta_count: int,
+    verdict: str,
+) -> str:
+    sign = "+" if delta_count >= 0 else ""
+    return (
+        f"{prefix}: {current_count} операцій. "
+        f"За попередній такий самий період: {previous_count}. "
+        f"Різниця: {sign}{delta_count}. "
+        f"Висновок: подій {verdict}."
+    )
+
+
 def nlq_prefix_today() -> str:
     return "Сьогодні"
 

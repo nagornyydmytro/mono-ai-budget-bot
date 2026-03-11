@@ -695,7 +695,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if last_row is None:
             return _with_cov("Не знайшов жодної операції для такого запиту.")
         return _with_cov(
-            f"Остання операція була {format_ts_local(int(last_row.time))[:16]}: {last_row.description} — {format_money_grn(abs(int(last_row.amount)) / 100)}."
+            templates.nlq_last_time_line(
+                when_text=format_ts_local(int(last_row.time))[:16],
+                description=str(last_row.description),
+                amount=format_money_grn(abs(int(last_row.amount)) / 100),
+            )
         )
 
     if intent == "recurrence_summary":
@@ -706,7 +710,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         rows_for_summary = recurring if recurring else canonical_filtered
         op_count, active_days, median_gap = engine.recurrence_stats(rows_for_summary)
         return _with_cov(
-            f"{prefix}: {op_count} операцій у {active_days} активних днях. Медіанний інтервал — {median_gap} дн."
+            templates.nlq_recurrence_line(
+                prefix=prefix,
+                operations=op_count,
+                active_days=active_days,
+                median_gap_days=median_gap,
+            )
         )
 
     if intent in {"spend_summary_short", "spend_insights_three", "spend_unusual_summary"}:
@@ -835,7 +844,6 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         _, previous_value = _previous_value()
 
         delta_value = int(current_value - previous_value)
-        sign = "+" if delta_value >= 0 else ""
 
         if current_value > previous_value:
             verdict = "більші"
@@ -846,17 +854,24 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
 
         if canonical_metric == "count":
             return _with_cov(
-                f"{prefix}: {current_value} операцій. "
-                f"За попередній такий самий період: {previous_value}. "
-                f"Різниця: {sign}{delta_value}. "
-                f"Висновок: подій {verdict}."
+                templates.nlq_compare_previous_count_line(
+                    prefix=prefix,
+                    current_count=int(current_value),
+                    previous_count=int(previous_value),
+                    delta_count=int(delta_value),
+                    verdict=verdict,
+                )
             )
 
+        sign = "+" if delta_value >= 0 else ""
         return _with_cov(
-            f"{prefix}: {format_money_grn(current_value / 100)}. "
-            f"За попередній такий самий період: {format_money_grn(previous_value / 100)}. "
-            f"Різниця: {sign}{format_decimal_2(delta_value / 100)} грн. "
-            f"Висновок: витрати {verdict}."
+            templates.nlq_compare_previous_money_line(
+                prefix=prefix,
+                current_amount=format_money_grn(current_value / 100),
+                previous_amount=format_money_grn(previous_value / 100),
+                delta_amount=f"{sign}{format_decimal_2(delta_value / 100)}",
+                verdict=verdict,
+            )
         )
 
     if intent == "between_entities":
@@ -1086,7 +1101,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 kind="spend",
             )
             return _with_cov(
-                f"{prefix}: {category_name} — {format_money_grn(numerator_cents / 100)}, це {format_decimal_2(share)}% від усіх витрат."
+                templates.nlq_share_line(
+                    prefix=prefix,
+                    label=category_name,
+                    amount=format_money_grn(numerator_cents / 100),
+                    share_percent=format_decimal_2(share),
+                )
             )
 
         merchant_label = (
@@ -1116,7 +1136,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             kind="spend",
         )
         return _with_cov(
-            f"{prefix}: {merchant_label} — {format_money_grn(numerator_cents / 100)}, це {format_decimal_2(share)}% від усіх витрат."
+            templates.nlq_share_line(
+                prefix=prefix,
+                label=merchant_label,
+                amount=format_money_grn(numerator_cents / 100),
+                share_percent=format_decimal_2(share),
+            )
         )
 
     if intent == "spend_sum":
