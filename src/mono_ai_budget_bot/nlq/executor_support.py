@@ -54,19 +54,21 @@ def normalize_coverage_status_for_nlq(
     if status != CoverageStatus.partial or coverage_window is None:
         return status
 
-    if not has_rows_in_window:
-        return status
-
     cov_to = int(coverage_window[1])
     requested_to_ts = int(requested_to_ts)
+    lag_sec = requested_to_ts - cov_to
 
     if cov_to >= requested_to_ts:
         return CoverageStatus.ok
 
-    if requested_to_ts - cov_to <= 3600:
+    if has_rows_in_window and lag_sec <= 3600:
         return CoverageStatus.ok
 
-    if format_ts_local(cov_to)[:10] == format_ts_local(requested_to_ts)[:10]:
+    if (
+        not has_rows_in_window
+        and lag_sec <= 60
+        and format_ts_local(cov_to)[:10] == format_ts_local(requested_to_ts)[:10]
+    ):
         return CoverageStatus.ok
 
     return status

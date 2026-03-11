@@ -61,3 +61,32 @@ def test_executor_income_and_transfers(monkeypatch):
 
     s = execute_intent(uid, {"intent": "transfer_in_sum", "days": 30})
     assert "30.00" in s
+
+
+def test_executor_spend_sum_uses_gross_by_default_and_real_when_requested(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: 2000)
+
+    uid = 1
+
+    s = execute_intent(uid, {"intent": "spend_sum", "days": 30})
+    assert "70.00" in s
+
+    s = execute_intent(uid, {"intent": "spend_sum", "days": 30, "spend_basis": "real"})
+    assert "50.00" in s
+
+
+def test_executor_transactions_count_uses_all_rows(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: 2000)
+
+    uid = 1
+
+    s = execute_intent(uid, {"intent": "spend_count", "days": 30, "count_scope": "transactions"})
+    assert "5 транзакцій" in s

@@ -599,6 +599,30 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
     def _count_current(rows_subset) -> int:
         return engine.count_for_rows(rows_subset)
 
+    def _sum_gross_spend_total(rows_subset) -> int:
+        total = 0
+        for r in rows_subset:
+            kind = classify_kind(
+                getattr(r, "amount", 0),
+                getattr(r, "mcc", None),
+                getattr(r, "description", ""),
+            )
+            if kind in {"spend", "transfer_out"}:
+                total += abs(int(getattr(r, "amount", 0) or 0))
+        return total
+
+    def _sum_real_spend_total(rows_subset) -> int:
+        total = 0
+        for r in rows_subset:
+            kind = classify_kind(
+                getattr(r, "amount", 0),
+                getattr(r, "mcc", None),
+                getattr(r, "description", ""),
+            )
+            if kind == "spend":
+                total += abs(int(getattr(r, "amount", 0) or 0))
+        return total
+
     def _previous_value() -> tuple[int, int]:
         prev_from_ts, prev_total_cents = _sum_previous_period_filtered(
             tx_store,
@@ -1150,21 +1174,28 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             if spec is not None
             else str(intent_payload.get("spend_basis") or "gross").strip().lower()
         )
-        use_real_spend = (
-            spend_basis == "real"
-            and not merchant_filter
-            and not recipient_match
-            and (spec is None or spec.category is None)
+        resolved_category = (
+            spec.category
+            if spec is not None
+            else (
+                category_resolution.normalized_values[0]
+                if category_resolution.normalized_values
+                else None
+            )
+        )
+        generic_total_request = (
+            not merchant_filter and not recipient_match and resolved_category is None
         )
 
-        if use_real_spend:
-            report = _build_current_period_report(rows, ts_from, ts_to)
-            current = report.get("current", {}) if isinstance(report, dict) else {}
-            totals = current.get("totals", {}) if isinstance(current, dict) else {}
-            total_uah = float(totals.get("real_spend_total_uah") or 0.0)
-            return _with_cov(templates.nlq_spend_sum_line(prefix, format_money_grn(total_uah)))
+        if generic_total_request:
+            total_cents = (
+                _sum_real_spend_total(rows)
+                if spend_basis == "real"
+                else _sum_gross_spend_total(rows)
+            )
+        else:
+            total_cents = _sum_current(canonical_filtered)
 
-        total_cents = _sum_current(canonical_filtered)
         parts: list[str] = [
             templates.nlq_spend_sum_line(prefix, format_money_grn(total_cents / 100))
         ]
@@ -1202,6 +1233,24 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         return _with_cov("\n".join(parts))
 
     if intent == "spend_count":
+        resolved_category = (
+            spec.category
+            if spec is not None
+            else (
+                category_resolution.normalized_values[0]
+                if category_resolution.normalized_values
+                else None
+            )
+        )
+        count_scope = str(intent_payload.get("count_scope") or "").strip().lower()
+        generic_transactions_request = (
+            count_scope == "transactions"
+            and not merchant_filter
+            and not recipient_match
+            and resolved_category is None
+        )
+        if generic_transactions_request:
+            return _with_cov(templates.nlq_transactions_count_line(prefix, len(rows)))
         return _with_cov(templates.nlq_spend_count_line(prefix, _count_current(canonical_filtered)))
 
     if intent == "income_sum":

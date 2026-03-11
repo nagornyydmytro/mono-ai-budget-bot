@@ -143,6 +143,10 @@ def nlq_spend_count_line(prefix: str, n: int) -> str:
     return f"{prefix} було {n} витрат."
 
 
+def nlq_transactions_count_line(prefix: str, n: int) -> str:
+    return f"{prefix} було {n} транзакцій."
+
+
 def nlq_income_sum_line(prefix: str, amount: str) -> str:
     return f"{prefix} було поповнень на {amount}."
 

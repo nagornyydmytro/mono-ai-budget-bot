@@ -11,7 +11,16 @@ from mono_ai_budget_bot.nlq.types import NLQIntent, NLQRequest
 
 _DAYS_RE = re.compile(r"(\d{1,3})\s*(?:дн|днів|дня|days)\b", re.IGNORECASE)
 _INCOME_RE = re.compile(
-    r"\b(дох(ід|оди|одів)|поповнен\w*|зачислен\w*|пополнен\w*|top\s*up|income|депозит)\b",
+    (
+        r"\b("
+        r"дох(ід|оди|одів)|"
+        r"зароб(ив|ила|ити|іток|ітки)?|"
+        r"поповнен\w*|"
+        r"зачислен\w*|"
+        r"пополнен\w*|"
+        r"top\s*up|income|депозит"
+        r")\b"
+    ),
     re.IGNORECASE,
 )
 
@@ -34,6 +43,14 @@ _TRANSFER_IN_RE = re.compile(
 )
 
 _COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
+_TRANSACTION_COUNT_RE = re.compile(
+    r"\b(транзакц(ій|ии)|операц(ій|ии)|операції)\b",
+    re.IGNORECASE,
+)
+_REAL_SPEND_RE = re.compile(
+    r"\b(реальн\w*\s+витрат\w*|real\s+spend|без\s+переказ\w*)\b",
+    re.IGNORECASE,
+)
 
 _COMPARE_RE = re.compile(
     r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян\w*|порівняй|порівняти|compare)\b",
@@ -436,6 +453,8 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
 
     intent: str | None = None
     entity_kind = "spend"
+    count_scope: str | None = None
+    spend_basis = "real" if _REAL_SPEND_RE.search(t) is not None else "gross"
     want_sum = bool(
         re.search(
             r"\b(скільки|сколько|how\s+much|на\s+суму|сума|сумма|amount|sum|яка\s+.*сума)\b",
@@ -470,9 +489,11 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
 
     if intent is None:
         entity_kind = "spend"
-        count_markers = [
+        transaction_count_markers = [
             "транзакц",
             "операц",
+        ]
+        spend_count_markers = [
             "покуп",
             "скільки було витрат",
             "кількість витрат",
@@ -487,7 +508,10 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
             "сума витрат",
             "spent",
         ]
-        if any(mk in t for mk in count_markers) or is_count:
+        if any(mk in t for mk in transaction_count_markers):
+            intent = "spend_count"
+            count_scope = "transactions"
+        elif any(mk in t for mk in spend_count_markers) or is_count:
             intent = "spend_count"
         elif any(mk in t for mk in spend_sum_markers) or want_sum:
             intent = "spend_sum"
@@ -600,6 +624,8 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "comparison_mode": comparison_mode,
         "aggregation": aggregation,
         "target_type": target_type,
+        "count_scope": count_scope,
+        "spend_basis": spend_basis,
         "slots_confidence": slots_confidence,
         "llm_candidate": llm_candidate,
         "top_n": _extract_top_n(t) if intent in {"top_categories", "top_merchants"} else None,

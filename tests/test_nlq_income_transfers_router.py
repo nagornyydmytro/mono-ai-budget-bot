@@ -30,3 +30,20 @@ def test_router_income_sum_with_v_mene_phrase():
     p = parse_nlq_intent("Скільки в мене було доходів за останні 30 днів?")
     assert p["intent"] == "income_sum"
     assert p["merchant_contains"] is None
+
+
+def test_router_income_sum_for_zarobyv():
+    p = parse_nlq_intent("Скільки я заробив за місяць?")
+    assert p["intent"] == "income_sum"
+
+
+def test_router_real_spend_basis_detected():
+    p = parse_nlq_intent("Які в мене реальні витрати за тиждень?")
+    assert p["intent"] == "spend_sum"
+    assert p["spend_basis"] == "real"
+
+
+def test_router_transaction_count_scope_detected():
+    p = parse_nlq_intent("Скільки в мене було транзакцій за тиждень?")
+    assert p["intent"] == "spend_count"
+    assert p["count_scope"] == "transactions"
