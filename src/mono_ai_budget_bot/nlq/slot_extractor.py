@@ -17,27 +17,44 @@ _RECIPIENT_ALIAS_RE = re.compile(
     r"\b(дівчин(і|е|у|а)|дівчат(ам|ами|ах)?|мам(і|е|у|а)|тат(ові|у|а)|оренд(а|і|у)|квартир(а|і|у))\b",
     re.IGNORECASE,
 )
-_PREVIOUS_PERIOD_RE = re.compile(r"\b(поперед\w*|прошл\w*|previous|prior)\b", re.IGNORECASE)
-_BASELINE_RE = re.compile(r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline)\b", re.IGNORECASE)
-_COUNT_RE = re.compile(r"\b(скільки\s+разів|кількість|count|how\s+many)\b", re.IGNORECASE)
-_SHARE_RE = re.compile(r"\b(частка|доля|share|відсот(ок|ка|ки))\b", re.IGNORECASE)
+_PREVIOUS_PERIOD_RE = re.compile(
+    r"\b(попередн\w*|прошл\w*|previous|prior|минул\w*|останн\w*\s+період)\b",
+    re.IGNORECASE,
+)
+_BASELINE_RE = re.compile(
+    r"\b(зазвич(ай|но)|звичайн(о|ий)|usual|baseline|типово|як\s+правило)\b",
+    re.IGNORECASE,
+)
+_COUNT_RE = re.compile(
+    r"\b(скільки\s+разів|кількість|count|how\s+many|скільки\s+було)\b",
+    re.IGNORECASE,
+)
+_SHARE_RE = re.compile(
+    r"\b(частка|доля|share|відсот(ок|ка|ки)|який\s+відсоток|скільки\s+відсотків)\b",
+    re.IGNORECASE,
+)
 _LAST_TIME_RE = re.compile(
     r"\b(коли(?:\s+\w+){0,3}\s+останн(ій|є)|коли(?:\s+\w+){0,3}\s+востаннє|last\s+time|when\s+was\s+the\s+last)\b",
     re.IGNORECASE,
 )
 _RECURRENCE_RE = re.compile(
-    r"\b(як\s+часто|наскільки\s+регулярно|regularly|recurr|регулярно)\b",
+    r"\b(як\s+часто|наскільки\s+регулярно|regularly|recurr|регулярно|часто\s+чи\s+рідко)\b",
     re.IGNORECASE,
 )
-_TOP_RE = re.compile(r"\bтоп-?\s*\d*\b", re.IGNORECASE)
-_OR_SPLIT_RE = re.compile(r"\s+(?:або|чи|or|й|та|and|і)\s+", re.IGNORECASE)
+_TOP_RE = re.compile(
+    r"\b(топ-?\s*\d*|найбільш\w*|найтяжч\w*|найбільш\w*\s+категор\w*)\b", re.IGNORECASE
+)
+_OR_SPLIT_RE = re.compile(r"\s+(?:або|чи|or|й|та|and|і|плюс)\s+", re.IGNORECASE)
 _COMPARE_BETWEEN_RE = re.compile(
-    r"\b(що\s+більше|що\s+менше|хто\s+більше|хто\s+менше|на\s+скільки|порівняй|порівняти|compare)\b",
+    r"\b(що\s+більше|що\s+менше|хто\s+більше|хто\s+менше|на\s+скільки|різниц\w*|відрізня\w*|порівняй|порівняти|compare)\b",
     re.IGNORECASE,
 )
-_COMBINE_RE = re.compile(r"\b(разом|сумарно|сукупно|всього\s+разом)\b", re.IGNORECASE)
+_COMBINE_RE = re.compile(
+    r"\b(разом|сумарно|сукупно|всього\s+разом|у\s+сумі|разом\s+пішло)\b", re.IGNORECASE
+)
 _AVG_TICKET_RE = re.compile(
-    r"\b(середн(ій|ій\s+чек|ій\s+чеку)|average\s+ticket|avg)\b", re.IGNORECASE
+    r"\b(середн(ій|я|є)?\s*(чек|сума\s+покупки|сума\s+транзакції)?|average\s+ticket|avg(\s+ticket)?)\b",
+    re.IGNORECASE,
 )
 
 
@@ -206,6 +223,22 @@ def _split_multi_target(raw: str) -> list[str]:
     return uniq
 
 
+def _looks_like_explicit_merchant(prep: str, item: str) -> bool:
+    p = (prep or "").strip().lower()
+    s = (item or "").strip()
+    if not s:
+        return False
+
+    latin = re.search(r"[a-z]", s, flags=re.IGNORECASE) is not None
+    has_quote = any(ch in s for ch in ('"', "«", "»"))
+    title_like = re.match(r"^[A-ZА-ЯІЇЄҐ][\w'’`-]+$", s) is not None
+
+    if p in {"у", "в"}:
+        return latin or has_quote or title_like
+
+    return p == "на" and (latin or has_quote or title_like)
+
+
 def _extract_merchant_targets(text: str) -> tuple[list[str], bool, str | None]:
     t = (text or "").strip()
     lower = t.lower()
@@ -229,20 +262,26 @@ def _extract_merchant_targets(text: str) -> tuple[list[str], bool, str | None]:
         return [], False, None
     if cand.startswith("яку категорію"):
         return [], False, None
-    if re.fullmatch(r"(поперед\w*|прошл\w*|previous|prior)", cand, flags=re.IGNORECASE):
+    if re.fullmatch(r"(попередн\w*|прошл\w*|previous|prior)", cand, flags=re.IGNORECASE):
+        return [], False, None
+    if detect_category(cand) is not None and not _looks_like_explicit_merchant(prep, cand):
         return [], False, None
     candidates = _split_multi_target(cand)
     merchant_targets: list[str] = []
     display_targets: list[str] = []
+    explicit_single = False
     for item in candidates:
-        cat = detect_category(item)
-        if cat is not None:
-            continue
         if prep in {"у", "в"} and re.match(r"^(мене|меня|me)\b", item, flags=re.IGNORECASE):
+            continue
+        explicit_merchant = _looks_like_explicit_merchant(prep, item)
+        cat = detect_category(item)
+        if cat is not None and not explicit_merchant:
             continue
         merchant_targets.append(norm(item))
         display_targets.append(item.lower())
-    exact = prep in {"у", "в"} and len(merchant_targets) == 1
+        if explicit_merchant:
+            explicit_single = True
+    exact = len(merchant_targets) == 1 and explicit_single
     display = None
     if display_targets:
         display = " або ".join(display_targets) if len(display_targets) > 1 else display_targets[0]
@@ -260,7 +299,11 @@ def _extract_category_targets(text: str) -> list[str]:
     if ":" in s:
         raw_candidates.append(str(s.split(":", 1)[1] or "").strip())
 
-    raw_candidates.append(s)
+    merchant_targets, merchant_exact, _ = _extract_merchant_targets(s)
+    if merchant_targets and merchant_exact:
+        raw_candidates.append(s)
+    else:
+        raw_candidates.append(s)
 
     out: list[str] = []
     seen: set[str] = set()
@@ -341,7 +384,11 @@ def _detect_comparison_mode(text: str) -> str | None:
     t = (text or "").lower()
     if _BASELINE_RE.search(t) is not None:
         return "baseline"
-    if _PREVIOUS_PERIOD_RE.search(t) is not None:
+    if _PREVIOUS_PERIOD_RE.search(t) is not None and re.search(
+        r"\b(порівняй|порівняти|compare|різниц\w*|відрізня\w*|більш\w*|менш\w*|більше|менше)\b",
+        t,
+        flags=re.IGNORECASE,
+    ):
         return "previous_period"
     if re.search(r"\b(?:між|between)\b", t) and _OR_SPLIT_RE.search(t):
         return "between_entities"
@@ -379,6 +426,10 @@ def extract_slots(text: str, now_ts: int) -> SlotExtractionResult:
     recipient_slots = _extract_recipient_slots(text)
     comparison_mode = _detect_comparison_mode(text)
     aggregation = _detect_aggregation(text)
+
+    if merchant_targets and merchant_exact and category_targets:
+        category_targets = []
+
     target_type = None
     if recipient_slots["recipient_target"]:
         target_type = "recipient"

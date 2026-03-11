@@ -313,3 +313,19 @@ def test_router_top_merchants_biggest_phrase():
     p = parse_nlq_intent("У якого мерчанта я витратив найбільше за тиждень?")
     assert p["intent"] == "top_merchants"
     assert p["top_n"] == 1
+
+
+def test_router_income_salary_phrase():
+    p = parse_nlq_intent("Яка в мене зарплата за місяць?")
+    assert p["intent"] == "income_sum"
+
+
+def test_router_compare_delta_phrase():
+    p = parse_nlq_intent("Яка різниця між маркет/побут і кафе/ресторани за місяць?")
+    assert p["intent"] == "between_entities"
+
+
+def test_router_avg_ticket_alt_phrase():
+    p = parse_nlq_intent("Яка середня сума покупки у Bolt за тиждень?")
+    assert p["intent"] == "spend_sum"
+    assert p["aggregation"] == "avg_ticket"

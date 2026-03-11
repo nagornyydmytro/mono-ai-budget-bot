@@ -13,12 +13,16 @@ _DAYS_RE = re.compile(r"(\d{1,3})\s*(?:дн|днів|дня|days)\b", re.IGNOREC
 _INCOME_RE = re.compile(
     (
         r"\b("
-        r"дох(ід|оди|одів)|"
-        r"зароб(ив|ила|ити|іток|ітки)?|"
+        r"дох(ід|оди|одів|одами)?|"
+        r"зароб(ив|ила|или|ити|іток|ітки|лено)?|"
+        r"отриман(ий|і)?\s+дохід|"
+        r"salary|зарплат\w*|"
         r"поповнен\w*|"
         r"зачислен\w*|"
         r"пополнен\w*|"
-        r"top\s*up|income|депозит"
+        r"надходжен\w*|"
+        r"income|earning\w*|earn\w*|"
+        r"top\s*up|депозит"
         r")\b"
     ),
     re.IGNORECASE,
@@ -31,11 +35,15 @@ _TRANSFER_IN_RE = re.compile(
         r"входящ\w*\s+перевод\w*|"
         r"incoming\s+transfer(s)?|"
         r"inbound\s+transfer(s)?|"
+        r"received\s+transfer(s)?|"
         r"переказ\w*\s+на\s+карт\w*|"
         r"перевод\w*\s+на\s+карт\w*|"
-        r"отрим(ав|ала|ати)?|"
+        r"отрим(ав|ала|али|ати)?|"
+        r"отриман\w*|"
         r"прийшл(и|о)|"
         r"надійшл(и|о)|"
+        r"зайшл(о|и)|"
+        r"зарахувал\w*|"
         r"received|got"
         r")\b"
     ),
@@ -48,12 +56,12 @@ _TRANSACTION_COUNT_RE = re.compile(
     re.IGNORECASE,
 )
 _REAL_SPEND_RE = re.compile(
-    r"\b(реальн\w*\s+витрат\w*|real\s+spend|без\s+переказ\w*)\b",
+    r"\b(реальн\w*\s+витрат\w*|чист\w*\s+витрат\w*|real\s+spend|без\s+переказ\w*|без\s+внутрішн\w*\s+переказ\w*)\b",
     re.IGNORECASE,
 )
 
 _COMPARE_RE = re.compile(
-    r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|порівнян\w*|порівняй|порівняти|compare)\b",
+    r"\b(на\s+скільки|скільки\s+більше|скільки\s+менше|що\s+більше|що\s+менше|хто\s+більше|хто\s+менше|різниц\w*|відрізня\w*|порівнян\w*|порівняй|порівняти|compare)\b",
     re.IGNORECASE,
 )
 
@@ -124,7 +132,7 @@ _THRESHOLD_RE = re.compile(
 )
 
 _PREVIOUS_PERIOD_RE = re.compile(
-    r"\b(поперед\w*|прошл\w*|previous|prior)\b",
+    r"\b(попередн\w*|прошл\w*|previous|prior)\b",
     re.IGNORECASE,
 )
 
@@ -133,9 +141,14 @@ _TOP_MERCHANTS_RE = re.compile(
         r"\b("
         r"топ-?\s*\d*\s*мерчант\w*|"
         r"топ-?\s*\d*\s*merchant\w*|"
+        r"найбільш\w*\s+мерчант\w*|"
+        r"топ-?\s*\d*\s*магазин\w*|"
         r"де\s+я\s+витратив\s+найбільше|"
         r"у\s+якого\s+мерчант\w*.*найбільше|"
-        r"хто\s+(?:перший|другий|третій).*\bмерчант"
+        r"у\s+якого\s+магазин\w*.*найбільше|"
+        r"на\s+який\s+магазин.*найбільше|"
+        r"хто\s+(?:перший|другий|третій).*\bмерчант|"
+        r"який\s+(?:перший|другий|третій|найбільший)\s+мерчант"
         r")\b"
     ),
     re.IGNORECASE,
@@ -184,6 +197,8 @@ _TOP_CATEGORIES_RE = re.compile(
         r"яка\s+категорія\s+найбільш\w*|"
         r"яка\s+(?:друга|третя)\s+найбільш\w*\s+категор\w*|"
         r"яка\s+(?:найбільш\w*|друга|третя)\s+категор\w*|"
+        r"найбільш\w*\s+категор\w*|"
+        r"найтяжч\w*\s+категор\w*|"
         r"топ-?\s*\d*\s*категор"
         r")"
     ),
@@ -191,17 +206,17 @@ _TOP_CATEGORIES_RE = re.compile(
 )
 
 _SHARE_RE = re.compile(
-    r"\b(частка|доля|share|відсот(ок|ка|ки))\b",
+    r"\b(частка|доля|share|відсот(ок|ка|ки)|який\s+відсоток|скільки\s+відсотків)\b",
     re.IGNORECASE,
 )
 
 _AVG_TICKET_RE = re.compile(
-    r"\b(середн(ій|ій\s+чек|ій\s+чеку)|average\s+ticket|avg)\b",
+    r"\b(середн(ій|я|є)?\s*(чек|сума\s+покупки|сума\s+транзакції)?|average\s+ticket|avg(\s+ticket)?)\b",
     re.IGNORECASE,
 )
 
 _COMBINE_RE = re.compile(
-    r"\b(разом|сумарно|сукупно|всього\s+разом)\b",
+    r"\b(разом|сумарно|сукупно|всього\s+разом|у\s+сумі|скільки\s+разом|разом\s+пішло)\b",
     re.IGNORECASE,
 )
 
@@ -520,10 +535,8 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         entity_kind = "income"
         if _INCOME_COUNT_PHRASING_RE.search(t):
             intent = "income_count"
-        elif want_sum:
-            intent = "income_sum"
         else:
-            intent = "income_count"
+            intent = "income_sum"
     if _TRANSFER_OUT_RE.search(t):
         entity_kind = "transfer_out"
         if _COUNT_PHRASING_RE.search(t) and re.search(r"\b(переказ(ів)?|транзакц(ій|ии))\b", t):
@@ -585,6 +598,10 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     aggregation = extracted.get("aggregation")
     target_type = extracted.get("target_type")
     category_targets = extracted.get("category_targets") or ([] if category is None else [category])
+    if merchant and category is not None and merchant_exact:
+        category = None
+        category_targets = []
+        target_type = "merchant"
     comparison_metric = None
     combine_mode = None
     rank_only = False

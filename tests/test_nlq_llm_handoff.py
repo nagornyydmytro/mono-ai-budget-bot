@@ -238,3 +238,18 @@ def test_open_ended_budget_advice_request_handoffs_over_wrong_deterministic_matc
 
     assert pl._select_answer_policy(req, deterministic) == "safe_llm"
     assert pl._select_execution_route(req, deterministic) == "planner"
+
+
+def test_open_ended_phrase_prostymy_slovamy_goes_safe_llm():
+    req = NLQRequest(
+        telegram_user_id=1,
+        text="Поясни простими словами, де я найбільше просідаю по бюджету за місяць",
+        now_ts=70_000,
+    )
+    deterministic = NLQIntent(
+        name="spend_sum",
+        slots={"intent": "spend_sum", "days": 30},
+    )
+
+    assert pl._select_answer_policy(req, deterministic) == "safe_llm"
+    assert pl._select_execution_route(req, deterministic) == "planner"
