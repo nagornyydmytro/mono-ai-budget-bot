@@ -63,6 +63,57 @@ class SlotExtractionResult:
     slots: dict[str, Any]
 
 
+_EXPLICIT_MERCHANT_WORDS = {
+    "мак",
+    "маку",
+    "макдональдс",
+    "mcdonalds",
+    "mcdonald",
+    "kfc",
+    "bolt",
+    "болт",
+    "bolt food",
+    "болт фуд",
+    "glovo",
+    "глово",
+    "wolt",
+    "волт",
+    "loko",
+    "novus",
+    "новус",
+    "сільпо",
+    "silpo",
+    "фора",
+    "атб",
+    "atb",
+    "rozetka",
+    "розетка",
+    "prom",
+    "пром",
+    "olx",
+    "олх",
+    "uber",
+    "убер",
+    "uklon",
+    "уклон",
+    "lifecell",
+    "лайфсел",
+    "лайфселл",
+    "київстар",
+    "kyivstar",
+    "vodafone",
+    "водафон",
+    "ютуб",
+    "ютюб",
+    "youtube",
+    "spotify",
+    "спотіфай",
+    "спотик",
+    "телеграм преміум",
+    "tg premium",
+}
+
+
 def _strip_period_tail(value: str) -> str:
     s = (value or "").strip()
     if not s:
@@ -229,14 +280,16 @@ def _looks_like_explicit_merchant(prep: str, item: str) -> bool:
     if not s:
         return False
 
+    ns = norm(s)
     latin = re.search(r"[a-z]", s, flags=re.IGNORECASE) is not None
     has_quote = any(ch in s for ch in ('"', "«", "»"))
     title_like = re.match(r"^[A-ZА-ЯІЇЄҐ][\w'’`-]+$", s) is not None
+    brand_like = ns in _EXPLICIT_MERCHANT_WORDS
 
     if p in {"у", "в"}:
-        return latin or has_quote or title_like
+        return latin or has_quote or title_like or brand_like
 
-    return p == "на" and (latin or has_quote or title_like)
+    return p == "на" and (latin or has_quote or title_like or brand_like)
 
 
 def _extract_merchant_targets(text: str) -> tuple[list[str], bool, str | None]:
@@ -385,7 +438,7 @@ def _detect_comparison_mode(text: str) -> str | None:
     if _BASELINE_RE.search(t) is not None:
         return "baseline"
     if _PREVIOUS_PERIOD_RE.search(t) is not None and re.search(
-        r"\b(порівняй|порівняти|compare|різниц\w*|відрізня\w*|більш\w*|менш\w*|більше|менше)\b",
+        r"\b(порівняй|порівняти|compare|різниц\w*|відрізня\w*|біл\w*|мен\w*)\b",
         t,
         flags=re.IGNORECASE,
     ):
