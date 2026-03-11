@@ -251,3 +251,65 @@ def test_router_transfer_with_explicit_recipient_name():
     p = parse_nlq_intent("Скільки я переказав Юлії за останні 30 днів?")
     assert p["intent"] == "transfer_out_sum"
     assert p["recipient_alias"] == "юлії"
+
+
+def test_router_compare_two_categories():
+    p = parse_nlq_intent("Що більше за місяць: маркет/побут чи кафе/ресторани?")
+    assert p["intent"] == "between_entities"
+    assert p["comparison_mode"] == "between_entities"
+    assert p["target_type"] == "category"
+    assert p["category_targets"] == ["Маркет/Побут", "Кафе/Ресторани"]
+
+
+def test_router_sum_two_categories():
+    p = parse_nlq_intent("Скільки разом пішло на маркет/побут і кафе/ресторани за місяць?")
+    assert p["intent"] == "between_entities"
+    assert p["combine_mode"] == "sum"
+    assert p["target_type"] == "category"
+    assert p["category_targets"] == ["Маркет/Побут", "Кафе/Ресторани"]
+
+
+def test_router_second_biggest_category():
+    p = parse_nlq_intent("Яка друга найбільша категорія витрат за місяць?")
+    assert p["intent"] == "top_categories"
+    assert p["top_n"] == 2
+    assert p["rank_position"] == 2
+    assert p["rank_only"] is True
+
+
+def test_router_avg_ticket_merchant():
+    p = parse_nlq_intent("Який середній чек у Bolt за тиждень?")
+    assert p["intent"] == "spend_sum"
+    assert p["aggregation"] == "avg_ticket"
+    assert p["merchant_contains"] == "bolt"
+
+
+def test_router_compare_spend_bases():
+    p = parse_nlq_intent("На скільки total spend за місяць більше за real spend?")
+    assert p["intent"] == "compare_spend_bases"
+
+
+def test_router_category_aliases_health_and_digital_and_electronics():
+    p1 = parse_nlq_intent("Скільки я витратив на аптеки/здоров’я за тиждень?")
+    assert p1["category"] == "Аптеки/Здоров'я"
+    assert p1["merchant_contains"] is None
+
+    p2 = parse_nlq_intent("Скільки я витратив на розваги/діджитал за тиждень?")
+    assert p2["category"] == "Розваги/Діджитал"
+    assert p2["merchant_contains"] is None
+
+    p3 = parse_nlq_intent("Скільки я витратив на техніку/електроніку за місяць?")
+    assert p3["category"] == "Техніка/Електроніка"
+    assert p3["merchant_contains"] is None
+
+
+def test_router_bars_alcohol_category():
+    p = parse_nlq_intent("Скільки я витратив на бари/алкоголь за тиждень?")
+    assert p["category"] == "Бари/Алкоголь"
+    assert p["merchant_contains"] is None
+
+
+def test_router_top_merchants_biggest_phrase():
+    p = parse_nlq_intent("У якого мерчанта я витратив найбільше за тиждень?")
+    assert p["intent"] == "top_merchants"
+    assert p["top_n"] == 1

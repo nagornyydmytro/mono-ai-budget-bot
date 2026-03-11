@@ -30,7 +30,15 @@ _RECURRENCE_RE = re.compile(
     re.IGNORECASE,
 )
 _TOP_RE = re.compile(r"\bтоп-?\s*\d*\b", re.IGNORECASE)
-_OR_SPLIT_RE = re.compile(r"\s+(?:або|чи|or|й|та|and)\s+", re.IGNORECASE)
+_OR_SPLIT_RE = re.compile(r"\s+(?:або|чи|or|й|та|and|і)\s+", re.IGNORECASE)
+_COMPARE_BETWEEN_RE = re.compile(
+    r"\b(що\s+більше|що\s+менше|хто\s+більше|хто\s+менше|на\s+скільки|порівняй|порівняти|compare)\b",
+    re.IGNORECASE,
+)
+_COMBINE_RE = re.compile(r"\b(разом|сумарно|сукупно|всього\s+разом)\b", re.IGNORECASE)
+_AVG_TICKET_RE = re.compile(
+    r"\b(середн(ій|ій\s+чек|ій\s+чеку)|average\s+ticket|avg)\b", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -243,24 +251,41 @@ def _extract_merchant_targets(text: str) -> tuple[list[str], bool, str | None]:
 
 def _extract_category_targets(text: str) -> list[str]:
     s = (text or "").strip()
+    raw_candidates: list[str] = []
+
     matches = re.findall(r"\b(?:на|у|в)\s+([^\?\.,!]+)", s, flags=re.IGNORECASE)
-    if not matches:
-        cat = detect_category(s)
-        return [cat] if cat else []
-    raw = str(matches[-1] or "").strip()
-    raw = re.split(r"\b(ніж|чем|than)\b", raw, maxsplit=1, flags=re.IGNORECASE)[0].strip()
-    raw = _strip_period_tail(raw)
-    raw = _strip_threshold_tail(raw)
-    raw = raw.strip(" .,!?:;\"'()[]{}").strip()
+    if matches:
+        raw_candidates.append(str(matches[-1] or "").strip())
+
+    if ":" in s:
+        raw_candidates.append(str(s.split(":", 1)[1] or "").strip())
+
+    raw_candidates.append(s)
+
     out: list[str] = []
-    for item in _split_multi_target(raw):
-        cat = detect_category(item)
-        if cat is not None and cat not in out:
-            out.append(cat)
-    if not out:
-        cat = detect_category(s)
-        if cat is not None:
-            out.append(cat)
+    seen: set[str] = set()
+
+    for raw in raw_candidates:
+        candidate = re.split(r"\b(ніж|чем|than)\b", raw, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        candidate = _strip_period_tail(candidate)
+        candidate = _strip_threshold_tail(candidate)
+        candidate = candidate.strip(" .,!?:;\"'()[]{}").strip()
+        if not candidate:
+            continue
+
+        items = _split_multi_target(candidate)
+        if not items:
+            items = [candidate]
+
+        for item in items:
+            cat = detect_category(item)
+            if cat is not None and cat not in seen:
+                seen.add(cat)
+                out.append(cat)
+
+        if len(out) >= 2:
+            return out
+
     return out
 
 
@@ -320,6 +345,8 @@ def _detect_comparison_mode(text: str) -> str | None:
         return "previous_period"
     if re.search(r"\b(?:між|between)\b", t) and _OR_SPLIT_RE.search(t):
         return "between_entities"
+    if _COMPARE_BETWEEN_RE.search(t) is not None and _OR_SPLIT_RE.search(t):
+        return "between_entities"
     return None
 
 
@@ -329,8 +356,12 @@ def _detect_aggregation(text: str) -> str | None:
         return "last_time"
     if _RECURRENCE_RE.search(t) is not None:
         return "recurrence"
+    if _AVG_TICKET_RE.search(t) is not None:
+        return "avg_ticket"
     if _TOP_RE.search(t) is not None:
         return "top"
+    if _COMBINE_RE.search(t) is not None:
+        return "sum_entities"
     if _SHARE_RE.search(t) is not None:
         return "share"
     if _COUNT_RE.search(t) is not None:

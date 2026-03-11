@@ -14,6 +14,8 @@ IntentName = Literal[
     "transfer_in_count",
     "compare_to_baseline",
     "compare_to_previous_period",
+    "compare_spend_bases",
+    "between_entities",
     "top_merchants",
     "top_categories",
     "category_share",

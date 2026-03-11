@@ -81,7 +81,12 @@ def canonical_intent_family(intent_name: str | None) -> IntentFamily:
         return "transfer_out"
     if name.startswith("transfer_in_"):
         return "transfer_in"
-    if name in {"compare_to_baseline", "compare_to_previous_period"}:
+    if name in {
+        "compare_to_baseline",
+        "compare_to_previous_period",
+        "compare_spend_bases",
+        "between_entities",
+    }:
         return "comparison"
     if name in {
         "top_merchants",

@@ -305,3 +305,108 @@ def test_executor_transfer_out_explicit_name_uses_direct_ledger_match(monkeypatc
         },
     )
     assert "За останні 30 днів ти переказав 190.00 грн." in msg
+
+
+def test_executor_between_entities_compare_and_sum_and_rank_and_avg(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: NOW_TS)
+    monkeypatch.setattr(
+        ex,
+        "load_memory",
+        lambda telegram_user_id: {
+            "recipient_aliases": {},
+            "merchant_aliases": {},
+            "category_aliases": {},
+            "pending_intent": None,
+            "pending_kind": None,
+            "pending_options": None,
+        },
+    )
+    monkeypatch.setattr(ex, "save_memory", lambda telegram_user_id, data: None)
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "between_entities",
+            "comparison_mode": "between_entities",
+            "comparison_metric": "sum",
+            "category_targets": ["Маркет/Побут", "Кафе/Ресторани"],
+            "target_type": "category",
+            "days": 30,
+        },
+    )
+    assert "Маркет/Побут" in msg
+    assert "Кафе/Ресторани" in msg
+    assert "Різниця:" in msg
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "between_entities",
+            "comparison_mode": "between_entities",
+            "comparison_metric": "sum",
+            "combine_mode": "sum",
+            "category_targets": ["Маркет/Побут", "Кафе/Ресторани"],
+            "target_type": "category",
+            "days": 30,
+        },
+    )
+    assert "разом на Маркет/Побут, Кафе/Ресторани" in msg
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "top_categories",
+            "top_n": 2,
+            "rank_position": 2,
+            "rank_only": True,
+            "days": 30,
+        },
+    )
+    assert "друга категорія" in msg.lower()
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "spend_sum",
+            "aggregation": "avg_ticket",
+            "merchant_contains": "coffee point",
+            "days": 30,
+        },
+    )
+    assert "середній чек" in msg.lower()
+
+
+def test_executor_compare_spend_bases(monkeypatch):
+    import mono_ai_budget_bot.nlq.executor as ex
+
+    monkeypatch.setattr(ex, "UserStore", lambda: DummyUserStore())
+    monkeypatch.setattr(ex, "TxStore", lambda: DummyTxStore())
+    monkeypatch.setattr(time, "time", lambda: NOW_TS)
+    monkeypatch.setattr(
+        ex,
+        "load_memory",
+        lambda telegram_user_id: {
+            "recipient_aliases": {},
+            "merchant_aliases": {},
+            "category_aliases": {},
+            "pending_intent": None,
+            "pending_kind": None,
+            "pending_options": None,
+        },
+    )
+    monkeypatch.setattr(ex, "save_memory", lambda telegram_user_id, data: None)
+
+    msg = ex.execute_intent(
+        1,
+        {
+            "intent": "compare_spend_bases",
+            "days": 30,
+        },
+    )
+    assert "total spend" in msg
+    assert "real spend" in msg
+    assert "Різниця:" in msg

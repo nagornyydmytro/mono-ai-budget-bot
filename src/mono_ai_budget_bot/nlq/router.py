@@ -129,7 +129,15 @@ _PREVIOUS_PERIOD_RE = re.compile(
 )
 
 _TOP_MERCHANTS_RE = re.compile(
-    r"\b(топ-?\s*\d*\s*мерчант\w*|топ-?\s*\d*\s*merchant\w*|де\s+я\s+витратив\s+найбільше)\b",
+    (
+        r"\b("
+        r"топ-?\s*\d*\s*мерчант\w*|"
+        r"топ-?\s*\d*\s*merchant\w*|"
+        r"де\s+я\s+витратив\s+найбільше|"
+        r"у\s+якого\s+мерчант\w*.*найбільше|"
+        r"хто\s+(?:перший|другий|третій).*\bмерчант"
+        r")\b"
+    ),
     re.IGNORECASE,
 )
 
@@ -169,12 +177,39 @@ _MERCHANT_AFTER_PLACE_RE = re.compile(
 )
 
 _TOP_CATEGORIES_RE = re.compile(
-    r"\b(на\s+що\s+я\s+найбільше|на\s+яку\s+категорію\s+я\s+витратив\s+найбільше|яка\s+категорія\s+найбільш\w*|топ-?\s*\d*\s*категор)",
+    (
+        r"\b("
+        r"на\s+що\s+я\s+найбільше|"
+        r"на\s+яку\s+категорію\s+я\s+витратив\s+найбільше|"
+        r"яка\s+категорія\s+найбільш\w*|"
+        r"яка\s+(?:друга|третя)\s+найбільш\w*\s+категор\w*|"
+        r"яка\s+(?:найбільш\w*|друга|третя)\s+категор\w*|"
+        r"топ-?\s*\d*\s*категор"
+        r")"
+    ),
     re.IGNORECASE,
 )
 
 _SHARE_RE = re.compile(
     r"\b(частка|доля|share|відсот(ок|ка|ки))\b",
+    re.IGNORECASE,
+)
+
+_AVG_TICKET_RE = re.compile(
+    r"\b(середн(ій|ій\s+чек|ій\s+чеку)|average\s+ticket|avg)\b",
+    re.IGNORECASE,
+)
+
+_COMBINE_RE = re.compile(
+    r"\b(разом|сумарно|сукупно|всього\s+разом)\b",
+    re.IGNORECASE,
+)
+
+_RANK_SECOND_RE = re.compile(r"\b(друг(а|ий)|second|2-?га|2-?й)\b", re.IGNORECASE)
+_RANK_THIRD_RE = re.compile(r"\b(трет(я|ій)|third|3-?тя|3-?й)\b", re.IGNORECASE)
+
+_SPEND_BASE_COMPARE_RE = re.compile(
+    r"\b(total\s+spend|all\s+spend|усіх\s+витрат|загальн\w+\s+витрат\w*)\b",
     re.IGNORECASE,
 )
 
@@ -287,6 +322,10 @@ def _extract_top_n(text: str) -> int:
             return max(1, min(int(m.group(1)), 10))
         except Exception:
             return 5
+    if _RANK_THIRD_RE.search(text or ""):
+        return 3
+    if _RANK_SECOND_RE.search(text or ""):
+        return 2
     if re.search(r"\bяка\s+категорія\s+найбільш\w*\b", text or "", flags=re.IGNORECASE):
         return 1
     if re.search(
@@ -297,7 +336,19 @@ def _extract_top_n(text: str) -> int:
         return 1
     if re.search(r"\bде\s+я\s+витратив\s+найбільше\b", text or "", flags=re.IGNORECASE):
         return 1
+    if re.search(r"\bу\s+якого\s+мерчант\w*.*найбільше\b", text or "", flags=re.IGNORECASE):
+        return 1
     return 5
+
+
+def _extract_rank_position(text: str) -> int | None:
+    if _RANK_THIRD_RE.search(text or ""):
+        return 3
+    if _RANK_SECOND_RE.search(text or ""):
+        return 2
+    if _extract_top_n(text) == 1:
+        return 1
+    return None
 
 
 def _is_non_merchant_prepositional_phrase(prep: str, cand: str) -> bool:
@@ -448,6 +499,9 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     want_insights_three = _INSIGHTS_THREE_RE.search(t) is not None
     want_unusual = _UNUSUAL_RE.search(t) is not None
     want_explain_growth = _EXPLAIN_GROWTH_RE.search(t) is not None
+    want_avg_ticket = _AVG_TICKET_RE.search(t) is not None
+    want_combined_sum = _COMBINE_RE.search(t) is not None
+    rank_position = _extract_rank_position(t)
     direction = extracted.get("direction")
     threshold_uah = extracted.get("threshold_uah")
 
@@ -531,6 +585,32 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
     aggregation = extracted.get("aggregation")
     target_type = extracted.get("target_type")
     category_targets = extracted.get("category_targets") or ([] if category is None else [category])
+    comparison_metric = None
+    combine_mode = None
+    rank_only = False
+
+    if want_avg_ticket:
+        aggregation = "avg_ticket"
+        comparison_metric = "avg_ticket"
+
+    if want_combined_sum:
+        combine_mode = "sum"
+
+    multiple_targets = (
+        len(merchant_targets) >= 2 or len(category_targets) >= 2 or len(recipient_targets) >= 2
+    )
+    compare_between_targets = comparison_mode == "between_entities" or (
+        multiple_targets
+        and (
+            _COMPARE_RE.search(t) is not None
+            or re.search(r"\b(що\s+більше|що\s+менше|хто\s+більше|хто\s+менше)\b", t) is not None
+        )
+    )
+    compare_spend_bases = (
+        _COMPARE_RE.search(t) is not None
+        and _REAL_SPEND_RE.search(t) is not None
+        and _SPEND_BASE_COMPARE_RE.search(t) is not None
+    )
 
     if _INCOME_COUNT_OVERRIDE_RE.search(t):
         if intent in ("income_sum", "income_count"):
@@ -550,6 +630,17 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         intent = "top_decline_categories"
     elif comparison_mode == "previous_period":
         intent = "compare_to_previous_period"
+    elif compare_spend_bases:
+        intent = "compare_spend_bases"
+    elif compare_between_targets:
+        intent = "between_entities"
+        comparison_mode = "between_entities"
+        if comparison_metric is None:
+            comparison_metric = "count" if is_count else "sum"
+    elif multiple_targets and combine_mode == "sum":
+        intent = "between_entities"
+        comparison_mode = "between_entities"
+        comparison_metric = "sum"
     elif want_summary_short:
         intent = "spend_summary_short"
     elif want_insights_three:
@@ -562,8 +653,14 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         intent = "recurrence_summary"
     elif want_top_merchants:
         intent = "top_merchants"
+        rank_only = rank_position is not None
+        if want_combined_sum:
+            combine_mode = "top_sum"
     elif want_top_categories:
         intent = "top_categories"
+        rank_only = rank_position is not None
+        if want_combined_sum:
+            combine_mode = "top_sum"
     elif want_share and category is not None:
         intent = "category_share"
     elif want_top_growth:
@@ -572,6 +669,9 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         intent = "top_decline_categories"
     elif want_explain_growth:
         intent = "explain_growth"
+    elif want_avg_ticket and (merchant or category is not None):
+        intent = "spend_sum"
+        aggregation = "avg_ticket"
     elif (
         direction == "more_than"
         and threshold_uah is not None
@@ -622,10 +722,14 @@ def parse_nlq_intent(user_text: str, now_ts: int | None = None) -> dict[str, Any
         "threshold_uah": threshold_uah,
         "direction": direction,
         "comparison_mode": comparison_mode,
+        "comparison_metric": comparison_metric,
         "aggregation": aggregation,
         "target_type": target_type,
         "count_scope": count_scope,
         "spend_basis": spend_basis,
+        "combine_mode": combine_mode,
+        "rank_position": rank_position if intent in {"top_categories", "top_merchants"} else None,
+        "rank_only": rank_only,
         "slots_confidence": slots_confidence,
         "llm_candidate": llm_candidate,
         "top_n": _extract_top_n(t) if intent in {"top_categories", "top_merchants"} else None,

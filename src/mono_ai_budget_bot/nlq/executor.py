@@ -32,6 +32,12 @@ from mono_ai_budget_bot.nlq.resolver import (
     resolve_recipient_by_evidence,
 )
 from mono_ai_budget_bot.nlq.tabular import (
+    _top_categories as _tabular_top_categories,
+)
+from mono_ai_budget_bot.nlq.tabular import (
+    _top_merchants as _tabular_top_merchants,
+)
+from mono_ai_budget_bot.nlq.tabular import (
     render_top_categories,
     render_top_merchants,
     suggest_merchant_candidates_detailed,
@@ -623,6 +629,15 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 total += abs(int(getattr(r, "amount", 0) or 0))
         return total
 
+    def _ordinal_word(pos: int, feminine: bool = False) -> str:
+        if pos == 1:
+            return "найбільша" if feminine else "найбільший"
+        if pos == 2:
+            return "друга" if feminine else "другий"
+        if pos == 3:
+            return "третя" if feminine else "третій"
+        return f"{pos}-та" if feminine else f"{pos}-й"
+
     def _previous_value() -> tuple[int, int]:
         prev_from_ts, prev_total_cents = _sum_previous_period_filtered(
             tx_store,
@@ -907,6 +922,14 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         if len(comparisons) < 2:
             return _with_cov(f"{prefix}: не вистачає даних для порівняння.")
 
+        combine_mode = str(intent_payload.get("combine_mode") or "").strip().lower()
+        if combine_mode == "sum":
+            total_cents = sum(item.total_cents for item in comparisons)
+            labels = ", ".join(item.label for item in comparisons)
+            return _with_cov(
+                f"{prefix}: разом на {labels} — {format_money_grn(total_cents / 100)}."
+            )
+
         left = comparisons[0]
         right = comparisons[1]
 
@@ -954,6 +977,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         except Exception:
             top_n = 5
         top_n = max(1, min(top_n, 10))
+        rank_position = int(intent_payload.get("rank_position") or 0)
+        rank_only = bool(intent_payload.get("rank_only"))
+        combine_mode = str(intent_payload.get("combine_mode") or "").strip().lower()
 
         spend_rows = engine.filter_rows(
             rows,
@@ -968,6 +994,16 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 recipient_contains=None,
             ),
         )
+        raw_items = _tabular_top_merchants(spend_rows)
+        if not raw_items:
+            return _with_cov(f"{prefix}: витрат не знайшов.")
+
+        if combine_mode == "top_sum":
+            total_cents = sum(item[1] for item in raw_items[:top_n])
+            return _with_cov(
+                f"{prefix}: топ-{top_n} мерчантів разом — {format_money_grn(total_cents / 100)}."
+            )
+
         table = render_top_merchants(
             spend_rows,
             page=1,
@@ -975,8 +1011,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             title=templates.nlq_top_merchants_title(),
         )
 
-        if not table.lines:
-            return _with_cov(f"{prefix}: витрат не знайшов.")
+        if rank_only and rank_position > 0 and len(raw_items) >= rank_position:
+            name, cents, count = raw_items[rank_position - 1]
+            ordinal = _ordinal_word(rank_position, feminine=False)
+            return _with_cov(
+                f"{prefix}: {ordinal} мерчант — {name}: {format_money_grn(cents / 100)} ({count})."
+            )
 
         if top_n == 1:
             first = table.lines[0]
@@ -1062,6 +1102,9 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         except Exception:
             top_n = 5
         top_n = max(1, min(top_n, 10))
+        rank_position = int(intent_payload.get("rank_position") or 0)
+        rank_only = bool(intent_payload.get("rank_only"))
+        combine_mode = str(intent_payload.get("combine_mode") or "").strip().lower()
 
         spend_rows = engine.filter_rows(
             rows,
@@ -1072,6 +1115,16 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
                 recipient_contains=None,
             ),
         )
+        raw_items = _tabular_top_categories(spend_rows)
+        if not raw_items:
+            return _with_cov(f"{prefix}: витрат не знайшов.")
+
+        if combine_mode == "top_sum":
+            total_cents = sum(item[1] for item in raw_items[:top_n])
+            return _with_cov(
+                f"{prefix}: топ-{top_n} категорії разом — {format_money_grn(total_cents / 100)}."
+            )
+
         table = render_top_categories(
             spend_rows,
             page=1,
@@ -1079,8 +1132,12 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             title=templates.nlq_top_categories_title(),
         )
 
-        if not table.lines:
-            return _with_cov(f"{prefix}: витрат не знайшов.")
+        if rank_only and rank_position > 0 and len(raw_items) >= rank_position:
+            name, cents, count = raw_items[rank_position - 1]
+            ordinal = _ordinal_word(rank_position, feminine=True)
+            return _with_cov(
+                f"{prefix}: {ordinal} категорія — {name}: {format_money_grn(cents / 100)} ({count})."
+            )
 
         if top_n == 1:
             first_line = str(table.lines[0] or "").strip()
@@ -1168,12 +1225,34 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
             )
         )
 
+    if intent == "compare_spend_bases":
+        gross_cents = _sum_gross_spend_total(rows)
+        real_cents = _sum_real_spend_total(rows)
+        delta_cents = gross_cents - real_cents
+
+        if gross_cents > real_cents:
+            verdict = "Більше total spend."
+        elif gross_cents < real_cents:
+            verdict = "Більше real spend."
+        else:
+            verdict = "Показники однакові."
+
+        return _with_cov(
+            (
+                f"{prefix}: total spend — {format_money_grn(gross_cents / 100)}; "
+                f"real spend — {format_money_grn(real_cents / 100)}. "
+                f"Різниця: {format_decimal_2(delta_cents / 100)} грн. "
+                f"{verdict}"
+            )
+        )
+
     if intent == "spend_sum":
         spend_basis = (
             spec.spend_basis
             if spec is not None
             else str(intent_payload.get("spend_basis") or "gross").strip().lower()
         )
+        aggregation_mode = str(intent_payload.get("aggregation") or "").strip().lower()
         resolved_category = (
             spec.category
             if spec is not None
@@ -1186,6 +1265,11 @@ def execute_intent(telegram_user_id: int, intent_payload: dict[str, Any]) -> str
         generic_total_request = (
             not merchant_filter and not recipient_match and resolved_category is None
         )
+
+        if aggregation_mode in {"avg_ticket", "avg"}:
+            avg_cents = engine.average_ticket_cents(canonical_filtered, canonical_kind)
+            label = "середній чек"
+            return _with_cov(f"{prefix}: {label} — {format_money_grn(avg_cents / 100)}.")
 
         if generic_total_request:
             total_cents = (
