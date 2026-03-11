@@ -21,7 +21,8 @@ def test_llm_scope_guard_blocks_investing(monkeypatch):
             now_ts=2000,
         )
     )
-    assert resp.result is None
+    assert resp.result is not None
+    assert "лише з персональною фінансовою аналітикою" in resp.result.text
     assert called["n"] == 0
 
 

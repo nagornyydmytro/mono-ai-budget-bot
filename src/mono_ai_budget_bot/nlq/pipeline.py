@@ -139,9 +139,13 @@ _OPEN_ENDED_FINANCE_RE = re.compile(
     r"поведінк|патерн|"
     r"що\s+це\s+говорить|what\s+does\s+this\s+say|"
     r"людськ\w*\s+мов|human\s+language|"
-    r"м'?які\s+висновк|soft\s+conclusion|"
+    r"м'?які\s+висновк|висновк|soft\s+conclusion|"
     r"як\s+коуч|as\s+coach|coach|"
     r"підсумуй|сформулюй|опиши|describe|formulate|summari[sz]e|"
+    r"куди\s+.*йдуть\s+грош\w*|на\s+що\s+.*йдуть\s+грош\w*|"
+    r"що\s+добре|що\s+погано|на\s+що\s+звернути\s+увагу|"
+    r"який\s+один\s+.*крок|найреалістичн\w*\s+крок|без\s+сильн\w*\s+дискомфорт\w*|"
+    r"чим\s+.*відрізня\w*\s+від\s+попередн\w*|"
     r"регулярн\w*\s+повсякденн\w*|"
     r"разов\w*\s+велик\w*\s+покупк\w*|"
     r"one\s*off|regular\s+everyday|"
@@ -179,6 +183,11 @@ _SEMANTIC_REASONING_RE = re.compile(
     r"що\s+це\s+говорить|"
     r"наскільки\s+більше|наскільки\s+частіше|частіше|рідше|зазвичай|"
     r"більше\s+йде\s+на|"
+    r"куди\s+.*йдуть\s+грош\w*|на\s+що\s+.*йдуть\s+грош\w*|"
+    r"що\s+добре|що\s+погано|на\s+що\s+звернути\s+увагу|"
+    r"який\s+один\s+.*крок|найреалістичн\w*\s+крок|без\s+сильн\w*\s+дискомфорт\w*|"
+    r"чим\s+.*відрізня\w*\s+від\s+попередн\w*|"
+    r"коротко\s+і\s+по\s+суті|"
     r"чому\s+саме|поясни\s+чому|"
     r"порівняй.*(novus|atb|мак|kfc)|"
     r"курс\w*|валют\w*|currency"
@@ -192,8 +201,12 @@ _NARRATIVE_ONLY_RE = re.compile(
     r"підсумуй|сформулюй|formulate|summari[sz]e|"
     r"що\s+це\s+говорить|what\s+does\s+this\s+say|"
     r"людськ\w*\s+мов|human\s+language|"
-    r"м'?які\s+висновк|soft\s+conclusion|"
+    r"м'?які\s+висновк|висновк|soft\s+conclusion|"
     r"як\s+коуч|as\s+coach|coach|"
+    r"куди\s+.*йдуть\s+грош\w*|на\s+що\s+.*йдуть\s+грош\w*|"
+    r"що\s+добре|що\s+погано|на\s+що\s+звернути\s+увагу|"
+    r"який\s+один\s+.*крок|найреалістичн\w*\s+крок|без\s+сильн\w*\s+дискомфорт\w*|"
+    r"чим\s+.*відрізня\w*\s+від\s+попередн\w*|"
     r"регулярн\w*\s+повсякденн\w*|разов\w*\s+велик\w*\s+покупк\w*|one\s*off|regular\s+everyday|"
     r"патерн\w*|звичк\w*|поведінк\w*|"
     r"наскільки\s+більше|наскільки\s+частіше|частіше|рідше|зазвичай|"
@@ -581,6 +594,10 @@ def _open_question_clarification_text(
     if not _needs_open_question_clarification(req, deterministic_intent):
         return None
     return templates.nlq_clarify_scope_message()
+
+
+def _out_of_scope_response_text() -> str:
+    return templates.nlq_llm_scope_guard_message()
 
 
 def _select_answer_policy(
@@ -1360,6 +1377,12 @@ def handle_nlq(req: NLQRequest) -> NLQResponse:
                 result=NLQResult(text=(err or "Не знайшов такого отримувача в виписці.")),
                 clarification=None,
             )
+
+    if _is_out_of_scope_for_llm(req.text):
+        return NLQResponse(
+            result=NLQResult(text=_out_of_scope_response_text()),
+            clarification=None,
+        )
 
     canonical_query = _detect_canonical_intent(req)
     deterministic_intent = (

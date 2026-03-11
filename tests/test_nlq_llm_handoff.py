@@ -173,3 +173,68 @@ def test_handle_nlq_returns_clarification_for_too_ambiguous_open_question(monkey
     assert resp.result is not None
     assert "Уточни, будь ласка" in resp.result.text
     assert "витрати, доходи чи перекази" in resp.result.text
+
+
+def test_handle_nlq_uses_safe_narrative_mode_for_where_money_goes_question(monkeypatch):
+    monkeypatch.setattr(pl, "route", lambda req: None)
+    monkeypatch.setattr(pl, "load_memory", lambda telegram_user_id: {})
+    monkeypatch.setattr(pl, "get_pending_manual_mode", lambda telegram_user_id, now_ts: None)
+    monkeypatch.setattr(pl, "_llm_cooldown_ok", lambda *args, **kwargs: True)
+
+    class DummyClient:
+        def plan_nlq(self, *, user_text: str, now_ts: int):
+            return {"intent": "unsupported"}
+
+        def interpret_nlq(self, *, user_text: str, schema: dict, facts_payload: dict):
+            return {
+                "mode": "narrative",
+                "answer": "За місяць у тебе гроші в основному йдуть на маркет/побут, кафе та транспорт.",
+            }
+
+    monkeypatch.setattr(pl, "_get_llm_client", lambda: DummyClient())
+    monkeypatch.setattr(
+        pl,
+        "execute_tool_call",
+        lambda telegram_user_id, **kwargs: {
+            "tool": "query_facts",
+            "period": "month",
+            "facts": {
+                "totals": {"real_spend_total_uah": 12345.0},
+                "comparison": {"totals": {"delta_uah": 456.0}},
+                "top_categories_named_real_spend": [
+                    {"name": "Маркет/Побут", "amount_uah": 4500.0},
+                    {"name": "Кафе/Ресторани", "amount_uah": 3200.0},
+                ],
+                "coverage": {"coverage_days": 30},
+            },
+        },
+    )
+
+    resp = pl.handle_nlq(
+        NLQRequest(
+            telegram_user_id=1,
+            text="куди в мене за місяць в основному йдуть гроші",
+            now_ts=50_000,
+        )
+    )
+
+    assert resp.result is not None
+    assert "в основному йдуть на маркет/побут" in resp.result.text.lower()
+
+
+def test_open_ended_budget_advice_request_handoffs_over_wrong_deterministic_match():
+    req = NLQRequest(
+        telegram_user_id=1,
+        text=(
+            "Якщо дивитися на мої витрати за місяць, який один найреалістичніший крок "
+            "допоміг би мені скоротити витрати без сильного дискомфорту?"
+        ),
+        now_ts=60_000,
+    )
+    deterministic = NLQIntent(
+        name="spend_sum",
+        slots={"intent": "spend_sum", "days": 30},
+    )
+
+    assert pl._select_answer_policy(req, deterministic) == "safe_llm"
+    assert pl._select_execution_route(req, deterministic) == "planner"
