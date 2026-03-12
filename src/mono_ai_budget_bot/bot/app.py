@@ -15,7 +15,7 @@ from mono_ai_budget_bot.monobank import MonobankClient
 from mono_ai_budget_bot.storage.report_store import ReportStore
 from mono_ai_budget_bot.storage.tx_store import TxStore
 
-from ..config import load_settings
+from ..config import load_bot_runtime_settings
 from ..logging_setup import setup_logging
 from ..reports.renderer import render_report_for_user as _render_report_for_user_impl
 from ..storage.profile_store import ProfileStore
@@ -124,10 +124,11 @@ async def refresh_period_for_user(period: str, cfg, store: ReportStore) -> None:
 
 
 async def main() -> None:
+    settings = load_bot_runtime_settings()
+
     from aiogram import Bot, Dispatcher
     from aiogram.client.default import DefaultBotProperties
 
-    settings = load_settings(require_bot_token=True)
     setup_logging(settings.log_level)
     profile_store = ProfileStore(Path(".cache") / "profiles")
     taxonomy_store = TaxonomyStore(Path(".cache") / "taxonomy")
@@ -151,9 +152,6 @@ async def main() -> None:
     uncat_store = UncatStore(Path(".cache") / "uncat")
     rules_store = RulesStore(Path(".cache") / "rules")
     uncat_pending_store = UncatPendingStore(Path(".cache") / "uncat_pending")
-
-    if not settings.telegram_bot_token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
     bot = Bot(
         token=settings.telegram_bot_token,

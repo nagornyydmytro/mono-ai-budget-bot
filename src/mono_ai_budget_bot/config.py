@@ -53,6 +53,8 @@ class Settings(BaseSettings):
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
         if require_master_key and not self.master_key:
+            if require_bot_token and self.telegram_bot_token:
+                raise ValueError("MASTER_KEY is required for encrypted token storage runtime")
             raise ValueError("MASTER_KEY is required")
 
 
@@ -72,3 +74,7 @@ def load_settings(
     settings.cache_dir.mkdir(parents=True, exist_ok=True)
 
     return settings
+
+
+def load_bot_runtime_settings() -> Settings:
+    return load_settings(require_bot_token=True, require_master_key=True)
